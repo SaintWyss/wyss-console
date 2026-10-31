@@ -45,6 +45,21 @@ fn token() -> Option<String> {
 
 fn tools() -> Value {
     let provider = json!({"type": "string", "enum": ["codex", "claude_code"]});
+    let request_schema = json!({
+        "type": "object",
+        "properties": {
+            "provider": provider,
+            "model": {"type": "string"},
+            "effort": {"type": "string"},
+            "task": {"type": "string"},
+            "title": {"type": "string"},
+            "skills": {"type": "array", "items": {"type": "object", "properties": {"capability": {"type": "string"}, "revision": {"type": "integer"}}, "required": ["capability"]}},
+            "preset": {"type": "string"},
+            "selection": {"type": "string"},
+            "timeout_minutes": {"type": "integer"}
+        },
+        "required": ["provider", "model", "effort", "task"]
+    });
     json!([
         {
             "name": "wyss_delegate_options",
@@ -57,23 +72,14 @@ fn tools() -> Value {
             "inputSchema": {"type": "object", "properties": {"provider": provider, "query": {"type": "string"}}, "required": ["provider"]}
         },
         {
+            "name": "wyss_delegate_preview",
+            "description": "Validate and prepare a delegation using the same policy, model, skill and provider configuration checks as wyss_delegate. Creates no worker or history and reserves no capacity. Start revalidates the request; this preview is not a launch grant. Pass returned concrete skill revisions to start to retain the previewed pins.",
+            "inputSchema": request_schema.clone()
+        },
+        {
             "name": "wyss_delegate",
             "description": "Start a task with a separate Codex or Claude Code agent run by Wyss Console in its own workspace. Choose its model and reasoning effort (see wyss_delegate_options) and its skills: Arsenal capability ids (optionally pinned revisions), an Arsenal preset or selection. The agent gets only those skills, writes only in its workspace, has no network for its tools and never asks for approval. Returns the delegation id at once; then call wyss_delegation_wait.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "provider": provider,
-                    "model": {"type": "string"},
-                    "effort": {"type": "string"},
-                    "task": {"type": "string"},
-                    "title": {"type": "string"},
-                    "skills": {"type": "array", "items": {"type": "object", "properties": {"capability": {"type": "string"}, "revision": {"type": "integer"}}, "required": ["capability"]}},
-                    "preset": {"type": "string"},
-                    "selection": {"type": "string"},
-                    "timeout_minutes": {"type": "integer"}
-                },
-                "required": ["provider", "model", "effort", "task"]
-            }
+            "inputSchema": request_schema
         },
         {
             "name": "wyss_delegation_wait",
@@ -119,6 +125,13 @@ fn call(name: &str, args: &Value) -> (String, bool) {
                 map.insert("token".into(), Value::String(token));
             }
             host("delegate_start", request).map(|record| brief(&record))
+        }
+        "wyss_delegate_preview" => {
+            let mut request = args.clone();
+            if let Some(map) = request.as_object_mut() {
+                map.insert("token".into(), Value::String(token));
+            }
+            host("delegate_preview", request)
         }
         "wyss_delegation_status" => {
             host("delegate_get", json!({"id": id(), "token": token})).map(|r| brief(&r))
@@ -217,7 +230,7 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 8);
         for tool in tools.as_array().unwrap() {
             assert_eq!(tool["inputSchema"]["type"], "object");
         }
@@ -231,6 +244,13 @@ mod tests {
             start["inputSchema"]["required"],
             json!(["provider", "model", "effort", "task"])
         );
+        let preview = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "wyss_delegate_preview")
+            .unwrap();
+        assert_eq!(preview["inputSchema"], start["inputSchema"]);
     }
 
     #[test]
@@ -240,6 +260,9 @@ mod tests {
         let (text, error) = call("wyss_delegate", &json!({"provider": "codex"}));
         assert!(error);
         assert!(text.contains("cannot delegate"));
+        let (preview, error) = call("wyss_delegate_preview", &json!({"provider": "codex"}));
+        assert!(error);
+        assert!(preview.contains("cannot delegate"));
         assert!(
             brief(&json!({"task": "secret", "id": "x"}))
                 .get("task")

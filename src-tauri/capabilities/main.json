@@ -111,6 +111,8 @@
     "allow-credential-verify",
     "allow-native-handoff-prepare",
     "allow-native-handoff-save",
+    "allow-native-delegations",
+    "allow-native-delegation-cancel",
     "allow-f8-state"
   ]
 }

@@ -25,6 +25,8 @@ const delegation = (overrides: Partial<Delegation>): Delegation => ({
   model: 'gpt-6.1-terra',
   effort: 'low',
   title: 'Write the helper',
+  preset: 'Frontend preset',
+  selection: 'Worker selection',
   workspace: '/s/delegations/a/workspace',
   created_at: 1,
   ended_at: null,
@@ -71,6 +73,11 @@ describe('Delegated agents', () => {
     expect(text).toContain('gsap-react r1');
     expect(text).toContain('179 installed skill(s) switched off');
     expect(text).toContain('configuration verified');
+    expect(text).toContain('1 completed step(s)');
+    expect(text).toContain('Preset: Frontend preset');
+    expect(text).toContain('Selection: Worker selection');
+    expect(text).toContain('Observed: claude-haiku-5-5');
+    expect(text).toContain('effort not reported');
     expect(text).toContain('From Codex session 12345678');
     expect(text).toContain('hello.py');
     const buttons = [...document.querySelectorAll('button')];

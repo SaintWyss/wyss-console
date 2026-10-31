@@ -533,7 +533,10 @@ impl NativeService {
                     ),
                     "mcp_servers.wyss_delegate.args=[\"--wyss-delegate-mcp\"]".to_owned(),
                     format!(
-                        "mcp_servers.wyss_delegate.env_vars=[\"{}\"]",
+                        // Codex filters the environment of stdio MCP processes. The server
+                        // needs the runtime directory as well as its session right to find
+                        // the host socket; neither value belongs in the command line.
+                        "mcp_servers.wyss_delegate.env_vars=[\"{}\",\"XDG_RUNTIME_DIR\"]",
                         crate::delegate::TOKEN_VAR
                     ),
                     "mcp_servers.wyss_delegate.tool_timeout_sec=660".to_owned(),
@@ -1339,6 +1342,7 @@ impl NativeService {
     /// failure was already reported when they started.
     fn finish(&self, id: &str, state: State, code: Option<u32>, signal: Option<String>) -> bool {
         lock(&self.inner.live).remove(id);
+        crate::delegate::revoke_parent(id);
         let mut persisted = true;
         {
             let mut registry = lock(&self.inner.registry);

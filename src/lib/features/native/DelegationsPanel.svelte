@@ -101,8 +101,24 @@
             0,
             8,
           )} · {when(d.created_at)}{d.ended_at ? ` – ${when(d.ended_at)}` : ''} ·
-          {CHECK[d.verification.state] ?? d.verification.state}
+          {CHECK[d.verification.state] ?? d.verification.state} ·
+          {d.steps} completed step(s)
         </p>
+        {#if d.verification.model}
+          <p class="event-meta">
+            Observed: {d.verification.model} · {d.verification.effort ??
+              'effort not reported'}
+          </p>
+        {/if}
+        {#if d.preset || d.selection}
+          <p class="event-meta">
+            {#if d.preset}Preset: {d.preset}{/if}
+            {#if d.preset && d.selection}
+              ·
+            {/if}
+            {#if d.selection}Selection: {d.selection}{/if}
+          </p>
+        {/if}
         <p class="event-meta">
           Skills: {d.applied.skills.length > 0
             ? d.applied.skills

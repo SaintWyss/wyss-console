@@ -2135,9 +2135,22 @@ fn an_orchestrator_gets_the_delegation_tool_for_its_own_session_and_never_on_its
         "{out:?}"
     );
     assert!(out.contains(&format!(
-        "[mcp_servers.wyss_delegate.env_vars=[\"{}\"]]",
+        "[mcp_servers.wyss_delegate.env_vars=[\"{}\",\"XDG_RUNTIME_DIR\"]]",
         crate::delegate::TOKEN_VAR
     )));
+
+    world
+        .service
+        .stop(&world.terminal, &claude.session.session.id)
+        .unwrap();
+    assert_eq!(
+        crate::delegate::manager()
+            .list(Some(&token))
+            .unwrap_err()
+            .code,
+        "delegation_unauthorized",
+        "ending an orchestrator must revoke its delegation right"
+    );
 
     // Without delegation nothing of it is added.
     let plain = world.start(AgentId::ClaudeCode, None).unwrap();

@@ -23,7 +23,7 @@ use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -38,6 +38,8 @@ const MAX_ITEMS: usize = 64;
 const MAX_EVENTS: u64 = 32 * 1024 * 1024;
 /// Most workspace files listed as artifacts.
 const MAX_ARTIFACTS: usize = 200;
+/// Process namespace wrapper required to contain worker descendants, including children that call `setsid`.
+const BWRAP: &str = "/usr/bin/bwrap";
 
 /// The owner's delegation policy: `~/.config/wyss-console/delegation.json`, every field optional.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,23 +92,48 @@ fn config_dir() -> Option<PathBuf> {
         })
 }
 
+fn policy_path() -> Option<PathBuf> {
+    config_dir().map(|directory| directory.join("wyss-console/delegation.json"))
+}
+
 /// The policy as written, bounded; an unreadable or invalid file is reported and the defaults hold.
 pub fn load_policy() -> (Policy, Option<String>) {
-    let Some(path) = config_dir().map(|d| d.join("wyss-console/delegation.json")) else {
-        return (Policy::default(), None);
+    let (policy, note, _) = load_policy_details();
+    (policy, note)
+}
+
+fn load_policy_details() -> (Policy, Option<String>, String) {
+    let path = policy_path();
+    load_policy_from(path.as_deref())
+}
+
+fn load_policy_from(path: Option<&Path>) -> (Policy, Option<String>, String) {
+    let Some(path) = path else {
+        return (Policy::default(), None, "defaults".into());
     };
-    let Ok(text) = fs::read_to_string(&path) else {
-        return (Policy::default(), None);
-    };
-    match parse_policy(&text) {
-        Some(policy) => (policy, None),
-        None => (
+    match fs::read_to_string(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            (Policy::default(), None, "defaults".into())
+        }
+        Err(_) => (
             Policy::default(),
             Some(format!(
-                "{} is not a valid delegation policy; the defaults apply.",
+                "{} could not be read; delegation is blocked until the policy is corrected.",
                 path.display()
             )),
+            path.display().to_string(),
         ),
+        Ok(text) => match parse_policy(&text) {
+            Some(policy) => (policy, None, path.display().to_string()),
+            None => (
+                Policy::default(),
+                Some(format!(
+                    "{} is not a valid delegation policy; delegation is blocked until it is corrected.",
+                    path.display()
+                )),
+                path.display().to_string(),
+            ),
+        },
     }
 }
 
@@ -182,6 +209,7 @@ pub struct Verification {
     /// `pending`, `verified`, `mismatch` or `unavailable`.
     pub state: String,
     pub model: Option<String>,
+    pub effort: Option<String>,
     pub problems: Vec<String>,
     pub source: Option<String>,
 }
@@ -196,6 +224,12 @@ pub struct Record {
     pub effort: String,
     pub title: String,
     pub task: String,
+    /// The Arsenal preset requested when this run was planned, if any.
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// The saved Arsenal selection requested when this run was planned, if any.
+    #[serde(default)]
+    pub selection: Option<String>,
     pub workspace: String,
     pub created_at: u64,
     pub ended_at: Option<u64>,
@@ -215,7 +249,7 @@ pub struct Record {
 
 impl Record {
     fn finished(&self) -> bool {
-        self.status != "running"
+        self.ended_at.is_some()
     }
 }
 
@@ -234,9 +268,41 @@ impl Refusal {
     }
 }
 
+#[derive(Clone)]
 struct Live {
     record: Arc<Mutex<Record>>,
+    child_id: u32,
     pgid: i32,
+}
+
+#[derive(Default)]
+struct LiveState {
+    workers: BTreeMap<String, Live>,
+    starting: usize,
+}
+
+struct StartReservation {
+    live: Arc<Mutex<LiveState>>,
+    active: bool,
+}
+
+impl StartReservation {
+    fn commit(mut self, id: String, worker: Live) {
+        let mut state = lock(&self.live);
+        debug_assert!(state.starting > 0);
+        state.starting = state.starting.saturating_sub(1);
+        state.workers.insert(id, worker);
+        self.active = false;
+    }
+}
+
+impl Drop for StartReservation {
+    fn drop(&mut self) {
+        if self.active {
+            let mut state = lock(&self.live);
+            state.starting = state.starting.saturating_sub(1);
+        }
+    }
 }
 
 /// What a worker process is started with, beside its record.
@@ -245,6 +311,7 @@ struct WorkerSpec {
     argv: Vec<String>,
     dir: PathBuf,
     requested_model: String,
+    requested_effort: String,
     excluded: Vec<String>,
     excluded_files: Vec<String>,
     kept_names: Vec<String>,
@@ -252,10 +319,71 @@ struct WorkerSpec {
     deadline: Duration,
 }
 
+struct ValidatedRequest {
+    parent: Parent,
+    agent: AgentId,
+    minutes: u32,
+}
+
+struct PreparedWorker {
+    record: Record,
+    spec: WorkerSpec,
+}
+
+/// A validated launch plan. It has no execution id and grants no permission to start later.
+#[derive(Debug, Clone, Serialize)]
+pub struct DelegationPreview {
+    pub preview: bool,
+    pub provider: String,
+    pub model: String,
+    pub effort: String,
+    pub skills: Vec<Value>,
+    pub preset: Option<String>,
+    pub selection: Option<String>,
+    pub policy: Policy,
+    pub policy_source: String,
+    pub policy_note: Option<String>,
+    pub applied: Applied,
+}
+
+struct WorkerDirectory {
+    path: PathBuf,
+    persist: bool,
+}
+
+impl WorkerDirectory {
+    fn create(path: PathBuf) -> Result<Self, Refusal> {
+        let workspace = path.join("workspace");
+        if private_dir(&workspace).is_err() {
+            let _ = fs::remove_dir_all(&path);
+            return Err(Refusal::new(
+                "store_unavailable",
+                "The task workspace could not be made.",
+            ));
+        }
+        Ok(Self {
+            path,
+            persist: false,
+        })
+    }
+
+    fn keep(&mut self) {
+        self.persist = true;
+    }
+}
+
+impl Drop for WorkerDirectory {
+    fn drop(&mut self) {
+        if !self.persist {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 pub struct Manager {
     base: PathBuf,
     tokens: Mutex<BTreeMap<String, Parent>>,
-    live: Mutex<BTreeMap<String, Live>>,
+    live: Arc<Mutex<LiveState>>,
     models: Mutex<Option<(Instant, Value)>>,
 }
 
@@ -277,6 +405,13 @@ fn private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 static MANAGER: OnceLock<Manager> = OnceLock::new();
+
+/// Withdraws a finished orchestrator's right without initializing a delegation service.
+pub fn revoke_parent(session_id: &str) {
+    if let Some(manager) = MANAGER.get() {
+        lock(&manager.tokens).retain(|_, parent| parent.session_id != session_id);
+    }
+}
 
 /// The host's one manager: `~/.local/state/wyss-console/delegations`. Records left `running` by a
 /// host that stopped are `interrupted`: their processes ended with it.
@@ -308,7 +443,7 @@ impl Manager {
         let manager = Self {
             base,
             tokens: Mutex::new(BTreeMap::new()),
-            live: Mutex::new(BTreeMap::new()),
+            live: Arc::new(Mutex::new(LiveState::default())),
             models: Mutex::new(None),
         };
         for mut record in manager.records() {
@@ -351,8 +486,9 @@ impl Manager {
             .filter_map(|e| fs::read(e.path().join("record.json")).ok())
             .filter_map(|b| serde_json::from_slice(&b).ok())
             .collect();
+        let live = lock(&self.live);
         for record in &mut records {
-            if let Some(live) = lock(&self.live).get(&record.id) {
+            if let Some(live) = live.workers.get(&record.id) {
                 *record = lock(&live.record).clone();
             }
         }
@@ -390,30 +526,50 @@ impl Manager {
     /// Stops a running delegation and its whole process group.
     pub fn cancel(&self, id: &str, token: Option<&str>) -> Result<Record, Refusal> {
         let record = self.get(id, token)?;
-        if record.finished() {
+        if record.status != "running" || record.finished() {
             return Ok(record);
         }
-        if let Some(live) = lock(&self.live).get(id) {
-            {
-                let mut record = lock(&live.record);
-                record.status = "cancelled".into();
-                record.error = Some("Cancelled.".into());
+        let live = lock(&self.live).workers.get(id).cloned();
+        if let Some(live) = live {
+            let mut record = lock(&live.record);
+            if record.status == "running" && !record.finished() {
+                if !child_has_exited(live.child_id) {
+                    record.status = "cancelled".into();
+                    record.error = Some("Cancelled.".into());
+                }
             }
-            stop_group(live.pgid);
         }
         self.get(id, token)
     }
 
     fn running(&self) -> usize {
-        lock(&self.live)
-            .values()
-            .filter(|l| !lock(&l.record).finished())
-            .count()
+        let live = lock(&self.live);
+        live.workers.len() + live.starting
+    }
+
+    fn reserve_start(&self, limit: usize) -> Result<StartReservation, Refusal> {
+        let mut live = lock(&self.live);
+        if live.workers.len() + live.starting >= limit {
+            return Err(Refusal::new(
+                "delegation_limit",
+                format!("{limit} delegated agents are already running"),
+            ));
+        }
+        live.starting += 1;
+        Ok(StartReservation {
+            live: self.live.clone(),
+            active: true,
+        })
     }
 
     /// The models and reasoning levels a provider accepts here, as its own installation says.
     pub fn options(&self, provider: &str, executable: Option<&Path>) -> Value {
-        let (policy, note) = load_policy();
+        let (policy, note, source) = load_policy_details();
+        let model_source = if provider == "codex" {
+            "local_provider_catalogue"
+        } else {
+            "owner_policy_and_cli_syntax"
+        };
         let models = match provider {
             "codex" => executable
                 .and_then(|path| self.codex_models(path))
@@ -433,6 +589,7 @@ impl Manager {
                                     .filter_map(|l| l["effort"].as_str().or(l.as_str()))
                                     .collect::<Vec<_>>(),
                                 "default_effort": m["default_reasoning_level"],
+                                "source": model_source,
                             })
                         })
                         .collect::<Vec<_>>()
@@ -441,10 +598,33 @@ impl Manager {
             _ => policy
                 .claude_models
                 .iter()
-                .map(|m| json!({"model": m, "efforts": worker::CLAUDE_EFFORTS}))
+                .map(|m| json!({"model": m, "efforts": worker::CLAUDE_EFFORTS, "source": model_source}))
                 .collect(),
         };
-        json!({"provider": provider, "models": models, "policy": policy, "policy_note": note})
+        let runtime_confirmed: Vec<(String, String)> = self
+            .records()
+            .into_iter()
+            .filter(|record| {
+                record.provider == provider
+                    && record.status == "succeeded"
+                    && record.verification.state == "verified"
+            })
+            .filter_map(|record| Some((record.verification.model?, record.verification.effort?)))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        json!({
+            "provider": provider,
+            "models": models,
+            "model_source": model_source,
+            "effort_source": model_source,
+            "availability_scope": "CLI and owner policy evidence do not confirm account availability",
+            "runtime_confirmed": runtime_confirmed.iter().map(|(model, effort)| json!({"model": model, "effort": effort})).collect::<Vec<_>>(),
+            "runtime_confirmed_source": "succeeded_verified_delegation_records",
+            "policy": policy,
+            "policy_source": source,
+            "policy_note": note
+        })
     }
 
     /// `codex debug models` (no inference, no network for the catalogue it reads), kept ten minutes.
@@ -528,10 +708,98 @@ impl Manager {
 
     /// Validates, plans and starts one delegated agent. Returns its record, `running`.
     pub fn start(&self, request: Request, executable: &Path) -> Result<Record, Refusal> {
-        let (policy, _) = load_policy();
+        let (policy, note) = load_policy();
+        self.start_with_policy(request, executable, policy, note)
+    }
+
+    /// Validates and prepares the same launch plan as `start`, without reserving or launching.
+    pub fn preview(
+        &self,
+        request: Request,
+        executable: &Path,
+    ) -> Result<DelegationPreview, Refusal> {
+        let (policy, note, source) = load_policy_details();
+        self.preview_with_policy(request, executable, policy, note, source)
+    }
+
+    fn preview_with_policy(
+        &self,
+        request: Request,
+        executable: &Path,
+        policy: Policy,
+        note: Option<String>,
+        policy_source: String,
+    ) -> Result<DelegationPreview, Refusal> {
+        let validated = self.validate_request(&request, &policy, note.as_deref())?;
+        self.check_model(&request, executable, &policy)?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let dir = self.base.join(format!(".preview-{id}"));
+        let directory = WorkerDirectory::create(dir.clone())?;
+        let prepared = self.prepare_worker(&request, executable, &policy, validated, id, &dir)?;
+        let record = prepared.record;
+        let preview = DelegationPreview {
+            preview: true,
+            provider: record.provider,
+            model: record.model,
+            effort: record.effort,
+            skills: record.applied.skills.clone(),
+            preset: record.preset,
+            selection: record.selection,
+            policy,
+            policy_source,
+            policy_note: note,
+            applied: record.applied,
+        };
+        drop(directory);
+        Ok(preview)
+    }
+
+    fn start_with_policy(
+        &self,
+        request: Request,
+        executable: &Path,
+        policy: Policy,
+        note: Option<String>,
+    ) -> Result<Record, Refusal> {
+        let validated = self.validate_request(&request, &policy, note.as_deref())?;
+        let reservation = self.reserve_start(policy.max_concurrent)?;
+        self.check_model(&request, executable, &policy)?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let dir = self.base.join(&id);
+        let mut directory = WorkerDirectory::create(dir.clone())?;
+        let prepared = self.prepare_worker(&request, executable, &policy, validated, id, &dir)?;
+        // Linearize the launch against session revocation after potentially slow planning.
+        let parents = lock(&self.tokens);
+        if !parents.contains_key(&request.token) {
+            return Err(Refusal::new(
+                "delegation_unauthorized",
+                "The orchestrator session has ended.",
+            ));
+        }
+        let result =
+            self.launch_worker_with_reservation(prepared.record, prepared.spec, Some(reservation));
+        drop(parents);
+        if result.is_ok() {
+            directory.keep();
+        }
+        result
+    }
+
+    fn validate_request(
+        &self,
+        request: &Request,
+        policy: &Policy,
+        note: Option<&str>,
+    ) -> Result<ValidatedRequest, Refusal> {
         let parent = self.parent(&request.token).ok_or_else(|| {
             Refusal::new("delegation_unauthorized", "This session may not delegate.")
         })?;
+        if note.is_some() {
+            return Err(Refusal::new(
+                "policy_invalid",
+                "The delegation policy is unreadable or invalid; no agent was started.",
+            ));
+        }
         let agent = match request.provider.as_str() {
             "codex" => AgentId::Codex,
             "claude_code" => AgentId::ClaudeCode,
@@ -559,32 +827,33 @@ impl Manager {
                 format!("At most {} minutes", policy.max_minutes),
             ));
         }
-        if self.running() >= policy.max_concurrent {
-            return Err(Refusal::new(
-                "delegation_limit",
-                format!(
-                    "{} delegated agents are already running",
-                    policy.max_concurrent
-                ),
-            ));
-        }
-        self.check_model(&request, executable, &policy)?;
+        Ok(ValidatedRequest {
+            parent,
+            agent,
+            minutes,
+        })
+    }
 
-        let id = uuid::Uuid::new_v4().simple().to_string();
-        let dir = self.base.join(&id);
+    fn prepare_worker(
+        &self,
+        request: &Request,
+        executable: &Path,
+        policy: &Policy,
+        validated: ValidatedRequest,
+        id: String,
+        dir: &Path,
+    ) -> Result<PreparedWorker, Refusal> {
+        let ValidatedRequest {
+            parent,
+            agent,
+            minutes,
+        } = validated;
         let workspace = dir.join("workspace");
-        private_dir(&workspace).map_err(|_| {
-            Refusal::new("store_unavailable", "The task workspace could not be made.")
-        })?;
-        let fail = |refusal: Refusal| {
-            let _ = fs::remove_dir_all(&dir);
-            refusal
-        };
 
         // The worker's skills: exactly the capabilities the request names, planned as a terminal's.
         let version = catalogue_version(agent, executable);
         let (plan, installed, picked) =
-            plan_skills(&request, &id, agent, version.clone(), &workspace).map_err(fail)?;
+            plan_skills(request, &id, agent, version.clone(), &workspace)?;
         let launch = ArsenalLaunch {
             selection: id.clone(),
             selection_name: request
@@ -603,10 +872,10 @@ impl Manager {
         let mut words = LaunchPlan::default();
         crate::native::arsenal::apply(&mut words, agent, &launch);
         if !words.not_applicable.is_empty() {
-            return Err(fail(Refusal {
+            return Err(Refusal {
                 code: "arsenal_not_applicable",
                 reasons: words.not_applicable,
-            }));
+            });
         }
 
         let last = dir.join("last-message.txt");
@@ -641,16 +910,17 @@ impl Manager {
                     &enabled_plugins,
                 )
                 .map_err(|name| {
-                    fail(Refusal::new(
+                    Refusal::new(
                         "tools_not_closable",
                         format!("Codex cannot turn off \"{name}\" from the command line"),
-                    ))
+                    )
                 })?;
                 (
                     argv,
                     vec![
                         format!("{} MCP server(s) off", installed.mcp_servers.len()),
                         format!("{} plugin(s) off", enabled_plugins.len()),
+                        "multi-agent subagents off".into(),
                     ],
                 )
             }
@@ -674,15 +944,13 @@ impl Manager {
                     .ok()
                     .is_some_and(|bytes| write_private(&settings, &bytes).is_ok());
                 if !written {
-                    return Err(fail(Refusal::new(
-                        "store_unavailable",
-                        "settings not written",
-                    )));
+                    return Err(Refusal::new("store_unavailable", "settings not written"));
                 }
                 let mut off = vec![
                     "MCP servers".to_owned(),
                     "plugins".to_owned(),
                     "web tools".to_owned(),
+                    "Agent and Task tools".to_owned(),
                 ];
                 if !policy.claude_allow_bash {
                     off.push("shell".into());
@@ -709,6 +977,8 @@ impl Manager {
             effort: request.effort.clone(),
             title: launch.selection_name.clone(),
             task: request.task.clone(),
+            preset: request.preset.clone(),
+            selection: request.selection.clone(),
             workspace: workspace.display().to_string(),
             created_at: now(),
             timeout_minutes: minutes,
@@ -722,11 +992,15 @@ impl Manager {
                 switched_off: plan.excluded.len(),
                 config_hash: plan.config_hash.clone(),
                 sandbox: if agent == AgentId::Codex {
-                    "workspace-write (Codex sandbox)".into()
+                    "workspace-write (Codex sandbox); bwrap PID namespace; host filesystem permissions unchanged".into()
                 } else {
-                    "edits accepted in the workspace only".into()
+                    "provider edit permissions; bwrap PID namespace; host filesystem permissions unchanged".into()
                 },
-                network: "off for the agent's tools; provider inference stays on".into(),
+                network: if agent == AgentId::ClaudeCode && policy.claude_allow_bash {
+                    "web tools off; the allowed shell may use the host network; provider inference stays on".into()
+                } else {
+                    "worker tools cannot use the network; provider inference stays on".into()
+                },
                 approvals: "never asked: a request needing more is refused".into(),
                 tools_off,
             },
@@ -736,7 +1010,6 @@ impl Manager {
             },
             ..Record::default()
         };
-        self.save(&record);
 
         let kept_files: Vec<PathBuf> = installed
             .skills
@@ -747,31 +1020,41 @@ impl Manager {
             })
             .filter_map(|(_, file)| file.clone())
             .collect();
-        self.launch_worker(
+        Ok(PreparedWorker {
             record,
-            WorkerSpec {
+            spec: WorkerSpec {
                 executable: executable.to_path_buf(),
                 argv,
-                dir: dir.clone(),
+                dir: dir.to_path_buf(),
                 requested_model: request.model.clone(),
+                requested_effort: request.effort.clone(),
                 excluded: plan.excluded.clone(),
                 excluded_files: plan.excluded_files.clone(),
                 kept_names,
                 kept_files,
                 deadline: Duration::from_secs(u64::from(minutes) * 60),
             },
-        )
-        .map_err(fail)
+        })
     }
 
     /// Starts a planned worker in its own process group with only its own environment, reads its
     /// stream into the record, checks the configuration it reports, and stops it at its deadline.
-    fn launch_worker(&self, mut record: Record, spec: WorkerSpec) -> Result<Record, Refusal> {
+    fn launch_worker(&self, record: Record, spec: WorkerSpec) -> Result<Record, Refusal> {
+        self.launch_worker_with_reservation(record, spec, None)
+    }
+
+    fn launch_worker_with_reservation(
+        &self,
+        mut record: Record,
+        spec: WorkerSpec,
+        reservation: Option<StartReservation>,
+    ) -> Result<Record, Refusal> {
         let WorkerSpec {
             executable,
             argv,
             dir,
             requested_model,
+            requested_effort,
             excluded,
             excluded_files,
             kept_names,
@@ -780,6 +1063,12 @@ impl Manager {
         } = spec;
         let id = record.id.clone();
         let workspace = PathBuf::from(&record.workspace);
+        if !Path::new(BWRAP).is_file() {
+            return Err(Refusal::new(
+                "process_isolation_unavailable",
+                "bubblewrap is required to isolate worker processes.",
+            ));
+        }
         self.save(&record);
         let events = fs::OpenOptions::new()
             .create(true)
@@ -797,8 +1086,23 @@ impl Manager {
             self.save(&record);
             return Err(Refusal::new("store_unavailable", "record not writable"));
         };
-        let mut command = Command::new(executable);
+        let mut command = Command::new(BWRAP);
         command
+            .args([
+                "--unshare-user",
+                "--unshare-pid",
+                "--die-with-parent",
+                "--new-session",
+                "--bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--",
+            ])
+            .arg(executable)
             .args(&argv)
             .current_dir(&workspace)
             .stdin(Stdio::null())
@@ -818,18 +1122,28 @@ impl Manager {
                 return Ok(record);
             }
         };
-        let pgid = i32::try_from(child.id()).unwrap_or(0);
-        let shared = Arc::new(Mutex::new(record.clone()));
-        lock(&self.live).insert(
-            id.clone(),
-            Live {
-                record: shared.clone(),
-                pgid,
-            },
-        );
+        let child_id = child.id();
+        let pgid = i32::try_from(child_id).unwrap_or(0);
         let stdout = child.stdout.take();
+        let shared = Arc::new(Mutex::new(record.clone()));
+        let live = Live {
+            record: shared.clone(),
+            child_id,
+            pgid,
+        };
+        if let Some(reservation) = reservation {
+            reservation.commit(id.clone(), live);
+        } else {
+            lock(&self.live).workers.insert(id.clone(), live);
+        }
         let provider = record.provider.clone();
         let base = self.base.clone();
+        let (stream_tx, stream_rx) = std::sync::mpsc::channel();
+        let stream_provider = provider.clone();
+        let stream_model = requested_model.clone();
+        let stream_excluded = excluded.clone();
+        let stream_kept_names = kept_names.clone();
+        let stream_shared = shared.clone();
         std::thread::spawn(move || {
             let mut seen = worker::Observed::default();
             let mut events = events;
@@ -841,15 +1155,19 @@ impl Manager {
                         written += line.len() as u64 + 1;
                         let _ = writeln!(events, "{line}");
                     }
-                    worker::observe(&provider, &line, &mut seen);
-                    let mut record = lock(&shared);
+                    worker::observe(&stream_provider, &line, &mut seen);
+                    let mut record = lock(&stream_shared);
                     record.steps = seen.steps;
                     record.thread_id = seen.thread_id.clone();
                     // Claude Code says what it was given before it does anything: check it then.
-                    if provider == "claude_code" && !checked && seen.model.is_some() {
+                    if stream_provider == "claude_code" && !checked && seen.model.is_some() {
                         checked = true;
-                        let problems =
-                            worker::verify_claude(&requested_model, &seen, &excluded, &kept_names);
+                        let problems = worker::verify_claude(
+                            &stream_model,
+                            &seen,
+                            &stream_excluded,
+                            &stream_kept_names,
+                        );
                         record.verification = Verification {
                             state: if problems.is_empty() {
                                 "verified"
@@ -858,17 +1176,37 @@ impl Manager {
                             }
                             .into(),
                             model: seen.model.clone(),
+                            effort: None,
                             problems: problems.clone(),
                             source: Some("Claude Code init event".into()),
                         };
                         if !problems.is_empty() {
                             record.status = "failed".into();
                             record.error = Some("The worker did not start with the planned configuration; it was stopped.".into());
-                            stop_group(pgid);
                         }
                     }
                 }
             }
+            let _ = stream_tx.send(seen);
+        });
+
+        let live_state = self.live.clone();
+        let watch = shared.clone();
+        std::thread::spawn(move || {
+            let mut child = child;
+            let mut termination_started = false;
+            while !child_has_exited(child_id) {
+                let status = lock(&shared).status.clone();
+                if status != "running" && !termination_started {
+                    stop_group(&mut child, pgid, Duration::from_secs(5));
+                    termination_started = true;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // The provider may have exited while a descendant still holds its stdout pipe open.
+            // Kill remaining members before waiting for the stream reader or reaping the leader.
+            stop_group(&mut child, pgid, Duration::from_millis(100));
+            let seen = stream_rx.recv().unwrap_or_default();
             let status = child.wait().ok();
             let mut record = lock(&shared);
             record.exit_code = status.and_then(|s| s.code());
@@ -884,8 +1222,13 @@ impl Manager {
                 })
                 .or(seen.last_message.clone());
             if provider == "codex" {
-                record.verification =
-                    codex_verification(seen.thread_id.as_deref(), &excluded_files, &kept_files);
+                record.verification = codex_verification(
+                    seen.thread_id.as_deref(),
+                    &requested_model,
+                    &requested_effort,
+                    &excluded_files,
+                    &kept_files,
+                );
             }
             if record.status == "running" {
                 let ok =
@@ -905,32 +1248,28 @@ impl Manager {
             }
             record.artifacts = artifacts(Path::new(&record.workspace));
             save_at(&base, &record);
+            drop(record);
+            drop(child);
+            lock(&live_state).workers.remove(&id);
         });
-        let watch = self.live_record(&id);
         std::thread::spawn(move || {
             let started = Instant::now();
             while started.elapsed() < deadline {
                 std::thread::sleep(Duration::from_millis(500));
-                if watch.as_ref().is_none_or(|r| lock(r).finished()) {
+                let record = lock(&watch);
+                if record.status != "running" || record.finished() {
                     return;
                 }
             }
-            if let Some(record) = watch {
-                let mut record = lock(&record);
-                if record.status == "running" {
-                    record.status = "timed_out".into();
-                    record.error = Some(format!("Stopped after {} second(s).", deadline.as_secs()));
-                    stop_group(pgid);
-                }
+            let mut record = lock(&watch);
+            if record.status == "running" && !child_has_exited(child_id) {
+                record.status = "timed_out".into();
+                record.error = Some(format!("Stopped after {} second(s).", deadline.as_secs()));
             }
         });
         let mut started = record;
         started.status = "running".into();
         Ok(started)
-    }
-
-    fn live_record(&self, id: &str) -> Option<Arc<Mutex<Record>>> {
-        lock(&self.live).get(id).map(|l| l.record.clone())
     }
 
     /// Arsenal capabilities a delegation may name for a provider, from the library as stored.
@@ -995,18 +1334,37 @@ fn catalogue_version(agent: AgentId, executable: &Path) -> Option<String> {
 }
 
 /// Ends a worker's whole process group: politely, then for good.
-fn stop_group(pgid: i32) {
+///
+/// Callers hold the unreaped child under its mutex until this returns. That keeps its PID reserved
+/// while the delayed group SIGKILL is pending, so the numeric PGID cannot be reused by an unrelated
+/// process group in between the two signals.
+fn stop_group(child: &mut Child, pgid: i32, grace: Duration) {
     use nix::sys::signal::{Signal, killpg};
     use nix::unistd::Pid;
-    if pgid <= 1 {
+    if pgid <= 1 || i32::try_from(child.id()).ok() != Some(pgid) {
         return;
     }
     let group = Pid::from_raw(pgid);
-    let _ = killpg(group, Signal::SIGTERM);
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(5));
+    if killpg(group, Signal::SIGTERM).is_ok() {
+        std::thread::sleep(grace);
         let _ = killpg(group, Signal::SIGKILL);
-    });
+    }
+}
+
+/// Observes child exit without reaping it. Its PID remains reserved while the process group is
+/// cleaned up; the owning `Child` is reaped only afterward.
+fn child_has_exited(child_id: u32) -> bool {
+    use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+    use nix::unistd::Pid;
+
+    let Ok(pid) = i32::try_from(child_id) else {
+        return false;
+    };
+    waitid(
+        Id::Pid(Pid::from_raw(pid)),
+        WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
+    )
+    .is_ok_and(|status| !matches!(status, WaitStatus::StillAlive))
 }
 
 /// The capabilities a request names, as one transient selection of the worker's provider, planned
@@ -1046,8 +1404,7 @@ fn plan_skills(
         capability: pick.capability.clone(),
         revision: pick.revision,
     }));
-    let mut seen = BTreeSet::new();
-    items.retain(|item| seen.insert(item.capability.clone()));
+    let items = merge_capability_items(items)?;
     if items.len() > MAX_ITEMS {
         return Err(Refusal::new(
             "too_many_capabilities",
@@ -1114,8 +1471,37 @@ fn plan_skills(
     Ok((plan, installed, picked))
 }
 
+fn merge_capability_items(items: Vec<store::Item>) -> Result<Vec<store::Item>, Refusal> {
+    let mut merged: Vec<store::Item> = Vec::new();
+    let mut positions: BTreeMap<String, usize> = BTreeMap::new();
+    for item in items {
+        if let Some(index) = positions.get(&item.capability).copied() {
+            match (merged[index].revision, item.revision) {
+                (Some(existing), Some(requested)) if existing != requested => {
+                    return Err(Refusal::new(
+                        "capability_revision_conflict",
+                        format!("{} has conflicting pinned revisions", item.capability),
+                    ));
+                }
+                (None, Some(requested)) => merged[index].revision = Some(requested),
+                _ => {}
+            }
+        } else {
+            positions.insert(item.capability.clone(), merged.len());
+            merged.push(item);
+        }
+    }
+    Ok(merged)
+}
+
 /// A Codex worker's configuration, read from its own session record after it ran.
-fn codex_verification(thread: Option<&str>, excluded: &[String], kept: &[PathBuf]) -> Verification {
+fn codex_verification(
+    thread: Option<&str>,
+    requested_model: &str,
+    requested_effort: &str,
+    excluded: &[String],
+    kept: &[PathBuf],
+) -> Verification {
     let Some(thread) = thread else {
         return Verification {
             state: "unavailable".into(),
@@ -1130,27 +1516,64 @@ fn codex_verification(thread: Option<&str>, excluded: &[String], kept: &[PathBuf
             ..Verification::default()
         };
     };
-    let Some(listed) = fs::read_to_string(&rollout)
-        .ok()
-        .and_then(|t| worker::codex_listed_files(&t))
-    else {
+    let Some(text) = fs::read_to_string(&rollout).ok() else {
         return Verification {
             state: "unavailable".into(),
-            problems: vec!["Codex's session record lists no skills".into()],
+            problems: vec!["Codex's session record could not be read".into()],
             ..Verification::default()
         };
     };
-    let problems = worker::verify_codex(&listed, excluded, kept);
+    codex_verification_from_text(
+        &text,
+        thread,
+        requested_model,
+        requested_effort,
+        excluded,
+        kept,
+        rollout.display().to_string(),
+    )
+}
+
+fn codex_verification_from_text(
+    text: &str,
+    thread: &str,
+    requested_model: &str,
+    requested_effort: &str,
+    excluded: &[String],
+    kept: &[PathBuf],
+    source: String,
+) -> Verification {
+    let listed = worker::codex_listed_files(&text);
+    let runtime = worker::codex_runtime(&text, thread);
+    let mut problems = Vec::new();
+    let mut mismatch = false;
+    if let Some(listed) = &listed {
+        let findings = worker::verify_codex(listed, excluded, kept);
+        mismatch |= !findings.is_empty();
+        problems.extend(findings);
+    } else {
+        problems.push("Codex's session record lists no skills".into());
+    }
+    let runtime_findings =
+        worker::verify_codex_runtime(requested_model, requested_effort, runtime.as_ref());
+    if runtime.is_some() {
+        mismatch |= !runtime_findings.is_empty();
+    }
+    problems.extend(runtime_findings);
+    let unavailable = listed.is_none() || runtime.is_none();
     Verification {
-        state: if problems.is_empty() {
-            "verified"
-        } else {
+        state: if mismatch {
             "mismatch"
+        } else if unavailable {
+            "unavailable"
+        } else {
+            "verified"
         }
         .into(),
-        model: None,
+        model: runtime.as_ref().map(|runtime| runtime.model.clone()),
+        effort: runtime.as_ref().map(|runtime| runtime.effort.clone()),
         problems,
-        source: Some(format!("Codex session record {}", rollout.display())),
+        source: Some(source),
     }
 }
 

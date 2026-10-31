@@ -185,6 +185,8 @@ fn main() {
             "credential_verify",
             "native_handoff_prepare",
             "native_handoff_save",
+            "native_delegations",
+            "native_delegation_cancel",
             // The project-centered workspace (M1): granted by the `projects` capability, whose
             // Managed side can prepare a session and nothing more.
             "projects_overview",

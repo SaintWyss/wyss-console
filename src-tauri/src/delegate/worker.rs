@@ -49,6 +49,8 @@ pub fn codex_argv(
     argv.extend([
         "-c".to_owned(),
         "sandbox_workspace_write.network_access=false".to_owned(),
+        "-c".to_owned(),
+        "features.multi_agent=false".to_owned(),
     ]);
     for name in mcp_servers {
         argv.extend([
@@ -89,11 +91,12 @@ pub fn claude_argv(launch: &Launch<'_>, settings: &Path, allow_bash: bool) -> Ve
         "--strict-mcp-config".into(),
         "--disallowedTools".into(),
     ];
-    argv.push(if allow_bash {
-        "WebFetch,WebSearch".into()
-    } else {
-        "Bash,WebFetch,WebSearch".into()
-    });
+    let mut disallowed = Vec::new();
+    if !allow_bash {
+        disallowed.push("Bash");
+    }
+    disallowed.extend(["WebFetch", "WebSearch", "Agent", "Task"]);
+    argv.push(disallowed.join(","));
     argv.push("--".into());
     argv.push(launch.task.to_owned());
     argv
@@ -254,11 +257,15 @@ pub fn verify_claude(
     } else {
         problems.push("Claude Code did not list its skills".to_owned());
     }
-    if seen.plugins.as_ref().is_some_and(|p| !p.is_empty()) {
-        problems.push("plugins are loaded".to_owned());
+    match &seen.plugins {
+        Some(plugins) if !plugins.is_empty() => problems.push("plugins are loaded".to_owned()),
+        None => problems.push("Claude Code did not list its plugins".to_owned()),
+        _ => {}
     }
-    if seen.mcp_servers.as_ref().is_some_and(|m| !m.is_empty()) {
-        problems.push("MCP servers are loaded".to_owned());
+    match &seen.mcp_servers {
+        Some(servers) if !servers.is_empty() => problems.push("MCP servers are loaded".to_owned()),
+        None => problems.push("Claude Code did not list its MCP servers".to_owned()),
+        _ => {}
     }
     problems
 }
@@ -343,6 +350,95 @@ pub fn verify_codex(
     problems
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexRuntime {
+    pub model: String,
+    pub effort: String,
+}
+
+/// Runtime settings from a Codex `turn_context` record bound to the worker's own session.
+/// A later incomplete context revokes the earlier observation.
+pub fn codex_runtime(rollout: &str, expected_session: &str) -> Option<CodexRuntime> {
+    let mut session: Option<String> = None;
+    let mut observed = None;
+    for line in rollout.lines() {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let payload = event
+            .get("payload")
+            .filter(|payload| payload.is_object())
+            .unwrap_or(&Value::Null);
+        session = event
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .or_else(|| event.get("session_id").and_then(Value::as_str))
+            .or_else(|| payload.get("session_id").and_then(Value::as_str))
+            .map(str::to_owned)
+            .or(session);
+        match event["type"].as_str() {
+            Some("session_meta") => {
+                session = payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .or_else(|| payload.get("session_id").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .or(session);
+                observed = None;
+            }
+            Some("turn_context") => {
+                observed = None;
+                if session.as_deref() == Some(expected_session) {
+                    let model = payload.get("model").and_then(Value::as_str);
+                    let effort = payload.get("effort").and_then(Value::as_str);
+                    if let (Some(model), Some(effort)) = (model, effort)
+                        && runtime_token(model)
+                        && runtime_token(effort)
+                    {
+                        observed = Some(CodexRuntime {
+                            model: model.to_owned(),
+                            effort: effort.to_owned(),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    observed
+}
+
+fn runtime_token(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=128).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(byte))
+}
+
+/// Compares only the worker runtime event, never prompt text or configured model defaults.
+pub fn verify_codex_runtime(
+    requested_model: &str,
+    requested_effort: &str,
+    observed: Option<&CodexRuntime>,
+) -> Vec<String> {
+    let Some(observed) = observed else {
+        return vec!["Codex did not report its runtime model and effort".into()];
+    };
+    let mut problems = Vec::new();
+    if observed.model != requested_model {
+        problems.push(format!("model {} is not {requested_model}", observed.model));
+    }
+    if observed.effort != requested_effort {
+        problems.push(format!(
+            "effort {} is not {requested_effort}",
+            observed.effort
+        ));
+    }
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +470,7 @@ mod tests {
         assert!(joined.contains("-s workspace-write -C /w/ws"));
         assert!(joined.contains("approval_policy=\"never\""));
         assert!(joined.contains("sandbox_workspace_write.network_access=false"));
+        assert!(joined.contains("features.multi_agent=false"));
         assert!(joined.contains("model_reasoning_effort=\"low\""));
         // Bare keys: Codex keeps quotes as part of the name.
         assert!(argv.contains(&"mcp_servers.context7.enabled=false".to_owned()));
@@ -414,7 +511,7 @@ mod tests {
         );
         let joined = argv.join(" ");
         assert!(joined.contains("--strict-mcp-config"));
-        assert!(joined.contains("--disallowedTools Bash,WebFetch,WebSearch"));
+        assert!(joined.contains("--disallowedTools Bash,WebFetch,WebSearch,Agent,Task"));
         assert!(joined.contains("--permission-mode acceptEdits"));
         assert!(joined.contains("--settings /w/settings.json"));
         assert!(!joined.contains("bypassPermissions"));
@@ -422,8 +519,40 @@ mod tests {
         assert!(
             shell
                 .join(" ")
-                .contains("--disallowedTools WebFetch,WebSearch")
+                .contains("--disallowedTools WebFetch,WebSearch,Agent,Task")
         );
+    }
+
+    #[test]
+    fn claude_init_requires_explicit_skills_plugins_and_mcp_arrays() {
+        let mut complete = Observed::default();
+        observe(
+            "claude_code",
+            r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5","skills":[],"plugins":[],"mcp_servers":[]}"#,
+            &mut complete,
+        );
+        assert!(verify_claude("haiku", &complete, &[], &[]).is_empty());
+
+        let mut missing_plugins = Observed::default();
+        observe(
+            "claude_code",
+            r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5","skills":[],"mcp_servers":[]}"#,
+            &mut missing_plugins,
+        );
+        let mut missing_mcp = Observed::default();
+        observe(
+            "claude_code",
+            r#"{"type":"system","subtype":"init","model":"claude-haiku-5-5","skills":[],"plugins":[]}"#,
+            &mut missing_mcp,
+        );
+        for (seen, omitted) in [
+            (&missing_plugins, "Claude Code did not list its plugins"),
+            (&missing_mcp, "Claude Code did not list its MCP servers"),
+        ] {
+            let problems = verify_claude("haiku", seen, &[], &[]);
+            assert!(problems.contains(&omitted.to_owned()), "{problems:?}");
+            assert!(!problems.is_empty(), "incomplete init must not verify");
+        }
     }
 
     #[test]
@@ -479,5 +608,47 @@ mod tests {
             &[PathBuf::from("/h/.agents/skills/gsap-react/SKILL.md")],
         );
         assert_eq!(problems, ["/h/.codex/skills/pdf/SKILL.md is exposed"]);
+    }
+
+    #[test]
+    fn codex_runtime_model_and_effort_are_session_bound_and_mismatch_is_detected() {
+        let transcript = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"t-1"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-6-luna","effort":"high","turn_id":"turn-1"}}),
+        ]
+        .into_iter()
+        .map(|event| event.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        let runtime = codex_runtime(&transcript, "t-1").unwrap();
+        assert_eq!(runtime.model, "gpt-6-luna");
+        assert_eq!(runtime.effort, "high");
+        assert!(verify_codex_runtime("gpt-6-luna", "high", Some(&runtime)).is_empty());
+        assert_eq!(
+            verify_codex_runtime("gpt-6.1-sol", "low", Some(&runtime)),
+            [
+                "model gpt-6-luna is not gpt-6.1-sol",
+                "effort high is not low"
+            ]
+        );
+        assert!(codex_runtime(&transcript, "t-other").is_none());
+    }
+
+    #[test]
+    fn a_later_incomplete_codex_runtime_event_revokes_the_earlier_one() {
+        let transcript = [
+            serde_json::json!({"type":"session_meta","payload":{"id":"t-1"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-6-luna","effort":"high"}}),
+            serde_json::json!({"type":"turn_context","payload":{"model":"gpt-6-luna"}}),
+        ]
+        .into_iter()
+        .map(|event| event.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        assert!(codex_runtime(&transcript, "t-1").is_none());
+        assert_eq!(
+            verify_codex_runtime("gpt-6-luna", "high", None),
+            ["Codex did not report its runtime model and effort"]
+        );
     }
 }

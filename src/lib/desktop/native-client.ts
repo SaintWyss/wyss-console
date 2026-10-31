@@ -223,6 +223,8 @@ export interface Delegation {
   model: string;
   effort: string;
   title: string;
+  preset: string | null;
+  selection: string | null;
   workspace: string;
   created_at: number;
   ended_at: number | null;
@@ -231,7 +233,12 @@ export interface Delegation {
   error: string | null;
   result: string | null;
   steps: number;
-  verification: { state: string; problems: string[]; model: string | null };
+  verification: {
+    state: string;
+    problems: string[];
+    model: string | null;
+    effort?: string | null;
+  };
   applied: {
     skills: { name: string; revision: number | null }[];
     switched_off: number;
@@ -254,6 +261,8 @@ function parseDelegation(value: unknown): Delegation {
     model: text(v.model),
     effort: text(v.effort),
     title: text(v.title),
+    preset: typeof v.preset === 'string' ? v.preset : null,
+    selection: typeof v.selection === 'string' ? v.selection : null,
     workspace: text(v.workspace),
     created_at: number(v.created_at),
     ended_at: typeof v.ended_at === 'number' ? v.ended_at : null,
@@ -268,6 +277,8 @@ function parseDelegation(value: unknown): Delegation {
         ? verification.problems.map(text)
         : [],
       model: typeof verification.model === 'string' ? verification.model : null,
+      effort:
+        typeof verification.effort === 'string' ? verification.effort : null,
     },
     applied: {
       skills: Array.isArray(applied.skills)

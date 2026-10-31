@@ -674,6 +674,23 @@ impl HostCore {
                         .map_err(|e| native_error(&e))?,
                 )
             }
+            "delegate_preview" => {
+                let request: crate::delegate::Request = params(value)?;
+                let agent = match request.provider.as_str() {
+                    "codex" => crate::native::catalogue::AgentId::Codex,
+                    "claude_code" => crate::native::catalogue::AgentId::ClaudeCode,
+                    _ => return Err(HostError::new("provider_unsupported")),
+                };
+                let executable = self
+                    .native()?
+                    .executable_of(agent)
+                    .ok_or_else(|| HostError::new("agent_not_installed"))?;
+                to_value(
+                    crate::delegate::manager()
+                        .preview(request, &executable)
+                        .map_err(|r| delegate_error(&r))?,
+                )
+            }
             "delegate_start" => {
                 let request: crate::delegate::Request = params(value)?;
                 let agent = match request.provider.as_str() {
