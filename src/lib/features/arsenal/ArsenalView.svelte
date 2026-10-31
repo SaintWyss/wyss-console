@@ -315,6 +315,28 @@
     });
     if (saved) newPreset();
   }
+  /** Starts a preset or a selection with one capability, named after it, in its own tab. */
+  function presetFrom(summary: Summary) {
+    presetDraft = {
+      id: null,
+      name: summary.name,
+      description: '',
+      items: [{ capability: summary.id, revision: null }],
+    };
+    presetError = null;
+    controller.setTab('presets');
+  }
+  function selectionFrom(summary: Summary) {
+    selectionDraft = {
+      id: null,
+      name: summary.name,
+      provider: summary.provider,
+      items: [{ capability: summary.id, revision: null }],
+      composites: [],
+    };
+    selectionError = null;
+    controller.setTab('selections');
+  }
   function editSelection(selection: Selection) {
     selectionDraft = {
       id: selection.id,
@@ -542,6 +564,20 @@
                 applied.
               </dd>
             </dl>
+            <div class="arsenal-actions">
+              <button
+                class="action"
+                type="button"
+                onclick={() => presetFrom(opened.summary)}
+                >Start a preset with this</button
+              >
+              <button
+                class="action"
+                type="button"
+                onclick={() => selectionFrom(opened.summary)}
+                >Start a selection with this</button
+              >
+            </div>
             <h4>Dependencies</h4>
             {#if opened.dependencies.length === 0}
               <p class="arsenal-muted">
@@ -1598,6 +1634,11 @@
     font-size: 14px;
     font-weight: 600;
     overflow-wrap: anywhere;
+  }
+  .arsenal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .arsenal-badges {
     display: flex;

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-31 — Arsenal: every Codex skill folder, and presets from a capability
+
+- Discover reads Codex's own skill folder `~/.codex/skills` (shown as "Codex home skills") besides
+  `~/.agents/skills`; Codex 0.159 loads both. Its skills import under the same checks. The skills Codex
+  installs itself in `~/.codex/skills/.system` are listed as "Codex system skills" and are never read or
+  imported.
+- Library › a capability has "Start a preset with this" and "Start a selection with this": the editor opens
+  named after the capability with it already in, so a first preset needs no typing.
+
 ## 2026-10-30 — Arsenal integration gate
 
 - The host excludes closed terminals from its restore listing even if their output pump has already ended. Exited terminals still retain their output.
