@@ -337,7 +337,7 @@ fn codex_base_off(
                 .into_iter()
                 .flatten()
                 .filter_map(|path| enabled.get(&path))
-                .last()
+                .next_back()
                 .is_some_and(|on| !on);
             off.then(|| skill.name.clone())
         })

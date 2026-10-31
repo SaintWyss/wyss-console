@@ -944,7 +944,7 @@ mod tests {
             Vec::new(),
         );
         installed.skill_files = vec![Some(real.clone().into()), Some(gone.clone().into())];
-        assert!(validate_files(&[real.clone()], &installed).is_ok());
+        assert!(validate_files(std::slice::from_ref(&real), &installed).is_ok());
         assert_eq!(validate_files(&[gone], &installed), Err("missing_file"));
         assert!(validate_files(&["/etc/SKILL.md".into()], &installed).is_err());
         assert!(validate_files(&[real.clone(), real], &installed).is_err());
