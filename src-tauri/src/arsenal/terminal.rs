@@ -245,9 +245,16 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
     let excluded_files: Vec<String> = if provider == "codex" {
         let mut files: Vec<String> = installed
             .iter()
-            .zip(&input.installed.skill_files)
+            .zip(
+                input
+                    .installed
+                    .skill_files
+                    .iter()
+                    .zip(&input.installed.nested_files),
+            )
             .filter(|(skill, _)| switchable(skill) && !kept.contains(&skill.name))
-            .filter_map(|(_, file)| file.as_ref().map(|f| f.to_string_lossy().into_owned()))
+            .flat_map(|(_, (file, nested))| file.iter().chain(nested))
+            .map(|f| f.to_string_lossy().into_owned())
             .collect();
         files.sort();
         files.dedup();
@@ -537,9 +544,10 @@ pub fn validate_files(files: &[String], installed: &LaunchScan) -> Result<(), &'
     let known: BTreeSet<String> = installed
         .skills
         .iter()
-        .zip(&installed.skill_files)
+        .zip(installed.skill_files.iter().zip(&installed.nested_files))
         .filter(|(skill, _)| skill.source != SYSTEM_SKILLS)
-        .filter_map(|(_, file)| file.as_ref().map(|f| f.to_string_lossy().into_owned()))
+        .flat_map(|(_, (file, nested))| file.iter().chain(nested))
+        .map(|f| f.to_string_lossy().into_owned())
         .collect();
     let mut seen = BTreeSet::new();
     if files.len() > MAX_SKILLS_OFF {
@@ -658,6 +666,7 @@ mod tests {
             truncated: false,
             unreadable: Vec::new(),
             skill_files: Vec::new(),
+            nested_files: Vec::new(),
             base_off: Default::default(),
         }
     }
@@ -878,6 +887,13 @@ mod tests {
             Some("/p/.agents/skills/probe/SKILL.md".into()),
             Some("/h/.codex/skills/.system/imagegen/SKILL.md".into()),
         ];
+        installed.nested_files = vec![
+            Vec::new(),
+            vec!["/h/.agents/skills/tokens/inner/SKILL.md".into()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
         installed.base_off = ["old".to_owned()].into();
         let mut sel = selection(&[]);
         sel.provider = "codex".into();
@@ -895,6 +911,7 @@ mod tests {
             plan.excluded_files,
             [
                 "/h/.agents/skills/tokens/SKILL.md",
+                "/h/.agents/skills/tokens/inner/SKILL.md",
                 "/p/.agents/skills/probe/SKILL.md"
             ]
         );
@@ -904,7 +921,7 @@ mod tests {
         let parsed: toml::Table =
             toml::from_str(&value.replacen("skills.config=", "x=", 1)).unwrap();
         let entries = parsed["x"].as_array().unwrap();
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 3);
         assert!(
             entries
                 .iter()
@@ -944,6 +961,7 @@ mod tests {
             Vec::new(),
         );
         installed.skill_files = vec![Some(real.clone().into()), Some(gone.clone().into())];
+        installed.nested_files = vec![Vec::new(), Vec::new()];
         assert!(validate_files(std::slice::from_ref(&real), &installed).is_ok());
         assert_eq!(validate_files(&[gone], &installed), Err("missing_file"));
         assert!(validate_files(&["/etc/SKILL.md".into()], &installed).is_err());

@@ -179,6 +179,9 @@ pub struct LaunchScan {
     /// For each of `skills`, in order: the `SKILL.md` the provider reads, as an absolute path through
     /// the folder it is installed in (a link is named, not resolved). `None` for an entry without one.
     pub skill_files: Vec<Option<PathBuf>>,
+    /// For each of `skills`, in order: further `SKILL.md` files inside its folder. Codex lists each
+    /// of them as a skill of its own, so switching the folder's skill off must name them too.
+    pub nested_files: Vec<Vec<PathBuf>>,
     /// Installed skills the provider's own configuration already switches off: Claude Code's
     /// `skillOverrides` (account, project, local), Codex's `[[skills.config]]` with `enabled = false`.
     pub base_off: std::collections::BTreeSet<String>,
@@ -244,6 +247,23 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
             })
         })
         .collect();
+    let mut truncated = scan.truncated;
+    let nested_files: Vec<Vec<PathBuf>> = if provider == "codex" {
+        scan.candidates
+            .iter()
+            .zip(&skill_files)
+            .map(|(candidate, file)| match (candidate.blocked, file) {
+                (Some("symbolic_link"), _) | (_, None) => Vec::new(),
+                (_, Some(file)) => file.parent().map_or_else(Vec::new, |folder| {
+                    let (found, complete) = nested_skill_files(folder);
+                    truncated |= !complete;
+                    found
+                }),
+            })
+            .collect()
+    } else {
+        vec![Vec::new(); scan.candidates.len()]
+    };
     let base_off = if provider == "claude_code" {
         claude_base_off(env)
     } else {
@@ -253,11 +273,56 @@ pub fn launch_scan(env: &Environment, provider: &str) -> LaunchScan {
         skills: scan.candidates,
         composites,
         mcp_servers,
-        truncated: scan.truncated,
+        truncated,
         unreadable,
         skill_files,
+        nested_files,
         base_off,
     }
+}
+
+/// Most entries read while looking for skills nested in one skill's folder.
+const MAX_NESTED_WALK: usize = 4096;
+/// How deep below a skill's folder a nested skill is looked for.
+const MAX_NESTED_DEPTH: usize = 4;
+
+/// `SKILL.md` files below a skill's own folder: in its subfolders, not following links and not
+/// entering hidden folders or `node_modules`. Returns them and whether the walk finished within its
+/// bounds; an unfinished walk means the exclusion could be incomplete.
+fn nested_skill_files(folder: &Path) -> (Vec<PathBuf>, bool) {
+    let mut found = Vec::new();
+    let mut seen = 0_usize;
+    let mut stack = vec![(folder.to_path_buf(), 0_usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > MAX_NESTED_WALK {
+                return (found, false);
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if !kind.is_dir() || name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("SKILL.md").is_file() {
+                found.push(path.join("SKILL.md"));
+            }
+            if depth + 1 < MAX_NESTED_DEPTH {
+                stack.push((path, depth + 1));
+            }
+        }
+    }
+    found.sort();
+    (found, true)
 }
 
 /// Skill names Claude Code's own settings switch off, the most specific file winning: the account's
@@ -1828,7 +1893,16 @@ mod tests {
             ),
         )
         .unwrap();
+        let pack = home.join(".codex/skills/pack");
+        fs::create_dir_all(pack.join("inner")).unwrap();
+        fs::create_dir_all(pack.join("node_modules/dep")).unwrap();
+        fs::write(pack.join("SKILL.md"), "---\nname: pack\n---\n").unwrap();
+        fs::write(pack.join("inner/SKILL.md"), "---\nname: inner\n---\n").unwrap();
+        fs::write(pack.join("node_modules/dep/SKILL.md"), "x").unwrap();
         let codex = launch_scan(&launch_env(&home, None), "codex");
+        let at = codex.skills.iter().position(|s| s.name == "pack").unwrap();
+        // Codex lists a SKILL.md inside a skill's folder as a skill of its own.
+        assert_eq!(codex.nested_files[at], [pack.join("inner/SKILL.md")]);
         // A folder path is ignored, as Codex ignores it; the last entry for a file wins.
         assert_eq!(codex.base_off.iter().collect::<Vec<_>>(), ["alpha"]);
         let alpha = codex
