@@ -387,6 +387,68 @@ pub struct Manager {
     tokens: Mutex<BTreeMap<String, Parent>>,
     live: Arc<Mutex<LiveState>>,
     models: Mutex<Option<(Instant, Value)>>,
+    isolation: Isolation,
+}
+
+/// What a worker must not see of Wyss Console itself. The worker's namespace sees the host's
+/// filesystem, except: `hidden` folders are empty (the host and authority sockets, the sessions'
+/// delegation rights, API credentials, the authority's state) and `read_only` ones cannot be
+/// changed (the delegation policy, Arsenal's library). The worker's own delegation folder, inside
+/// a hidden one, is mounted back writable.
+#[derive(Debug, Clone, Default)]
+pub struct Isolation {
+    pub hidden: Vec<PathBuf>,
+    pub read_only: Vec<PathBuf>,
+}
+
+impl Isolation {
+    /// The folders of this user's Wyss Console, from the same variables the host uses.
+    pub fn from_environment() -> Self {
+        let absolute = |key: &str| {
+            std::env::var_os(key)
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+        };
+        let home = absolute("HOME");
+        let under_home = |key: &str, fallback: &str| {
+            absolute(key).or_else(|| home.as_ref().map(|h| h.join(fallback)))
+        };
+        let mut hidden = Vec::new();
+        let mut read_only = Vec::new();
+        if let Some(state) = under_home("XDG_STATE_HOME", ".local/state") {
+            hidden.push(state.join("wyss-console"));
+            hidden.push(state.join("wyss-console-f8"));
+        }
+        if let Some(runtime) = absolute("XDG_RUNTIME_DIR") {
+            hidden.push(runtime.join("wyss-console"));
+            hidden.push(runtime.join("wyss-console-f8"));
+        }
+        if let Some(config) = under_home("XDG_CONFIG_HOME", ".config") {
+            read_only.push(config.join("wyss-console"));
+        }
+        if let Some(data) = under_home("XDG_DATA_HOME", ".local/share") {
+            read_only.push(data.join("wyss-console"));
+        }
+        Self { hidden, read_only }
+    }
+
+    /// Bubblewrap mounts for a worker whose own folder is `own`. Only folders that exist are
+    /// mounted over: Bubblewrap would otherwise create them on the host.
+    fn mounts(&self, own: &Path) -> Vec<std::ffi::OsString> {
+        let mut args: Vec<std::ffi::OsString> = Vec::new();
+        for path in self.hidden.iter().filter(|p| p.is_dir()) {
+            args.extend(["--tmpfs".into(), path.clone().into_os_string()]);
+        }
+        for path in self.read_only.iter().filter(|p| p.is_dir()) {
+            args.push("--ro-bind".into());
+            args.push(path.clone().into_os_string());
+            args.push(path.clone().into_os_string());
+        }
+        args.push("--bind".into());
+        args.push(own.as_os_str().to_owned());
+        args.push(own.as_os_str().to_owned());
+        args
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -436,7 +498,7 @@ pub fn manager() -> &'static Manager {
             .unwrap_or_else(|| PathBuf::from("/nonexistent"))
             .join("wyss-console/delegations");
         #[cfg(not(test))]
-        Manager::at(base)
+        Manager::at(base).with_isolation(Isolation::from_environment())
     })
 }
 
@@ -447,6 +509,7 @@ impl Manager {
             tokens: Mutex::new(BTreeMap::new()),
             live: Arc::new(Mutex::new(LiveState::default())),
             models: Mutex::new(None),
+            isolation: Isolation::default(),
         };
         for mut record in manager.records() {
             if record.status == "running" {
@@ -457,6 +520,11 @@ impl Manager {
             }
         }
         manager
+    }
+
+    pub fn with_isolation(mut self, isolation: Isolation) -> Self {
+        self.isolation = isolation;
+        self
     }
 
     /// A new delegation right for an orchestrator session. Kept only in this host's memory.
@@ -631,21 +699,21 @@ impl Manager {
 
     /// `codex debug models` (no inference, no network for the catalogue it reads), kept ten minutes.
     fn codex_models(&self, codex: &Path) -> Option<Value> {
-        let mut cache = lock(&self.models);
-        if let Some((at, value)) = cache.as_ref()
+        if let Some((at, value)) = lock(&self.models).as_ref()
             && at.elapsed() < Duration::from_secs(600)
         {
             return Some(value.clone());
         }
-        let output = Command::new(codex)
+        // The cache is not held while Codex answers: a slow or stuck Codex delays only this call.
+        let mut command = Command::new(codex);
+        command
             .args(["debug", "models"])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
-            .env_remove(TOKEN_VAR)
-            .output()
-            .ok()?;
-        let value: Value = serde_json::from_slice(&output.stdout).ok()?;
-        *cache = Some((Instant::now(), value.clone()));
+            .env_remove(TOKEN_VAR);
+        let stdout = bounded_stdout(&mut command, 8 << 20, Duration::from_secs(15))?;
+        let value: Value = serde_json::from_slice(&stdout).ok()?;
+        *lock(&self.models) = Some((Instant::now(), value.clone()));
         Some(value)
     }
 
@@ -1103,8 +1171,9 @@ impl Manager {
                 "/dev",
                 "--proc",
                 "/proc",
-                "--",
             ])
+            .args(self.isolation.mounts(&dir))
+            .arg("--")
             .arg(executable)
             .args(&argv)
             .current_dir(&workspace)
@@ -1153,7 +1222,10 @@ impl Manager {
             let mut written = 0_u64;
             let mut checked = false;
             if let Some(stdout) = stdout {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let mut reader = BufReader::new(stdout);
+                while let Some(next) = next_line(&mut reader, MAX_LINE) {
+                    // A line longer than any event a provider writes is dropped, not held.
+                    let Some(line) = next else { continue };
                     if written < MAX_EVENTS {
                         written += line.len() as u64 + 1;
                         let _ = writeln!(events, "{line}");
@@ -1183,7 +1255,8 @@ impl Manager {
                             problems: problems.clone(),
                             source: Some("Claude Code init event".into()),
                         };
-                        if !problems.is_empty() {
+                        // A worker already cancelled or past its deadline keeps that ending.
+                        if !problems.is_empty() && record.status == "running" {
                             record.status = "failed".into();
                             record.error = Some("The worker did not start with the planned configuration; it was stopped.".into());
                         }
@@ -1332,8 +1405,64 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.write_all(bytes)
 }
 
+/// What `command` prints, if it closes its output within `timeout` after at most `limit` bytes.
+/// Otherwise it is killed and nothing is returned.
+fn bounded_stdout(command: &mut Command, limit: usize, timeout: Duration) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut child = command.stdout(Stdio::piped()).spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let read = stdout.take(limit as u64 + 1).read_to_end(&mut buffer);
+        let _ = send.send(read.ok().map(|_| buffer));
+    });
+    let read = receive.recv_timeout(timeout).ok().flatten();
+    // Its output is complete once the pipe closed; whatever is left of the process goes. The
+    // exit status is not judged: the caller parses what was printed.
+    let _ = child.kill();
+    let _ = child.wait();
+    read.filter(|buffer| buffer.len() <= limit)
+}
+
 fn catalogue_version(agent: AgentId, executable: &Path) -> Option<String> {
     crate::native::catalogue::probe_provider_version(agent, executable)
+}
+
+/// The longest line of a worker's stream that is read: a longer one is skipped as it arrives.
+const MAX_LINE: usize = 8 << 20;
+
+/// The next line of `reader` without its newline: `None` at the end of the stream, `Some(None)`
+/// for a line longer than `max` bytes (dropped while it is read, never held whole).
+fn next_line<R: BufRead>(reader: &mut R, max: usize) -> Option<Option<String>> {
+    let mut line = Vec::new();
+    let mut oversized = false;
+    loop {
+        let chunk = reader.fill_buf().ok()?;
+        if chunk.is_empty() {
+            if line.is_empty() && !oversized {
+                return None;
+            }
+            return Some((!oversized).then(|| String::from_utf8_lossy(&line).into_owned()));
+        }
+        let (used, ended) = match chunk.iter().position(|b| *b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (chunk.len(), false),
+        };
+        let content = if ended { used - 1 } else { used };
+        if !oversized {
+            if line.len() + content > max {
+                oversized = true;
+                line = Vec::new();
+            } else {
+                line.extend_from_slice(&chunk[..content]);
+            }
+        }
+        reader.consume(used);
+        if ended {
+            return Some((!oversized).then(|| String::from_utf8_lossy(&line).into_owned()));
+        }
+    }
 }
 
 /// Ends a worker's whole process group: politely, then for good.

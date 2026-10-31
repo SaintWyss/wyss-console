@@ -867,3 +867,123 @@ fn an_orchestrator_sees_and_stops_only_its_own_delegations() {
     assert_eq!(manager.list(None).unwrap().len(), 2);
     fs::remove_dir_all(base).unwrap();
 }
+
+#[test]
+fn a_worker_line_longer_than_the_limit_is_dropped_and_reading_goes_on() {
+    let input = b"first\n0123456789abcdef\nlast-without-newline";
+    let mut reader = std::io::BufReader::with_capacity(4, &input[..]);
+    assert_eq!(next_line(&mut reader, 10), Some(Some("first".into())));
+    assert_eq!(next_line(&mut reader, 10), Some(None));
+    assert_eq!(
+        next_line(&mut reader, 30),
+        Some(Some("last-without-newline".into()))
+    );
+    assert_eq!(next_line(&mut reader, 10), None);
+}
+
+/// The layout of the owner's state: the delegations live inside a folder the worker must not see
+/// (sessions' delegation rights, credentials, sockets), next to a read-only policy folder.
+#[test]
+fn a_worker_sees_neither_wyss_secrets_nor_sockets_and_cannot_change_the_policy() {
+    let root = temp("isolation");
+    let hidden = root.join("state/wyss-console");
+    let policy = root.join("config/wyss-console");
+    fs::create_dir_all(hidden.join("native/s1")).unwrap();
+    fs::create_dir_all(&policy).unwrap();
+    fs::write(
+        hidden.join("native/s1/wyss-delegate.mcp.json"),
+        "secret-token",
+    )
+    .unwrap();
+    fs::write(policy.join("delegation.json"), "{}").unwrap();
+    let manager = Manager::at(hidden.join("delegations")).with_isolation(Isolation {
+        hidden: vec![hidden.clone(), root.join("absent")],
+        read_only: vec![policy.clone()],
+    });
+    let bin = temp("isolation-bin");
+    let worker = script(
+        &bin,
+        "worker",
+        &format!(
+            r#"if [ -e '{token}' ]; then echo leaked > seen.txt; else echo hidden > seen.txt; fi
+if echo '{{"max_concurrent":8}}' > '{policy}' 2>/dev/null; then echo changed >> seen.txt; else echo kept >> seen.txt; fi
+echo own > ../own.txt && echo own-writable >> seen.txt
+echo '{{"type":"thread.started","thread_id":"t-iso"}}'
+echo '{{"type":"item.completed","item":{{"type":"agent_message","text":"done"}}}}'
+echo '{{"type":"turn.completed"}}'"#,
+            token = hidden.join("native/s1/wyss-delegate.mcp.json").display(),
+            policy = policy.join("delegation.json").display(),
+        ),
+    );
+    let record = record(&manager, "codex", "s1");
+    let id = record.id.clone();
+    let dir = manager.base.join(&id);
+    manager
+        .launch_worker(record, spec(worker, dir.clone(), Duration::from_secs(30)))
+        .unwrap();
+    let done = wait_finished(&manager, &id);
+    let seen = fs::read_to_string(dir.join("workspace/seen.txt")).unwrap();
+    let token_kept = fs::read_to_string(hidden.join("native/s1/wyss-delegate.mcp.json")).unwrap();
+    let policy_kept = fs::read_to_string(policy.join("delegation.json")).unwrap();
+    let absent_created = root.join("absent").exists();
+    fs::remove_dir_all(&root).unwrap();
+    fs::remove_dir_all(&bin).unwrap();
+    assert_eq!(done.status, "succeeded", "{:?}", done.error);
+    assert_eq!(seen, "hidden\nkept\nown-writable\n");
+    assert_eq!(token_kept, "secret-token");
+    assert_eq!(policy_kept, "{}");
+    assert!(
+        !absent_created,
+        "a missing folder must not be created on the host"
+    );
+}
+
+#[test]
+fn a_provider_command_that_hangs_or_floods_is_cut_off() {
+    let bin = temp("bounded");
+    let slow = script(&bin, "slow", "sleep 30");
+    let flood = script(&bin, "flood", "yes model");
+    let fine = script(&bin, "fine", "echo '{\"models\":[]}'");
+    let started = Instant::now();
+    let hung = bounded_stdout(&mut Command::new(&slow), 1024, Duration::from_millis(300));
+    let elapsed = started.elapsed();
+    let flooded = bounded_stdout(&mut Command::new(&flood), 1024, Duration::from_secs(5));
+    let answered = bounded_stdout(&mut Command::new(&fine), 1024, Duration::from_secs(5));
+    fs::remove_dir_all(&bin).unwrap();
+    assert!(hung.is_none());
+    assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
+    assert!(flooded.is_none());
+    assert_eq!(answered.unwrap(), b"{\"models\":[]}\n");
+}
+
+#[test]
+fn the_folders_a_worker_cannot_see_come_from_the_hosts_own_variables() {
+    let _serial = lock(&ENVIRONMENT);
+    let _env = EnvGuard::set(&[
+        ("HOME", Some("/h".into())),
+        ("XDG_STATE_HOME", None),
+        ("XDG_CONFIG_HOME", Some("/cfg".into())),
+        ("XDG_DATA_HOME", Some("relative".into())),
+        ("XDG_RUNTIME_DIR", Some("/run/user/7".into())),
+    ]);
+    let isolation = Isolation::from_environment();
+    let paths = |list: &[PathBuf]| {
+        list.iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        paths(&isolation.hidden),
+        [
+            "/h/.local/state/wyss-console",
+            "/h/.local/state/wyss-console-f8",
+            "/run/user/7/wyss-console",
+            "/run/user/7/wyss-console-f8",
+        ]
+    );
+    // A relative XDG folder is ignored, as the host itself ignores it.
+    assert_eq!(
+        paths(&isolation.read_only),
+        ["/cfg/wyss-console", "/h/.local/share/wyss-console"]
+    );
+}

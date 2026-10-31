@@ -36,8 +36,16 @@ tool. The same service runs both directions; only the two worker adapters differ
   explicit revision over an unpinned pick; conflicting explicit revisions are refused.
 - **Isolation**: each worker has its own workspace under `~/.local/state/wyss-console/delegations/<id>/`
   and its own process group inside a Bubblewrap PID namespace. `/usr/bin/bwrap` is required; there
-  is no uncontained fallback. Descendants using `setsid` remain inside that namespace. The wrapper
-  preserves existing host filesystem permissions; it does not make skill files unreadable. Workers
+  is no uncontained fallback. Descendants using `setsid` remain inside that namespace. Inside it,
+  Wyss Console's own folders are covered: the state folders (`~/.local/state/wyss-console`,
+  `wyss-console-f8`: sessions' delegation rights, API credentials, the authority) and the runtime
+  folders holding the host and authority sockets are empty, the policy folder
+  (`~/.config/wyss-console`) and Arsenal's library (`~/.local/share/wyss-console`) are read-only,
+  and only the worker's own delegation folder is mounted back writable. The rest of the host
+  filesystem keeps its permissions; this does not make skill files unreadable, and the provider's
+  own home (`~/.claude`, `~/.codex`) stays writable because the provider needs it.
+- **Stream limits**: a worker's output line longer than 8 MiB is dropped as it is read; `codex
+debug models` gets 15 seconds and 8 MiB. Workers
   receive no parent's delegation token, MCP servers or plugins. Codex native multi-agent support
   and Claude's Agent/Task tools are disabled.
 - **Verification**: Claude Code's `init` event (model, skills, plugins, MCP servers) is compared with the plan
