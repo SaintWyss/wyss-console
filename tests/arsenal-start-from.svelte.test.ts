@@ -30,6 +30,27 @@ const tracer: LibraryItem = {
   compatibility: { status: 'supported', reason: 'own format' },
 };
 
+const design: LibraryItem = {
+  ...tracer,
+  id: 'cap-design',
+  provider: 'claude_code',
+  source: 'claude_user_skills',
+  name: 'design',
+  origin: '~/.claude/skills/design',
+};
+
+const detailOf = (summary: LibraryItem) =>
+  ({
+    summary,
+    revision: 1,
+    compatibility: summary.compatibility,
+    dependencies: [],
+    files: [{ path: 'SKILL.md', size: 10 }],
+    revisions: [
+      { number: 1, files: 1, bytes: 10, created_at: 1, current: true },
+    ],
+  }) as unknown as Detail;
+
 const opened = {
   summary: tracer,
   revision: 1,
@@ -43,7 +64,7 @@ function start() {
   const state = $state<ArsenalState>({
     tab: 'library',
     phase: 'ready',
-    library: [tracer],
+    library: [tracer, design],
     opened,
     file: null,
     discover: null,
@@ -81,7 +102,7 @@ function start() {
     },
   });
   flushSync();
-  return controller;
+  return { controller, state };
 }
 
 const button = (label: string) =>
@@ -98,7 +119,7 @@ const submit = (label: string) => {
 
 describe('Starting from a library capability', () => {
   it('opens a preset named after the capability with it already in, saved without typing', () => {
-    const controller = start();
+    const { controller } = start();
     button('Start a preset with this').click();
     flushSync();
     expect(controller.setTab).toHaveBeenCalledWith('presets');
@@ -116,10 +137,59 @@ describe('Starting from a library capability', () => {
   });
 
   it('opens a selection for the capability’s own provider with it already in', () => {
-    const controller = start();
+    const { controller } = start();
     button('Start a selection with this').click();
     flushSync();
     expect(controller.setTab).toHaveBeenCalledWith('selections');
+    submit('Selection editor');
+    expect(controller.saveSelection).toHaveBeenCalledWith({
+      id: null,
+      name: 'tracer',
+      provider: 'codex',
+      items: [{ capability: 'cap-tracer', revision: null }],
+      composites: [],
+    });
+  });
+
+  it('adds to a preset being edited instead of discarding its unsaved name and items', () => {
+    const { controller, state } = start();
+    button('Start a preset with this').click();
+    flushSync();
+    const name = document.querySelector<HTMLInputElement>(
+      'form[aria-label="Preset editor"] input',
+    )!;
+    name.value = 'Frontend kit';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    state.tab = 'library';
+    state.opened = detailOf(design);
+    flushSync();
+    button('Start a preset with this').click();
+    flushSync();
+    submit('Preset editor');
+    expect(controller.savePreset).toHaveBeenCalledWith({
+      id: null,
+      name: 'Frontend kit',
+      description: '',
+      items: [
+        { capability: 'cap-tracer', revision: null },
+        { capability: 'cap-design', revision: null },
+      ],
+    });
+  });
+
+  it('leaves a selection for another provider untouched and says why', () => {
+    const { controller, state } = start();
+    button('Start a selection with this').click();
+    flushSync();
+    state.tab = 'library';
+    state.opened = detailOf(design);
+    flushSync();
+    button('Start a selection with this').click();
+    flushSync();
+    expect(document.body.textContent).toContain(
+      'The selection being edited is for Codex.',
+    );
     submit('Selection editor');
     expect(controller.saveSelection).toHaveBeenCalledWith({
       id: null,

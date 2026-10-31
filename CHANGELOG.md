@@ -7,7 +7,8 @@
   installs itself in `~/.codex/skills/.system` are listed as "Codex system skills" and are never read or
   imported.
 - Library › a capability has "Start a preset with this" and "Start a selection with this": the editor opens
-  named after the capability with it already in, so a first preset needs no typing.
+  named after the capability with it already in, so a first preset needs no typing. A draft already being
+  edited keeps its name and gets the capability added; a selection for the other provider is left as it is.
 
 ## 2026-10-30 — Arsenal integration gate
 

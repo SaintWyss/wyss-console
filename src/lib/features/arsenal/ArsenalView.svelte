@@ -315,26 +315,50 @@
     });
     if (saved) newPreset();
   }
-  /** Starts a preset or a selection with one capability, named after it, in its own tab. */
+  /**
+   * Starts a preset or a selection with one capability, named after it, in its own tab. A draft
+   * already in the editor is never discarded: the capability is added to it instead.
+   */
   function presetFrom(summary: Summary) {
-    presetDraft = {
-      id: null,
-      name: summary.name,
-      description: '',
-      items: [{ capability: summary.id, revision: null }],
-    };
+    const item = { capability: summary.id, revision: null };
+    const blank =
+      presetDraft.id === null &&
+      presetDraft.name.trim() === '' &&
+      presetDraft.items.length === 0;
+    if (blank) {
+      presetDraft = {
+        id: null,
+        name: summary.name,
+        description: '',
+        items: [item],
+      };
+    } else if (!inItems(presetDraft.items, summary.id)) {
+      presetDraft.items = [...presetDraft.items, item];
+    }
     presetError = null;
     controller.setTab('presets');
   }
   function selectionFrom(summary: Summary) {
-    selectionDraft = {
-      id: null,
-      name: summary.name,
-      provider: summary.provider,
-      items: [{ capability: summary.id, revision: null }],
-      composites: [],
-    };
+    const item = { capability: summary.id, revision: null };
+    const blank =
+      selectionDraft.id === null &&
+      selectionDraft.name.trim() === '' &&
+      selectionDraft.items.length === 0 &&
+      selectionDraft.composites.length === 0;
     selectionError = null;
+    if (blank) {
+      selectionDraft = {
+        id: null,
+        name: summary.name,
+        provider: summary.provider,
+        items: [item],
+        composites: [],
+      };
+    } else if (selectionDraft.provider !== summary.provider) {
+      selectionError = `The selection being edited is for ${PROVIDER_LABEL[selectionDraft.provider]}. Save or clear it before starting one for ${PROVIDER_LABEL[summary.provider]}.`;
+    } else if (!inItems(selectionDraft.items, summary.id)) {
+      selectionDraft.items = [...selectionDraft.items, item];
+    }
     controller.setTab('selections');
   }
   function editSelection(selection: Selection) {
