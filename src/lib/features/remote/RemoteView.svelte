@@ -115,91 +115,106 @@
 </section>
 
 <style>
+  /* The same grammar as every view: a heading at the view scale, tabs drawn as tabs, a
+     column that scrolls. Selection and keyboard focus never look the same. */
   .remote {
-    max-width: 72rem;
-    margin: 0 auto;
-    padding: 1.5rem clamp(1rem, 3vw, 2rem) 3rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 2px 4px 24px 0;
     color: var(--text);
   }
 
   header {
-    border-bottom: 1px solid var(--glass-line);
-    padding-bottom: 1rem;
+    display: grid;
+    gap: 6px;
   }
 
   .eyebrow {
-    color: var(--muted);
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
+    color: var(--faint);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
   }
 
   h2 {
-    margin: 0.25rem 0 0.75rem;
-    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    margin: 0;
+    font-size: var(--text-xl);
+    font-weight: 600;
   }
 
   .blocked {
-    border-left: 4px solid var(--warn-line);
-    padding: 0.6rem 0.8rem;
+    max-width: 72ch;
+    padding: 8px 12px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--text);
     background: var(--warn-soft);
-    font-weight: 650;
+    border: 1px solid var(--warn-line);
+    border-left-width: 3px;
+    border-radius: var(--radius-md);
   }
 
   .areas {
     display: flex;
-    gap: 0.5rem;
+    gap: 2px;
+    margin-top: 12px;
     overflow-x: auto;
-    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--line);
   }
 
-  button {
-    min-height: 2.75rem;
+  .areas button {
+    position: relative;
     flex: 0 0 auto;
-    border: 1px solid var(--glass-line);
-    border-radius: 0.35rem;
-    padding: 0.4rem 0.75rem;
-    color: inherit;
-    background: var(--surface-control);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  button[aria-current='page'] {
-    border-color: var(--accent);
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-
-  button:disabled {
+    min-height: 38px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     color: var(--muted);
-    cursor: not-allowed;
-    opacity: 0.72;
+    background: transparent;
+    font-weight: 500;
+  }
+
+  .areas button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-hover);
+  }
+
+  .areas button[aria-current='page'] {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .areas button[aria-current='page']::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+  }
+
+  .areas button:focus-visible {
+    outline-offset: -2px;
   }
 
   article {
-    max-width: 54rem;
-    padding: 1rem 0;
+    max-width: 72ch;
+    padding: 16px 0;
     line-height: 1.6;
   }
 
   h3 {
-    font-size: 1.35rem;
+    margin: 0 0 8px;
+    font-size: var(--text-lg);
+    font-weight: 600;
   }
 
   .no-queue {
-    margin-top: 2rem;
+    margin-top: 24px;
     color: var(--muted);
-    font-size: 0.9rem;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      scroll-behavior: auto !important;
-      animation-duration: 0.01ms !important;
-      transition-duration: 0.01ms !important;
-    }
+    font-size: var(--text-sm);
   }
 </style>

@@ -374,11 +374,6 @@
 </script>
 
 <div class="shell">
-  <div class="ambient" aria-hidden="true">
-    <span class="orb orb-a"></span>
-    <span class="orb orb-b"></span>
-    <span class="orb orb-c"></span>
-  </div>
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <TopBar
     title={current?.label ?? ''}

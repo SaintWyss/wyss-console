@@ -8,7 +8,6 @@ mod authority;
 mod events;
 #[cfg(target_os = "linux")]
 mod f8;
-mod glass;
 mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod select;
@@ -23,9 +22,9 @@ fn get_app_info() -> AppInfo {
     application::app_info().into()
 }
 
-/// The main window is created here, not from config, because transparency is
-/// decided before the window exists. A transparent window the display refuses
-/// falls back to the opaque one.
+/// The main window, from its configuration. It is always opaque: what is behind the window
+/// (the wallpaper, other windows) never shows through text, and no compositor blur is asked
+/// for (docs/research/global-ux-2026-10-31/GLOBAL-UX-UI-SPEC.md).
 fn open_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config = app
         .config()
@@ -34,28 +33,10 @@ fn open_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> 
         .iter()
         .find(|window| window.label == "main")
         .ok_or("main window configuration is missing")?;
-    let planned = glass::plan(glass::probe());
-    let (window, mode) = match build_main_window(app, config, planned) {
-        Ok(window) => (window, planned),
-        Err(_) if planned.transparent() => (
-            build_main_window(app, config, glass::GlassMode::Opaque)?,
-            glass::GlassMode::Opaque,
-        ),
-        Err(error) => return Err(error.into()),
-    };
-    glass::apply(&window, mode);
-    Ok(())
-}
-
-fn build_main_window(
-    app: &tauri::App,
-    config: &tauri::utils::config::WindowConfig,
-    mode: glass::GlassMode,
-) -> tauri::Result<tauri::WebviewWindow> {
     tauri::WebviewWindowBuilder::from_config(app, config)?
-        .transparent(mode.transparent())
-        .initialization_script(mode.bootstrap_script())
-        .build()
+        .transparent(false)
+        .build()?;
+    Ok(())
 }
 
 /// What the binary adds to the desktop: commands and the state they need. They live in the

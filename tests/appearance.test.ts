@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 import { APPEARANCE_THEMES } from '../src/lib/contracts/settings';
 import { terminalPalette } from '../src/lib/features/terminal/appearance';
@@ -38,41 +38,103 @@ function cssThemes(): Record<string, Record<string, string>> {
   return found;
 }
 
-it('provides every DN-34 theme with legible text, semantic text, focus and boundaries', () => {
+/** Every surface text can sit on. Each must be an opaque color in every theme. */
+const SURFACES = [
+  'chrome',
+  'bg',
+  'surface',
+  'surface-subtle',
+  'surface-control',
+  'surface-raised',
+  'surface-hover',
+  'surface-strong',
+  'surface-overlay',
+  'accent-soft',
+];
+const TEXT = [
+  'text',
+  'muted',
+  'faint',
+  'accent',
+  'accent-strong',
+  'ok',
+  'pending',
+  'warn',
+  'error',
+  'error-text',
+];
+
+it('defines every surface of every theme as an opaque color', () => {
   const themes = cssThemes();
   expect(Object.keys(themes).sort()).toEqual([...APPEARANCE_THEMES].sort());
+  for (const theme of APPEARANCE_THEMES)
+    for (const surface of [...SURFACES, 'ok-soft', 'warn-soft', 'error-soft'])
+      // Only six-digit hex is read as a token: rgba(), transparent or a missing one fail.
+      expect(themes[theme]![surface], `${theme} ${surface}`).toMatch(
+        /^#[0-9a-f]{6}$/i,
+      );
+});
+
+it('keeps every text token legible on every surface of its theme, not only the canvas', () => {
   for (const theme of APPEARANCE_THEMES) {
-    const tokens = themes[theme]!;
-    const background = tokens.bg!;
-    for (const foreground of [
-      'text',
-      'muted',
-      'faint',
-      'accent',
-      'accent-strong',
-      'ok',
-      'pending',
-      'warn',
-      'error',
-      'error-text',
-    ]) {
-      expect(
-        contrast(tokens[foreground]!, background),
-        `${theme} ${foreground}`,
-      ).toBeGreaterThanOrEqual(4.5);
+    const tokens = cssThemes()[theme]!;
+    for (const surface of SURFACES) {
+      for (const foreground of TEXT)
+        expect(
+          contrast(tokens[foreground]!, tokens[surface]!),
+          `${theme} ${foreground} on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      for (const boundary of ['line-strong', 'focus'])
+        expect(
+          contrast(tokens[boundary]!, tokens[surface]!),
+          `${theme} ${boundary} on ${surface}`,
+        ).toBeGreaterThanOrEqual(3);
     }
-    expect(
-      contrast(tokens['glass-line']!, background),
-      `${theme} boundary`,
-    ).toBeGreaterThanOrEqual(3);
-    expect(
-      contrast(tokens['glass-line-strong']!, background),
-      `${theme} strong boundary`,
-    ).toBeGreaterThanOrEqual(3);
+    // A state badge: its word on its own tinted background.
+    for (const [text, soft] of [
+      ['ok', 'ok-soft'],
+      ['warn', 'warn-soft'],
+      ['error-text', 'error-soft'],
+      ['pending', 'accent-soft'],
+      ['text', 'warn-soft'],
+    ] as const)
+      expect(
+        contrast(tokens[text]!, tokens[soft]!),
+        `${theme} ${text} on ${soft}`,
+      ).toBeGreaterThanOrEqual(4.5);
   }
 });
 
-it('keeps the keyboard skip link readable over translucent desktop surfaces', () => {
+it('never lets what is behind the window show through: no blur, no glass mode', () => {
+  const svelte = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? svelte(join(dir, entry.name))
+        : entry.name.endsWith('.svelte')
+          ? [join(dir, entry.name)]
+          : [],
+    );
+  const sources = [
+    stylesheet,
+    ...svelte(resolve(process.cwd(), 'src')).map((f) =>
+      readFileSync(f, 'utf8'),
+    ),
+  ];
+  for (const source of sources) {
+    expect(source).not.toMatch(/backdrop-filter|blur\(|data-glass|glass-/);
+    expect(source).not.toMatch(/--(frame|glow-[a-z]+)\b/);
+  }
+  // The shell and its chrome paint opaque tokens.
+  expect(stylesheet).toMatch(/\.shell\s*\{[^}]*background:\s*var\(--bg\);/s);
+  expect(stylesheet).toMatch(
+    /\.top-bar\s*\{[^}]*background:\s*var\(--chrome\);/s,
+  );
+  expect(stylesheet).toMatch(
+    /\.sidebar\s*\{[^}]*background:\s*var\(--chrome\);/s,
+  );
+});
+
+it('keeps the keyboard skip link readable over the window', () => {
   expect(stylesheet).toMatch(
     /\.skip-link\s*\{[^}]*color:\s*var\(--text\);[^}]*border:\s*2px solid var\(--accent\);[^}]*background:\s*var\(--bg\);/s,
   );

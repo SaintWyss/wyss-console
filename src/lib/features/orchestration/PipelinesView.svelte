@@ -1812,15 +1812,15 @@
   }
   h2 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--text-lg);
   }
   h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--text-md);
   }
   h4 {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
   p {
     margin: 0;
@@ -1830,7 +1830,7 @@
   .m6-panel-head p,
   .m6-note {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .m6-meta code,
   code {
@@ -1840,7 +1840,7 @@
   .m6-tabs {
     display: flex;
     gap: 8px;
-    border-bottom: 1px solid var(--glass-line-strong);
+    border-bottom: 1px solid var(--line-strong);
   }
   .m6-tabs button {
     min-height: 36px;
@@ -1863,7 +1863,7 @@
   }
   .m6-panel {
     min-width: 0;
-    border: 1px solid var(--glass-line);
+    border: 1px solid var(--line);
     background: var(--surface);
     border-radius: var(--radius-md);
     padding: 14px;
@@ -1886,7 +1886,7 @@
     display: flex;
     flex-direction: column;
     gap: 5px;
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--muted);
   }
   input,
@@ -1897,10 +1897,10 @@
     padding: 8px 10px;
     color: var(--text);
     background: var(--terminal-bg);
-    border: 1px solid var(--glass-line-strong);
+    border: 1px solid var(--line-strong);
     border-radius: 8px;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
   input[readonly] {
     color: var(--muted);
@@ -1916,10 +1916,10 @@
   .m6-button {
     min-height: 34px;
     padding: 5px 11px;
-    border: 1px solid var(--glass-line-strong);
+    border: 1px solid var(--line-strong);
     border-radius: 8px;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .m6-button:hover:not(:disabled) {
     background: var(--surface-strong);
@@ -1947,7 +1947,7 @@
   .m6-step-editor,
   .m6-run,
   .m6-review {
-    border: 1px solid var(--glass-line);
+    border: 1px solid var(--line);
     background: var(--surface-subtle);
     border-radius: 9px;
     padding: 11px;
@@ -1968,7 +1968,7 @@
   }
   fieldset {
     min-width: 0;
-    border: 1px solid var(--glass-line);
+    border: 1px solid var(--line);
     border-radius: 8px;
     padding: 8px;
     display: flex;
@@ -1978,7 +1978,7 @@
   legend {
     padding: 0 5px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .m6-blocked {
     padding: 9px 10px;
@@ -1986,7 +1986,7 @@
     background: var(--warn-soft);
     border: 1px solid var(--warn-line);
     border-radius: 8px;
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .m6-note {
     line-height: 1.5;
@@ -1995,7 +1995,7 @@
     overflow: hidden;
   }
   .m6-review > p {
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--muted);
     overflow-wrap: anywhere;
   }
@@ -2012,11 +2012,11 @@
   details summary {
     cursor: pointer;
     color: var(--accent-strong);
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
   .m6-empty {
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--text-sm);
     padding: 15px 3px;
   }
   .m6-alert {
@@ -2025,7 +2025,7 @@
     color: var(--error-text);
     border-radius: 8px;
     padding: 9px 11px;
-    font-size: 12px;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
   .m6-alert.compact {
@@ -2044,7 +2044,7 @@
   }
   .m6-run > header p {
     margin-top: 4px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
   }
   .m6-status {
@@ -2053,7 +2053,7 @@
     border-radius: 99px;
     background: var(--surface-raised);
     text-transform: uppercase;
-    font-size: 10px;
+    font-size: var(--text-xs);
     letter-spacing: 0.04em;
   }
   .m6-status[data-state='completed'] {
@@ -2079,12 +2079,12 @@
     gap: 8px;
   }
   .m6-step-list li {
-    border-top: 1px solid var(--glass-line);
+    border-top: 1px solid var(--line);
     padding-top: 8px;
     display: flex;
     flex-direction: column;
     gap: 7px;
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
   .m6-step-list li > div:first-child > span,
   .m6-step-list small {

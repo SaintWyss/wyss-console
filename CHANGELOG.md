@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-31 — An opaque, readable window; one design system
+
+- **The window is opaque.** It is no longer created transparent on KDE and asks KWin for no blur
+  (`src-tauri/src/desktop/glass.rs` removed); the wallpaper and the windows behind it never show through
+  text. Every surface token (chrome, canvas, panels, controls, selection) is an opaque color in the dark,
+  light and high-contrast themes; `tests/appearance.test.ts` checks every text token at 4.5:1 and every
+  control boundary and focus ring at 3:1 on every surface, and fails on any blur or glass rule.
+- **One design system.** Type scale tokens (12/13/14/16/18 px, nothing smaller), one focus ring, one
+  `.action` button (primary, danger, quiet) for every view, shared `.badge` (word + symbol + tone) and the
+  state stripe. Contract: `docs/research/global-ux-2026-10-31/GLOBAL-UX-UI-SPEC.md`.
+- **Navigation** in four labelled groups (Terminals, Agents & activity, Capabilities, System), in the
+  order the items always had; the approvals count stays visible on the narrow icon rail.
+- **Arsenal.** Sections are drawn as tabs; each capability shows its description, its metadata and its
+  compatibility as a badge with a symbol (Supported ✓, Unverified ?, Missing dependency !, Unsupported ✕);
+  Discover marks blocked, duplicate and colliding candidates the same way; a count says how many match.
+  On wide windows what is opened shows beside the list instead of under hundreds of rows.
+- **Workspace › Delegated agents** sits beside the sessions on wide windows, groups agents under the
+  session that delegated them, counts them by state and asks before stopping a running one.
+- `tests/preview/app.html` previews the whole window in a browser with a scripted desktop (`?v=<view>&theme=`).
+
 ## 2026-10-31 — Agent delegation in both directions
 
 - A Claude Code or Codex session started from Workspace with "Let it delegate…" gets the Wyss delegation

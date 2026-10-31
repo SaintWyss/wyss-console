@@ -353,7 +353,7 @@
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    border: 1px solid var(--glass-line);
+    border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--surface);
   }
@@ -377,7 +377,7 @@
   .arsenal-overlay,
   .arsenal-member-list {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-xs);
     overflow-wrap: anywhere;
     white-space: pre-wrap;
     max-height: 240px;
@@ -386,7 +386,7 @@
   @media (max-width: 767px) {
     .arsenal-overlay,
     .arsenal-member-list {
-      font-size: 13px;
+      font-size: var(--text-sm);
     }
   }
 </style>
