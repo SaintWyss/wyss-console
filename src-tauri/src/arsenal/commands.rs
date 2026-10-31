@@ -399,10 +399,18 @@ fn discover_reply(
         .iter()
         .map(|candidate| store::tree_digest(&candidate.content))
         .collect();
-    let names: Vec<String> = scan
+    // The library slot a capability would occupy: provider, kind, source, scope and name. Two
+    // candidates in one slot with different content would overwrite each other; the same name
+    // under another provider, kind, source or scope is a different capability.
+    let slots: Vec<String> = scan
         .candidates
         .iter()
-        .map(|candidate| candidate.name.clone())
+        .map(|candidate| {
+            format!(
+                "{}\0{}\0{}\0{}\0{}",
+                candidate.provider, candidate.kind, candidate.source, candidate.scope, candidate.name
+            )
+        })
         .collect();
     let importable: Vec<bool> = scan.candidates.iter().map(is_importable).collect();
     let mut candidates = Vec::with_capacity(scan.candidates.len());
@@ -412,7 +420,10 @@ fn discover_reply(
             importable[index] && importable[other] && trees[other] == trees[index]
         });
         let name_collisions = others(&ids, index, |other| {
-            importable[index] && importable[other] && names[other] == names[index]
+            importable[index]
+                && importable[other]
+                && slots[other] == slots[index]
+                && trees[other] != trees[index]
         });
         let (status, capability) =
             if IMPORTABLE.contains(&candidate.kind) || candidate.blocked.is_none() {
@@ -1507,6 +1518,36 @@ mod tests {
             project_a,
             identity_of(&candidate("skill", "design", b"same"), None)
         );
+    }
+
+    #[test]
+    fn a_name_is_a_collision_only_inside_one_library_slot_with_different_content() {
+        let store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let mut other_provider = candidate("skill", "design", b"other");
+        other_provider.provider = "codex";
+        let (reply, _) = discover_reply(
+            &store,
+            scan(vec![
+                candidate("skill", "design", b"claude"),
+                other_provider,
+                candidate("skill", "design", b"claude"),
+                candidate("skill", "design", b"changed"),
+            ]),
+            None,
+        )
+        .unwrap();
+        let [claude, codex, same, changed] = &reply.candidates[..] else {
+            panic!("four candidates expected");
+        };
+        // Another provider is its own namespace: no conflict, not even by name.
+        assert!(codex.name_collisions.is_empty());
+        assert!(!claude.name_collisions.contains(&codex.id));
+        // Identical content in the same slot is a duplicate, not a conflict.
+        assert_eq!(claude.duplicates, vec![same.id.clone()]);
+        assert!(!claude.name_collisions.contains(&same.id));
+        // Different content in the same slot would overwrite each other: a real conflict.
+        assert_eq!(claude.name_collisions, vec![changed.id.clone()]);
+        assert_eq!(changed.name_collisions.len(), 2);
     }
 
     #[test]
