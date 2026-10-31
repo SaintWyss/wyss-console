@@ -533,189 +533,195 @@
         </div>
       </section>
 
-      <section class="native-sessions" aria-label="Native sessions">
-        <h3 class="native-heading">
-          Sessions <span class="pill compact" data-tone="idle"
-            ><span class="dot" aria-hidden="true"></span>Native plane</span
-          >
-          {#if toRestore.length > 0}
-            <button
-              type="button"
-              class="action"
-              disabled={native.starting}
-              onclick={async () => {
-                if ((await controller.restoreLost()) > 0) onconsole();
-              }}
-              >Start {toRestore.length === 1
-                ? 'the lost session'
-                : `${toRestore.length} lost sessions`} again</button
+      <div class="native-side">
+        <section class="native-sessions" aria-label="Native sessions">
+          <h3 class="native-heading">
+            Sessions <span class="pill compact" data-tone="idle"
+              ><span class="dot" aria-hidden="true"></span>Native plane</span
             >
-          {/if}
-          {#if native.sessions.some((s) => s.state !== 'running' && s.state !== 'requested')}
-            <button
-              type="button"
-              class="action"
-              onclick={() => controller.forgetFinished()}
-              >Remove finished</button
-            >
-          {/if}
-        </h3>
-        {#if native.sessions.length === 0}
-          <div class="sessions-empty">
-            <p class="empty-title">No agent sessions yet</p>
-            <p>Start one above. It opens in the Console as a terminal tab.</p>
-          </div>
-        {:else}
-          {#each groups as group (group.project)}
-            <div class="native-group">
-              <p class="event-meta">
-                <span class="mono">{group.project}</span>
-                {#if crowded.has(group.project)}
-                  <span class="native-warning">
-                    · Two sessions run here and can write the same files.
-                    Nothing coordinates them.
-                  </span>
-                {/if}
-              </p>
-              <ul
-                class="events-list"
-                aria-label={`Sessions in ${folderName(group.project)}`}
+            {#if toRestore.length > 0}
+              <button
+                type="button"
+                class="action"
+                disabled={native.starting}
+                onclick={async () => {
+                  if ((await controller.restoreLost()) > 0) onconsole();
+                }}
+                >Start {toRestore.length === 1
+                  ? 'the lost session'
+                  : `${toRestore.length} lost sessions`} again</button
               >
-                {#each group.sessions as session (session.id)}
-                  {@const label = stateLabel(session)}
-                  <li class="native-row" data-state={session.state}>
-                    <span class="event-title">
-                      {session.agent_name}
-                      {#if session.version}<span class="event-meta"
-                          >{session.version}</span
-                        >{/if}
+            {/if}
+            {#if native.sessions.some((s) => s.state !== 'running' && s.state !== 'requested')}
+              <button
+                type="button"
+                class="action"
+                onclick={() => controller.forgetFinished()}
+                >Remove finished</button
+              >
+            {/if}
+          </h3>
+          {#if native.sessions.length === 0}
+            <div class="sessions-empty">
+              <p class="empty-title">No agent sessions yet</p>
+              <p>Start one above. It opens in the Console as a terminal tab.</p>
+            </div>
+          {:else}
+            {#each groups as group (group.project)}
+              <div class="native-group">
+                <p class="event-meta">
+                  <span class="mono">{group.project}</span>
+                  {#if crowded.has(group.project)}
+                    <span class="native-warning">
+                      · Two sessions run here and can write the same files.
+                      Nothing coordinates them.
                     </span>
-                    <span
-                      class="pill compact"
-                      data-tone={label.tone}
-                      title={STATE_NOTE[session.state]}
-                    >
-                      <span class="dot" aria-hidden="true"></span>{label.text}
-                    </span>
-                    <span class="event-meta native-facts">
-                      {#if session.profile}Profile {profileName(
-                          session.profile.id,
-                        )} (v{session.profile.version}) ·
-                      {:else}No profile ·
-                      {/if}
-                      {#if session.state === 'running' || session.state === 'requested'}
-                        up {since(session.started_at, now)}
-                      {:else}
-                        started {new Date(
-                          session.started_at * 1000,
-                        ).toLocaleString(undefined, {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        })}{ended(session)}
-                      {/if}
-                      {#if !session.through_shell}
-                        · started directly{/if}
-                      {#if session.restarts > 0}
-                        · restart {session.restarts}{/if}
-                      {#if sessionArsenalLine(session, bindings)}
-                        · {sessionArsenalLine(session, bindings)}{/if}
-                      {#if session.state === 'running' && session.pid}
-                        · process {session.pid}{/if}
-                      {#if session.usage}
-                        · {session.usage.cpu_percent === null
-                          ? '…'
-                          : `${session.usage.cpu_percent.toFixed(0)}%`} CPU · {formatBytes(
-                          session.usage.rss_bytes,
-                        )}{session.usage.processes > 1
-                          ? ` · ${session.usage.processes} processes`
-                          : ''}
-                      {/if}
-                    </span>
-                    {#if session.state === 'running' || session.state === 'requested'}
-                      {@const facts = modelFacts(
-                        session,
-                        native.profiles,
-                        configItems,
-                      )}
+                  {/if}
+                </p>
+                <ul
+                  class="events-list"
+                  aria-label={`Sessions in ${folderName(group.project)}`}
+                >
+                  {#each group.sessions as session (session.id)}
+                    {@const label = stateLabel(session)}
+                    <li class="native-row" data-state={session.state}>
+                      <span class="event-title">
+                        {session.agent_name}
+                        {#if session.version}<span class="event-meta"
+                            >{session.version}</span
+                          >{/if}
+                      </span>
                       <span
-                        class="event-meta native-facts"
-                        data-testid="models"
+                        class="pill compact"
+                        data-tone={label.tone}
+                        title={STATE_NOTE[session.state]}
                       >
-                        Model: asked for {facts.requested} · set in its files {facts.configured}
-                        · in use: {facts.inUse} · Effort: asked for {facts.requestedEffort}
-                        · set in its files {facts.configuredEffort}
+                        <span class="dot" aria-hidden="true"></span>{label.text}
                       </span>
-                      <span class="event-meta native-note" data-testid="switch">
-                        {switchHint(session.agent_id)}
+                      <span class="event-meta native-facts">
+                        {#if session.profile}Profile {profileName(
+                            session.profile.id,
+                          )} (v{session.profile.version}) ·
+                        {:else}No profile ·
+                        {/if}
+                        {#if session.state === 'running' || session.state === 'requested'}
+                          up {since(session.started_at, now)}
+                        {:else}
+                          started {new Date(
+                            session.started_at * 1000,
+                          ).toLocaleString(undefined, {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })}{ended(session)}
+                        {/if}
+                        {#if !session.through_shell}
+                          · started directly{/if}
+                        {#if session.restarts > 0}
+                          · restart {session.restarts}{/if}
+                        {#if sessionArsenalLine(session, bindings)}
+                          · {sessionArsenalLine(session, bindings)}{/if}
+                        {#if session.state === 'running' && session.pid}
+                          · process {session.pid}{/if}
+                        {#if session.usage}
+                          · {session.usage.cpu_percent === null
+                            ? '…'
+                            : `${session.usage.cpu_percent.toFixed(0)}%`} CPU · {formatBytes(
+                            session.usage.rss_bytes,
+                          )}{session.usage.processes > 1
+                            ? ` · ${session.usage.processes} processes`
+                            : ''}
+                        {/if}
                       </span>
-                    {/if}
-                    {#if session.state === 'lost'}
-                      <span class="event-meta native-note"
-                        >{STATE_NOTE.lost}</span
-                      >
-                    {/if}
-                    <span class="native-actions">
                       {#if session.state === 'running' || session.state === 'requested'}
-                        <button
-                          type="button"
-                          class="action"
-                          disabled={!controller.hasTab(session.id)}
-                          onclick={() => open(session)}>Open</button
+                        {@const facts = modelFacts(
+                          session,
+                          native.profiles,
+                          configItems,
+                        )}
+                        <span
+                          class="event-meta native-facts"
+                          data-testid="models"
                         >
-                        <button
-                          type="button"
-                          class="action"
-                          onclick={() => controller.stop(session.id)}
-                          >Stop</button
+                          Model: asked for {facts.requested} · set in its files {facts.configured}
+                          · in use: {facts.inUse} · Effort: asked for {facts.requestedEffort}
+                          · set in its files {facts.configuredEffort}
+                        </span>
+                        <span
+                          class="event-meta native-note"
+                          data-testid="switch"
                         >
-                        <button
-                          type="button"
-                          class="action"
-                          disabled={native.starting ||
-                            (native.m9Blocked && isM9Agent(session.agent_id))}
-                          onclick={() => controller.restart(session.id)}
-                          >Restart</button
+                          {switchHint(session.agent_id)}
+                        </span>
+                      {/if}
+                      {#if session.state === 'lost'}
+                        <span class="event-meta native-note"
+                          >{STATE_NOTE.lost}</span
                         >
-                      {:else}
-                        {#if controller.hasTab(session.id)}
+                      {/if}
+                      <span class="native-actions">
+                        {#if session.state === 'running' || session.state === 'requested'}
                           <button
                             type="button"
                             class="action"
-                            onclick={() => open(session)}>Show terminal</button
+                            disabled={!controller.hasTab(session.id)}
+                            onclick={() => open(session)}>Open</button
+                          >
+                          <button
+                            type="button"
+                            class="action"
+                            onclick={() => controller.stop(session.id)}
+                            >Stop</button
+                          >
+                          <button
+                            type="button"
+                            class="action"
+                            disabled={native.starting ||
+                              (native.m9Blocked && isM9Agent(session.agent_id))}
+                            onclick={() => controller.restart(session.id)}
+                            >Restart</button
+                          >
+                        {:else}
+                          {#if controller.hasTab(session.id)}
+                            <button
+                              type="button"
+                              class="action"
+                              onclick={() => open(session)}
+                              >Show terminal</button
+                            >
+                          {/if}
+                          <button
+                            type="button"
+                            class="action"
+                            disabled={native.starting ||
+                              (native.m9Blocked && isM9Agent(session.agent_id))}
+                            onclick={() => controller.restart(session.id)}
+                            >Start again</button
+                          >
+                          <button
+                            type="button"
+                            class="action"
+                            onclick={() => controller.forget(session.id)}
+                            >Remove</button
                           >
                         {/if}
                         <button
                           type="button"
                           class="action"
-                          disabled={native.starting ||
-                            (native.m9Blocked && isM9Agent(session.agent_id))}
-                          onclick={() => controller.restart(session.id)}
-                          >Start again</button
+                          disabled={native.starting}
+                          onclick={() => (handingOff = session.id)}
+                          >Hand off…</button
                         >
-                        <button
-                          type="button"
-                          class="action"
-                          onclick={() => controller.forget(session.id)}
-                          >Remove</button
-                        >
-                      {/if}
-                      <button
-                        type="button"
-                        class="action"
-                        disabled={native.starting}
-                        onclick={() => (handingOff = session.id)}
-                        >Hand off…</button
-                      >
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            </div>
-          {/each}
-        {/if}
-      </section>
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/each}
+          {/if}
+        </section>
 
-      <DelegationsPanel {visible} />
+        <DelegationsPanel {visible} />
+      </div>
     </div>
   {/if}
 </section>

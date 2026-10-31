@@ -2974,14 +2974,14 @@ li.native-row .native-note {
     grid-template-columns: minmax(26rem, 38rem) minmax(0, 1fr);
     align-items: start;
   }
-  .native-main > .native-launch {
-    grid-column: 1;
-    grid-row: span 2;
-  }
-  .native-main > .native-sessions,
-  .native-main > .delegations {
-    grid-column: 2;
-  }
+}
+/* What runs, in one column: the sessions, then the agents they delegated to, with no gap
+   between them whatever the launcher's height. */
+.native-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 /* Sentences in the launcher wrap: they explain, they are not one-line metadata. */
 .native-launch .event-meta {
