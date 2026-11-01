@@ -102,8 +102,12 @@ A file written here is never presented as applied elsewhere.
 Acknowledgments cover a contiguous prefix of each device's journal. Missing or unsupported
 records, deferred objects and refused content stop that prefix; a later record cannot acknowledge
 an earlier change that has not arrived or was refused. An unchanged acknowledgment is not rewritten.
-The prefix uses the last batch actually processed: a record arriving between application and the
-final status read waits for the next run before it can be acknowledged.
+The prefix uses the last batch actually processed: a record arriving after that batch was read
+waits for the next run before it can be acknowledged. A run that fails or stops writes no
+acknowledgment. The acknowledgment is written after the library committed and the bookkeeping was
+saved; a run stopped between a commit and its bookkeeping is recognized by the next one, which
+matches what the library holds against every received version of the object, so a received change
+is never published back as a local edit or reported as a conflict.
 
 ## Syncthing
 

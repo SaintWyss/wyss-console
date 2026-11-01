@@ -285,15 +285,26 @@ fn reconcile_with_budget(
     host: &str,
     budget: u64,
 ) -> Result<Status, String> {
-    reconcile_before_ack(store, paths, host, budget, || {})
+    reconcile_at(store, paths, host, budget, &mut |_| {})
 }
 
-fn reconcile_before_ack(
+/// Where a run is, for tests that change the shared folder or stop the run at that moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Point {
+    /// A round read the shared folder; what it applies is what it read.
+    Scanned,
+    /// A round applied what it read to the library, before its bookkeeping is saved.
+    Applied,
+    /// Every round is done; the acknowledgment is next.
+    BeforeAck,
+}
+
+fn reconcile_at(
     store: &mut Store,
     paths: &Paths,
     host: &str,
     mut budget: u64,
-    before_ack: impl FnOnce(),
+    at: &mut dyn FnMut(Point),
 ) -> Result<Status, String> {
     for dir in [&paths.local, &paths.staging()] {
         make_dir(dir).map_err(|e| format!("folder: {e}"))?;
@@ -314,6 +325,7 @@ fn reconcile_before_ack(
     let mut last_applied_records = Vec::new();
     for _ in 0..ROUNDS {
         let (records, refused_files) = read_records(paths)?;
+        at(Point::Scanned);
         note_rejected(&mut local, &refused_files);
         let views = materialize(&records);
         deferred.clear();
@@ -328,6 +340,7 @@ fn reconcile_before_ack(
             &mut deferred,
             &mut budget,
         )?;
+        at(Point::Applied);
         for (key, view) in &views {
             if !view.complete {
                 let detail = "journal history is missing parents or has invalid causal references; wait for transport or repair the source journal";
@@ -352,7 +365,7 @@ fn reconcile_before_ack(
             break;
         }
     }
-    before_ack();
+    at(Point::BeforeAck);
     let (records, _) = read_records(paths)?;
     // Acknowledge only records from the final apply pass, not records received after it.
     write_applied(
@@ -434,14 +447,15 @@ fn apply_and_publish(
         let identity = &key["capability/".len()..];
         let here = by_identity.get(identity);
         let content = here.map_or(ABSENT.to_owned(), |c| format!("tree:{}", current_tree(c)));
-        let synced = local.objects.get(key).cloned();
-        let synced_content = synced.as_ref().map_or(ABSENT, |s| s.content.as_str());
         let view = views.get(key);
+        let synced = local
+            .objects
+            .get(key)
+            .cloned()
+            .or_else(|| received(records, view, &content));
+        let synced_content = synced.as_ref().map_or(ABSENT, |s| s.content.as_str());
         // A matching current tree still needs any history delivered later.
-        let dirty = content != synced_content
-            && here.is_some()
-            && !(synced.is_none()
-                && view.is_some_and(|v| content_of(&records[v.chosen].body) == content));
+        let dirty = content != synced_content && here.is_some();
         if dirty {
             let capability = here.expect("dirty means present");
             let base = synced.as_ref().and_then(|s| s.record.clone());
@@ -595,20 +609,13 @@ fn apply_and_publish(
     for key in &keys {
         let here = objects.get(key);
         let content = here.map(content_of);
-        let synced = local.objects.get(key).cloned();
-        if synced.is_none()
-            && let (Some(view), Some(content)) = (views.get(key), &content)
-            && content_of(&records[view.chosen].body) == *content
-        {
-            local.objects.insert(
-                key.clone(),
-                Synced {
-                    record: Some(records[view.chosen].id()),
-                    content: content.clone(),
-                },
-            );
-            continue;
-        }
+        let synced = local.objects.get(key).cloned().or_else(|| {
+            let received = content
+                .as_ref()
+                .and_then(|content| received(records, views.get(key), content))?;
+            local.objects.insert(key.clone(), received.clone());
+            Some(received)
+        });
         let synced_content = synced.as_ref().map(|s| s.content.clone());
         let edited = match (&content, &synced_content) {
             (Some(content), Some(synced)) => content != synced,
@@ -843,6 +850,28 @@ fn resolve_conflicts(
         wrote += 1;
     }
     Ok(wrote)
+}
+
+/// For an object this computer has no bookkeeping for, the newest received version whose content
+/// the library already holds. A run that committed an application and then failed or was stopped
+/// before saving its bookkeeping left exactly that; without it, the next run would publish the
+/// received content back as a local edit and, once the sender moved on, report a false conflict.
+fn received(records: &[Record], view: Option<&View>, content: &str) -> Option<Synced> {
+    let view = view?;
+    let chosen = &records[view.chosen];
+    let record = if content_of(&chosen.body) == content {
+        chosen
+    } else {
+        view.all
+            .iter()
+            .rev()
+            .map(|&i| &records[i])
+            .find(|r| content_of(&r.body) == content)?
+    };
+    Some(Synced {
+        record: Some(record.id()),
+        content: content.to_owned(),
+    })
 }
 
 /// Supersede only heads whose content the local owner actually observed.

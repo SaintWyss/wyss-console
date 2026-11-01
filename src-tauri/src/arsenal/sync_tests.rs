@@ -16,12 +16,16 @@ fn review_a_record_arriving_after_apply_is_not_acknowledged_until_the_next_run()
     let late = acer.paths.devices().join(&device).join(record_name(2));
     let held = dir.join("held-until-after-apply");
     fs::rename(&late, &held).unwrap();
-    reconcile_before_ack(
+    reconcile_at(
         &mut desk.store,
         &desk.paths,
         desk.host,
         MAX_BLOB_BYTES_PER_RUN,
-        || fs::rename(&held, &late).unwrap(),
+        &mut |point| {
+            if point == Point::BeforeAck {
+                fs::rename(&held, &late).unwrap();
+            }
+        },
     )
     .unwrap();
     assert_eq!(desk.preset_names(), vec!["First"]);
@@ -36,6 +40,380 @@ fn review_a_record_arriving_after_apply_is_not_acknowledged_until_the_next_run()
     desk.sync();
     assert_eq!(desk.preset_names(), vec!["First", "Late"]);
     assert_eq!(read_applied(&journal).unwrap().seen[&device], 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Acknowledgment: a record is acknowledged only once the library committed it
+
+/// The highest record of `of` that `m` acknowledges as applied.
+fn acked(m: &Machine, of: &Machine) -> u64 {
+    let journal = Dir::open(&m.paths, &["v1", "devices", &device_of(m)], false)
+        .unwrap()
+        .unwrap();
+    read_applied(&journal)
+        .and_then(|applied| applied.seen.get(&device_of(of)).copied())
+        .unwrap_or(0)
+}
+
+/// A computer whose library is a file, so a second connection can make its writes fail.
+fn machine_on_disk(shared: &Path, host: &'static str) -> (Machine, PathBuf) {
+    let db = shared.with_extension(format!("{host}.db"));
+    let mut m = machine(shared, host);
+    m.store = Store::open(Connection::open(&db).unwrap()).unwrap();
+    (m, db)
+}
+
+fn own_records(m: &Machine) -> usize {
+    let journal = m.paths.devices().join(device_of(m));
+    fs::read_dir(journal)
+        .unwrap()
+        .flatten()
+        .filter(|f| parse_record_name(&f.file_name().to_string_lossy()).is_some())
+        .count()
+}
+
+#[test]
+fn ack_a_record_arriving_during_the_final_scan_waits_for_the_next_run() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    preset(&mut acer, "First", vec![]);
+    acer.sync();
+    desk.sync();
+    preset(&mut acer, "Late", vec![]);
+    acer.sync();
+    let late = acer
+        .paths
+        .devices()
+        .join(device_of(&acer))
+        .join(record_name(2));
+    let held = dir.join("held-during-scan");
+    fs::rename(&late, &held).unwrap();
+    // The synchronizer finishes writing the file just after this run read the folder: every
+    // later read of the run (conflicts, status, acknowledgment) sees it, the apply did not.
+    let mut delivered = false;
+    reconcile_at(
+        &mut desk.store,
+        &desk.paths,
+        desk.host,
+        MAX_BLOB_BYTES_PER_RUN,
+        &mut |point| {
+            if point == Point::Scanned && !delivered {
+                fs::rename(&held, &late).unwrap();
+                delivered = true;
+            }
+        },
+    )
+    .unwrap();
+    assert!(delivered);
+    assert_eq!(desk.preset_names(), vec!["First"]);
+    assert_eq!(
+        acked(&desk, &acer),
+        1,
+        "only the committed record is acknowledged"
+    );
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["First", "Late"]);
+    assert_eq!(acked(&desk, &acer), 2);
+    let status = acer.sync();
+    assert_eq!(status.peers[0].applied_mine, status.peers[0].published_mine);
+}
+
+#[test]
+fn ack_a_failed_database_transaction_is_never_acknowledged_and_the_retry_applies_it() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let (mut desk, db) = machine_on_disk(&dir, "Santiago-PC");
+    preset(&mut acer, "First", vec![]);
+    acer.sync();
+    desk.sync();
+    assert_eq!(acked(&desk, &acer), 1);
+    preset(&mut acer, "Second", vec![]);
+    acer.skill("design", "one");
+    acer.sync();
+    let published = own_records(&acer) as u64;
+    let applied_before = fs::read(
+        desk.paths
+            .devices()
+            .join(device_of(&desk))
+            .join("applied.json"),
+    )
+    .unwrap();
+    let state_before = fs::read(desk.paths.local.join("state.json")).unwrap();
+    // SQLite aborts the preset write inside its transaction, after the capability committed.
+    let other = Connection::open(&db).unwrap();
+    other
+        .execute_batch(
+            "CREATE TRIGGER injected_failure BEFORE INSERT ON preset \
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    for _ in 0..2 {
+        assert!(reconcile(&mut desk.store, &desk.paths, desk.host).is_err());
+        assert_eq!(
+            desk.preset_names(),
+            vec!["First"],
+            "the aborted write left nothing"
+        );
+        assert_eq!(
+            fs::read(
+                desk.paths
+                    .devices()
+                    .join(device_of(&desk))
+                    .join("applied.json")
+            )
+            .unwrap(),
+            applied_before,
+            "a failed run writes no acknowledgment"
+        );
+        assert_eq!(
+            fs::read(desk.paths.local.join("state.json")).unwrap(),
+            state_before
+        );
+    }
+    assert_eq!(desk.store.integrity().unwrap(), "ok");
+    // The capability committed before the failure; the retry must neither republish nor duplicate it.
+    assert_eq!(desk.names(), vec!["design"]);
+    other
+        .execute_batch("DROP TRIGGER injected_failure;")
+        .unwrap();
+    // A failure inside a capability import is not acknowledged either.
+    acer.skill("design", "two");
+    acer.sync();
+    let published_two = own_records(&acer) as u64;
+    other
+        .execute_batch(
+            "CREATE TRIGGER injected_revision_failure BEFORE INSERT ON revision \
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    assert!(reconcile(&mut desk.store, &desk.paths, desk.host).is_err());
+    assert_eq!(acked(&desk, &acer), 1);
+    assert!(published > 1);
+    other
+        .execute_batch("DROP TRIGGER injected_revision_failure;")
+        .unwrap();
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["First", "Second"]);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(acked(&desk, &acer), published_two);
+    assert_eq!(
+        own_records(&desk),
+        0,
+        "applying a peer's records publishes nothing"
+    );
+    assert_eq!(desk.store.integrity().unwrap(), "ok");
+}
+
+#[test]
+fn ack_a_committed_run_followed_by_retries_changes_nothing() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let design = acer.skill("design", "one");
+    preset(
+        &mut acer,
+        "Uses design",
+        vec![Item {
+            capability: design,
+            revision: None,
+        }],
+    );
+    acer.sync();
+    desk.sync();
+    let applied = desk
+        .paths
+        .devices()
+        .join(device_of(&desk))
+        .join("applied.json");
+    let ack = fs::read(&applied).unwrap();
+    let names = (desk.names(), desk.preset_names());
+    let records = record_files(&dir);
+    let generation = desk.sync().generation;
+    for _ in 0..3 {
+        let status = desk.sync();
+        assert_eq!(status.generation, generation, "a retry changes no library");
+        assert!(status.conflicts.is_empty() && status.pending.is_empty());
+    }
+    assert_eq!((desk.names(), desk.preset_names()), names);
+    assert_eq!(record_files(&dir), records, "a retry publishes nothing");
+    assert_eq!(
+        fs::read(&applied).unwrap(),
+        ack,
+        "the acknowledgment is not rewritten"
+    );
+    assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
+}
+
+#[test]
+fn ack_duplicate_delivery_creates_no_duplicate_objects() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "one");
+    preset(&mut acer, "First", vec![]);
+    preset(&mut acer, "Second", vec![]);
+    acer.sync();
+    desk.sync();
+    let journal = acer.paths.devices().join(device_of(&acer));
+    let last = own_records(&acer) as u64;
+    let file = journal.join(record_name(last));
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(acked(&desk, &acer), last);
+    // The synchronizer delivers the same file again (a new inode with the same bytes), keeps a
+    // conflict copy of it, and takes it away and brings it back.
+    fs::remove_file(&file).unwrap();
+    fs::write(&file, &bytes).unwrap();
+    fs::write(
+        journal.join(format!(
+            "r-{last:010}.sync-conflict-20261101-120000-ABCDEFG.json"
+        )),
+        &bytes,
+    )
+    .unwrap();
+    desk.sync();
+    let held = dir.join("held-duplicate");
+    fs::rename(&file, &held).unwrap();
+    desk.sync();
+    fs::rename(&held, &file).unwrap();
+    let status = desk.sync();
+    assert_eq!(desk.preset_names(), vec!["First", "Second"]);
+    assert_eq!(desk.names(), vec!["design"]);
+    assert_eq!(desk.cap("design").revisions.len(), 1);
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    assert_eq!(own_records(&desk), 0, "nothing is republished");
+    assert_eq!(acked(&desk, &acer), last);
+    acer.sync();
+    assert_eq!(acer.preset_names(), vec!["First", "Second"]);
+}
+
+#[test]
+fn ack_an_interrupted_reconciliation_resumes_without_duplicates_or_false_acknowledgment() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "one");
+    let first = preset(&mut acer, "First", vec![]);
+    let gone = preset(&mut acer, "Gone", vec![]);
+    acer.sync();
+    desk.sync();
+    let before = acked(&desk, &acer);
+    acer.skill("design", "two");
+    acer.store
+        .put_preset(
+            &first,
+            &PresetInput {
+                id: None,
+                name: "First, edited".into(),
+                description: "d".into(),
+                items: vec![],
+            },
+        )
+        .unwrap();
+    acer.store.delete_preset(&gone).unwrap();
+    acer.sync();
+    // The process stops after the library committed the round and before its bookkeeping and
+    // acknowledgment were written.
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reconcile_at(
+            &mut desk.store,
+            &desk.paths,
+            desk.host,
+            MAX_BLOB_BYTES_PER_RUN,
+            &mut |point| {
+                if point == Point::Applied {
+                    panic!("interrupted");
+                }
+            },
+        )
+    }));
+    assert!(stopped.is_err());
+    assert_eq!(
+        desk.preset_names(),
+        vec!["First, edited"],
+        "the library committed"
+    );
+    assert_eq!(
+        acked(&desk, &acer),
+        before,
+        "nothing is acknowledged by a stopped run"
+    );
+    // The next runs on both computers converge without a conflict, a copy or a resurrection.
+    let status = desk.sync();
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    acer.sync();
+    let status = desk.sync();
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    assert_eq!(acer.sync().conflicts, vec![]);
+    for m in [&acer, &desk] {
+        assert_eq!(m.preset_names(), vec!["First, edited"]);
+        assert_eq!(m.names(), vec!["design"]);
+        assert_eq!(m.cap("design").revisions.len(), 2);
+        assert_eq!(m.store.integrity().unwrap(), "ok");
+    }
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
+}
+
+#[test]
+fn ack_an_interrupted_first_application_is_not_republished_after_the_sender_moves_on() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let design = acer.skill("design", "one");
+    let id = preset(
+        &mut acer,
+        "Uses design",
+        vec![Item {
+            capability: design,
+            revision: None,
+        }],
+    );
+    acer.sync();
+    // The first application commits both objects and stops before its bookkeeping is saved.
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reconcile_at(
+            &mut desk.store,
+            &desk.paths,
+            desk.host,
+            MAX_BLOB_BYTES_PER_RUN,
+            &mut |point| {
+                if point == Point::Applied {
+                    panic!("interrupted");
+                }
+            },
+        )
+    }));
+    assert!(stopped.is_err());
+    assert_eq!(desk.preset_names(), vec!["Uses design"]);
+    assert_eq!(acked(&desk, &acer), 0);
+    // Before it runs again, the sender edits both.
+    acer.skill("design", "two");
+    acer.store
+        .put_preset(
+            &id,
+            &PresetInput {
+                id: None,
+                name: "Uses design, edited".into(),
+                description: "d".into(),
+                items: vec![],
+            },
+        )
+        .unwrap();
+    acer.sync();
+    let status = desk.sync();
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    assert_eq!(
+        own_records(&desk),
+        0,
+        "what was received is not published back as a local edit"
+    );
+    assert_eq!(desk.preset_names(), vec!["Uses design, edited"]);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
+    acer.sync();
+    assert_eq!(acer.preset_names(), vec!["Uses design, edited"]);
 }
 
 /// One computer: its own library and bookkeeping, and the folder both computers share.
