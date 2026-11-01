@@ -2,6 +2,42 @@ use super::*;
 use crate::arsenal::store::{Store, identity};
 use rusqlite::Connection;
 
+#[test]
+fn review_a_record_arriving_after_apply_is_not_acknowledged_until_the_next_run() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    preset(&mut acer, "First", vec![]);
+    acer.sync();
+    desk.sync();
+    preset(&mut acer, "Late", vec![]);
+    acer.sync();
+    let device = device_of(&acer);
+    let late = acer.paths.devices().join(&device).join(record_name(2));
+    let held = dir.join("held-until-after-apply");
+    fs::rename(&late, &held).unwrap();
+    reconcile_before_ack(
+        &mut desk.store,
+        &desk.paths,
+        desk.host,
+        MAX_BLOB_BYTES_PER_RUN,
+        || fs::rename(&held, &late).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(desk.preset_names(), vec!["First"]);
+    let journal = Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        read_applied(&journal).unwrap().seen[&device],
+        1,
+        "transport receipt after apply is not evidence of database application"
+    );
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["First", "Late"]);
+    assert_eq!(read_applied(&journal).unwrap().seen[&device], 2);
+}
+
 /// One computer: its own library and bookkeeping, and the folder both computers share.
 struct Machine {
     store: Store,
@@ -315,6 +351,13 @@ fn a_deletion_travels_but_never_wins_over_an_edit() {
     acer.sync();
     assert_eq!(acer.preset_names(), vec!["Kept and edited"]);
     assert_eq!(desk.preset_names(), vec!["Kept and edited"]);
+    let (records, _) = read_records(&desk.paths).unwrap();
+    assert!(materialize(&records).values().all(|view| view.complete));
+    assert!(desk.sync().pending.is_empty());
+    let count = record_files(&dir);
+    acer.sync();
+    desk.sync();
+    assert_eq!(record_files(&dir), count);
 }
 
 #[test]
@@ -756,4 +799,1141 @@ fn what_another_computer_deletes_is_kept_here_and_reported() {
     assert!(matches!(body, Body::Preset(p) if p.name == "Deleted elsewhere"));
     // The computer that deleted it keeps no copy: it was deleted there by its owner.
     assert!(!acer.paths.local.join("trash").exists());
+}
+
+#[test]
+fn review_acknowledgment_does_not_skip_a_record_still_in_transport() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    preset(&mut acer, "First", vec![]);
+    preset(&mut acer, "Second", vec![]);
+    acer.sync();
+    let device = device_of(&acer);
+    let first = acer.paths.devices().join(&device).join(record_name(1));
+    let held = dir.join("held-record");
+    fs::rename(&first, &held).unwrap();
+    desk.sync();
+    let journal = Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+        .unwrap()
+        .unwrap();
+    let applied = read_applied(&journal).unwrap();
+    assert_eq!(applied.seen.get(&device).copied().unwrap_or(0), 0);
+    fs::rename(held, first).unwrap();
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["First", "Second"]);
+    assert_eq!(read_applied(&journal).unwrap().seen[&device], 2);
+}
+
+#[test]
+fn review_refused_content_is_not_acknowledged_as_applied() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    // The store accepts raw library bytes; incoming synchronization applies the stricter
+    // import boundary. A refusal must never become an "applied" acknowledgment.
+    let mut secret = skill("credential-fixture", "safe");
+    secret.files.push(("auth.json".into(), b"{}".to_vec()));
+    acer.store.import(&secret).unwrap();
+    acer.sync();
+    let status = desk.sync();
+    assert!(!status.rejected.is_empty());
+    let journal = Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        read_applied(&journal)
+            .unwrap()
+            .seen
+            .get(&device_of(&acer))
+            .copied()
+            .unwrap_or(0),
+        0
+    );
+}
+
+#[test]
+fn review_late_history_is_imported_even_when_the_current_head_is_unchanged() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = acer.skill("design", "old");
+    acer.skill("design", "new");
+    preset(
+        &mut acer,
+        "Pinned",
+        vec![Item {
+            capability: id,
+            revision: Some(1),
+        }],
+    );
+    acer.sync();
+    let first = acer
+        .paths
+        .devices()
+        .join(device_of(&acer))
+        .join(record_name(1));
+    let held = dir.join("held-history");
+    fs::rename(&first, &held).unwrap();
+    let before = record_files(&dir);
+    for _ in 0..2 {
+        let status = desk.sync();
+        assert!(
+            status
+                .pending
+                .iter()
+                .any(|n| n.detail.contains("journal history"))
+        );
+        assert_eq!(desk.cap("design").revisions.len(), 1);
+        let journal = Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            read_applied(&journal).unwrap().seen.get(&device_of(&acer)),
+            None
+        );
+        assert_eq!(
+            record_files(&dir),
+            before,
+            "partial imports are not owner edits"
+        );
+    }
+    fs::rename(held, first).unwrap();
+    let status = desk.sync();
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(desk.preset_names(), vec!["Pinned"]);
+    assert!(status.pending.is_empty());
+}
+
+#[test]
+fn review_history_larger_than_one_run_eventually_finishes() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "old");
+    acer.skill("design", "new");
+    acer.sync();
+    let (records, _) = read_records(&acer.paths).unwrap();
+    let views = materialize(&records);
+    let view = views.values().next().unwrap();
+    let Body::Capability(body) = &records[view.chosen].body else {
+        panic!()
+    };
+    let allowance = body.files.iter().map(|f| f.size).sum::<u64>();
+    let mut budget = allowance;
+    assert!(matches!(
+        apply_capability(&mut desk.store, &desk.paths, &records, view, &mut budget),
+        Err(Applying::Wait(_))
+    ));
+    let mut budget = allowance;
+    assert!(apply_capability(&mut desk.store, &desk.paths, &records, view, &mut budget).is_ok());
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+}
+
+#[test]
+fn review_independent_conflict_merges_do_not_resurrect_a_later_deletion() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = preset(&mut acer, "Original", vec![]);
+    acer.sync();
+    desk.sync();
+    let key = format!("preset/{id}");
+    // Both offline edits use the same base. Both computers then resolve the same snapshot
+    // before either machine receives the other machine's merge.
+    for m in [&mut acer, &mut desk] {
+        let mut local = load_local(&m.paths).unwrap();
+        let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        let base = local.objects[&key].record.clone();
+        publish(
+            &m.paths,
+            &journal,
+            m.host,
+            &mut local,
+            &key,
+            base,
+            vec![],
+            Body::Preset(PresetBody {
+                name: m.host.into(),
+                description: "edit".into(),
+                items: vec![],
+            }),
+        )
+        .unwrap();
+    }
+    let (records, _) = read_records(&acer.paths).unwrap();
+    let views = materialize(&records);
+    assert!(views[&key].conflict);
+    for m in [&mut acer, &mut desk] {
+        let mut local = load_local(&m.paths).unwrap();
+        let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        resolve_conflicts(&m.paths, &journal, m.host, &mut local, &records, &views).unwrap();
+    }
+    acer.sync();
+    desk.sync();
+    acer.sync();
+    acer.store.delete_preset(&id).unwrap();
+    acer.sync();
+    desk.sync();
+    acer.sync();
+    assert!(!acer.store.presets().unwrap().iter().any(|p| p.id == id));
+    assert!(!desk.store.presets().unwrap().iter().any(|p| p.id == id));
+    assert_eq!(acer.preset_names(), desk.preset_names());
+}
+
+#[test]
+fn review_directory_limit_counts_non_utf8_names() {
+    use std::os::unix::ffi::OsStringExt;
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    acer.sync();
+    let folder = Dir::open(&acer.paths, &["v1", "blobs"], false)
+        .unwrap()
+        .unwrap();
+    for n in 0..3 {
+        let name = std::ffi::OsString::from_vec(vec![0xff, n + 1]);
+        fs::write(acer.paths.blobs().join(name), b"").unwrap();
+    }
+    assert!(folder.names(2).is_err());
+}
+
+#[test]
+fn review_excess_devices_fail_instead_of_silently_omitting_a_peer() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    acer.sync();
+    for n in 0..MAX_DEVICES {
+        fs::create_dir_all(acer.paths.devices().join(format!("{n:032x}"))).unwrap();
+    }
+    assert!(read_records(&acer.paths).is_err());
+}
+
+#[test]
+fn review_global_record_limit_counts_rejected_files_before_applying_anything() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    preset(&mut acer, "Must not partially apply", vec![]);
+    acer.sync();
+    for n in 0..2 {
+        let folder = acer.paths.devices().join(format!("{n:032x}"));
+        fs::create_dir_all(&folder).unwrap();
+        for seq in 1..=(MAX_RECORDS / 2 + 1) {
+            fs::write(folder.join(record_name(seq as u64)), b"").unwrap();
+        }
+    }
+    assert!(reconcile(&mut desk.store, &desk.paths, desk.host).is_err());
+    assert!(desk.preset_names().is_empty());
+}
+
+#[test]
+fn review_oversize_tree_is_rejected_before_reading_its_blobs() {
+    let mut body = CapabilityBody {
+        provider: "claude_code".into(),
+        source: "claude_user_skills".into(),
+        kind: "skill".into(),
+        name: "large".into(),
+        description: "".into(),
+        origin: "".into(),
+        tree_hash: String::new(),
+        files: vec![],
+    };
+    for n in 0..=(MAX_TREE_BYTES / MAX_FILE_BYTES) {
+        body.files.push(FileRef {
+            path: format!("f-{n}.md"),
+            sha256: "a".repeat(64),
+            size: MAX_FILE_BYTES as u64,
+        });
+    }
+    let mut entries: Vec<_> = body
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.sha256.as_str()))
+        .collect();
+    body.tree_hash = tree_of_digests(&mut entries);
+    assert!(
+        check_capability(
+            &identity("claude_code", "skill", "claude_user_skills", "large"),
+            &body
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn review_budget_limited_reconciliation_checkpoints_partial_history_without_publication() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "old");
+    acer.skill("design", "new");
+    acer.sync();
+    let (records, _) = read_records(&acer.paths).unwrap();
+    let Body::Capability(body) = &records.last().unwrap().body else {
+        panic!()
+    };
+    let allowance = body.files.iter().map(|f| f.size).sum();
+    let before = record_files(&dir);
+    let first = reconcile_with_budget(&mut desk.store, &desk.paths, desk.host, allowance).unwrap();
+    assert!(!first.pending.is_empty());
+    assert_eq!(desk.cap("design").revisions.len(), 1);
+    let checkpoint = load_local(&desk.paths).unwrap();
+    assert!(checkpoint.generation > 0);
+    let key = records[0].object.clone();
+    assert_eq!(
+        checkpoint.objects[&key].content,
+        format!("tree:{}", desk.tree("design"))
+    );
+    let second = reconcile_with_budget(&mut desk.store, &desk.paths, desk.host, allowance).unwrap();
+    assert!(second.pending.is_empty());
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(
+        record_files(&dir),
+        before,
+        "partial import must not publish an owner edit"
+    );
+    desk.sync();
+    assert_eq!(record_files(&dir), before);
+}
+
+#[test]
+fn review_missing_old_blob_does_not_starve_current_revision() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "old");
+    acer.skill("design", "new");
+    acer.sync();
+    let (records, _) = read_records(&acer.paths).unwrap();
+    let Body::Capability(old) = &records[0].body else {
+        panic!()
+    };
+    let blob = acer.paths.blobs().join(&old.files[0].sha256);
+    let held = dir.join("held-old-blob");
+    fs::rename(&blob, &held).unwrap();
+    let Body::Capability(current) = &records[1].body else {
+        panic!()
+    };
+    let allowance = current.files.iter().map(|f| f.size).sum();
+    let status = reconcile_with_budget(&mut desk.store, &desk.paths, desk.host, allowance).unwrap();
+    assert!(!status.pending.is_empty());
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    fs::rename(held, blob).unwrap();
+    desk.sync();
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+}
+
+#[test]
+fn review_invalid_history_does_not_poison_subsequent_good_revisions() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let mut invalid = skill("design", "old");
+    invalid.files.push(("auth.json".into(), b"{}".to_vec()));
+    acer.store.import(&invalid).unwrap();
+    acer.skill("design", "new");
+    acer.sync();
+    let status = desk.sync();
+    assert!(!status.rejected.is_empty());
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(desk.cap("design").revisions.len(), 1);
+    acer.skill("design", "newest");
+    acer.sync();
+    desk.sync();
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    let local = load_local(&desk.paths).unwrap();
+    assert!(
+        local
+            .refused
+            .contains_key(&format!("{}:1", device_of(&acer)))
+    );
+}
+
+#[test]
+fn review_equal_selection_heads_do_not_resurrect_after_an_edit_or_deletion() {
+    for delete in [false, true] {
+        let dir = shared();
+        let mut acer = machine(&dir, "saint-acer");
+        let mut desk = machine(&dir, "Santiago-PC");
+        let id = acer
+            .store
+            .save_selection(&SelectionInput {
+                id: None,
+                name: "Original".into(),
+                provider: "codex".into(),
+                items: vec![],
+                composites: vec![],
+            })
+            .unwrap()
+            .id;
+        acer.sync();
+        desk.sync();
+        let key = format!("selection/{id}");
+        let (records, _) = read_records(&acer.paths).unwrap();
+        let original = records.iter().find(|r| r.object == key).unwrap();
+        // Independently published equal-content heads, as produced by parallel merges.
+        for m in [&mut acer, &mut desk] {
+            let mut local = load_local(&m.paths).unwrap();
+            let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+                .unwrap()
+                .unwrap();
+            publish(
+                &m.paths,
+                &journal,
+                m.host,
+                &mut local,
+                &key,
+                Some(original.id()),
+                vec![],
+                original.body.clone(),
+            )
+            .unwrap();
+        }
+        acer.sync();
+        desk.sync();
+        let (records, _) = read_records(&acer.paths).unwrap();
+        let view = &materialize(&records)[&key];
+        assert!(!view.conflict);
+        assert_eq!(records[view.chosen].body, original.body);
+        if delete {
+            acer.store.delete_selection(&id).unwrap();
+        } else {
+            acer.store
+                .save_selection(&SelectionInput {
+                    id: Some(id.clone()),
+                    name: "Further edit".into(),
+                    provider: "codex".into(),
+                    items: vec![],
+                    composites: vec![],
+                })
+                .unwrap();
+        }
+        acer.sync();
+        desk.sync();
+        acer.sync();
+        let selections = desk.store.selections().unwrap();
+        if delete {
+            assert!(!selections.iter().any(|s| s.id == id));
+        } else {
+            assert_eq!(
+                selections.iter().find(|s| s.id == id).unwrap().name,
+                "Further edit"
+            );
+        }
+        let (records, _) = read_records(&acer.paths).unwrap();
+        assert_eq!(materialize(&records)[&key].heads.len(), 1);
+        let count = record_files(&dir);
+        desk.sync();
+        acer.sync();
+        assert_eq!(record_files(&dir), count);
+    }
+}
+
+#[test]
+fn review_held_trees_do_not_require_blobs_to_be_read_again() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "old");
+    acer.skill("design", "new");
+    acer.sync();
+    desk.sync();
+    for entry in fs::read_dir(acer.paths.blobs()).unwrap() {
+        let entry = entry.unwrap();
+        fs::rename(entry.path(), dir.join(entry.file_name())).unwrap();
+    }
+    let before = record_files(&dir);
+    let status = desk.sync();
+    assert!(status.pending.is_empty());
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(record_files(&dir), before);
+}
+
+#[test]
+fn review_a_late_duplicate_merge_does_not_resurrect_deleted_objects() {
+    for selection in [false, true] {
+        let dir = shared();
+        let mut acer = machine(&dir, "saint-acer");
+        let mut desk = machine(&dir, "Santiago-PC");
+        let id = if selection {
+            acer.store
+                .save_selection(&SelectionInput {
+                    id: None,
+                    name: "Original".into(),
+                    provider: "codex".into(),
+                    items: vec![],
+                    composites: vec![],
+                })
+                .unwrap()
+                .id
+        } else {
+            preset(&mut acer, "Original", vec![])
+        };
+        acer.sync();
+        desk.sync();
+        let kind = if selection { "selection" } else { "preset" };
+        let key = format!("{kind}/{id}");
+        for m in [&mut acer, &mut desk] {
+            let mut local = load_local(&m.paths).unwrap();
+            let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+                .unwrap()
+                .unwrap();
+            let base = local.objects[&key].record.clone();
+            let body = if selection {
+                Body::Selection(SelectionBody {
+                    name: m.host.into(),
+                    provider: "codex".into(),
+                    items: vec![],
+                    composites: vec![],
+                })
+            } else {
+                Body::Preset(PresetBody {
+                    name: m.host.into(),
+                    description: "offline edit".into(),
+                    items: vec![],
+                })
+            };
+            publish(
+                &m.paths,
+                &journal,
+                m.host,
+                &mut local,
+                &key,
+                base,
+                vec![],
+                body,
+            )
+            .unwrap();
+        }
+        let (snapshot, _) = read_records(&acer.paths).unwrap();
+        let views = materialize(&snapshot);
+        let desk_before = last_seq(
+            &Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        for m in [&mut acer, &mut desk] {
+            let mut local = load_local(&m.paths).unwrap();
+            let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+                .unwrap()
+                .unwrap();
+            resolve_conflicts(&m.paths, &journal, m.host, &mut local, &snapshot, &views).unwrap();
+        }
+        // Syncthing has not yet delivered the other machine's identical merge and copy.
+        let journal = desk.paths.devices().join(device_of(&desk));
+        let held = dir.join("held-late-merges");
+        fs::create_dir_all(&held).unwrap();
+        for entry in fs::read_dir(&journal).unwrap().flatten() {
+            if parse_record_name(&entry.file_name().to_string_lossy())
+                .is_some_and(|seq| seq > desk_before)
+            {
+                fs::rename(entry.path(), held.join(entry.file_name())).unwrap();
+            }
+        }
+        acer.sync();
+        let ids: Vec<_> = if selection {
+            acer.store
+                .selections()
+                .unwrap()
+                .into_iter()
+                .map(|s| s.id)
+                .collect()
+        } else {
+            acer.store
+                .presets()
+                .unwrap()
+                .into_iter()
+                .map(|p| p.id)
+                .collect()
+        };
+        assert_eq!(ids.len(), 2);
+        for id in &ids {
+            if selection {
+                acer.store.delete_selection(id).unwrap();
+            } else {
+                acer.store.delete_preset(id).unwrap();
+            }
+            acer.sync();
+        }
+        assert!(acer.store.presets().unwrap().is_empty());
+        assert!(acer.store.selections().unwrap().is_empty());
+        for entry in fs::read_dir(&held).unwrap().flatten() {
+            fs::rename(entry.path(), journal.join(entry.file_name())).unwrap();
+        }
+        desk.sync();
+        acer.sync();
+        desk.sync();
+        for m in [&acer, &desk] {
+            assert!(
+                m.store.presets().unwrap().is_empty(),
+                "a delayed equivalent merge is not a new owner edit"
+            );
+            assert!(
+                m.store.selections().unwrap().is_empty(),
+                "a delayed equivalent selection is not a new owner edit"
+            );
+        }
+        let count = record_files(&dir);
+        acer.sync();
+        desk.sync();
+        assert_eq!(record_files(&dir), count);
+    }
+}
+
+fn semantic_record(seq: u64, parents: &[u64], body: Body) -> Record {
+    Record {
+        schema: SCHEMA.into(),
+        device: "semantic-fixture".into(),
+        host: "fixture".into(),
+        seq,
+        at: seq as i64,
+        object: "preset/semantic-fixture".into(),
+        base: parents.first().map(|id| format!("semantic-fixture:{id}")),
+        merged: parents
+            .iter()
+            .skip(1)
+            .map(|id| format!("semantic-fixture:{id}"))
+            .collect(),
+        body,
+    }
+}
+
+#[test]
+fn review_semantic_duplicates_require_equal_parent_sets() {
+    for body in [
+        Body::Preset(PresetBody {
+            name: "Same".into(),
+            description: "".into(),
+            items: vec![],
+        }),
+        Body::Selection(SelectionBody {
+            name: "Same".into(),
+            provider: "codex".into(),
+            items: vec![],
+            composites: vec![],
+        }),
+    ] {
+        let mut records = vec![
+            semantic_record(1, &[], body.clone()),
+            semantic_record(2, &[1], body.clone()),
+            semantic_record(3, &[2], Body::Deleted),
+        ];
+        // A second physical ID for version 2 has exactly the same semantic parents.
+        // Even a much newer timestamp cannot defeat its causal successor's tombstone.
+        records.push(semantic_record(4, &[1], body.clone()));
+        let views = materialize(&records);
+        let view = &views["preset/semantic-fixture"];
+        assert_eq!(records[view.chosen].body, Body::Deleted);
+        assert_eq!(view.heads.len(), 1);
+        assert_eq!(view.all.len(), 4);
+        // Equal content reached through a different ancestry is a real concurrent edit.
+        let different = match &body {
+            Body::Preset(preset) => Body::Preset(PresetBody {
+                name: "Concurrent ancestor".into(),
+                ..preset.clone()
+            }),
+            Body::Selection(selection) => Body::Selection(SelectionBody {
+                name: "Concurrent ancestor".into(),
+                ..selection.clone()
+            }),
+            _ => unreachable!(),
+        };
+        records.push(semantic_record(5, &[1], different));
+        records.push(semantic_record(6, &[5], body.clone()));
+        let views = materialize(&records);
+        let view = &views["preset/semantic-fixture"];
+        assert_eq!(records[view.chosen].id(), records[5].id());
+        assert_eq!(records[view.chosen].body, body);
+        assert!(view.conflict);
+        assert_eq!(view.heads.len(), 2);
+    }
+}
+
+#[test]
+fn review_semantic_parent_sets_ignore_order_and_duplicate_ids() {
+    let body = Body::Preset(PresetBody {
+        name: "Same".into(),
+        description: "".into(),
+        items: vec![],
+    });
+    let records = vec![
+        semantic_record(1, &[98], body.clone()),
+        semantic_record(2, &[99], body.clone()),
+        semantic_record(3, &[1, 2], body.clone()),
+        semantic_record(4, &[2, 1, 2], body),
+        semantic_record(5, &[3], Body::Deleted),
+    ];
+    let (versions, complete) = semantic_versions(&records, &[0, 1, 2, 3, 4]);
+    assert!(!complete); // The fixture deliberately retains unknown parents 98 and 99.
+    assert_eq!(versions[&records[2].id()], versions[&records[3].id()]);
+    let views = materialize(&records);
+    let view = &views["preset/semantic-fixture"];
+    assert_eq!(records[view.chosen].body, Body::Deleted);
+    assert_eq!(view.heads.len(), 1);
+    let mut reversed = records.clone();
+    reversed.reverse();
+    let views = materialize(&reversed);
+    assert_eq!(
+        reversed[views["preset/semantic-fixture"].chosen].id(),
+        records[4].id()
+    );
+}
+
+#[test]
+fn review_semantic_normalization_is_iterative_and_cycles_stay_distinct() {
+    let body = Body::Preset(PresetBody {
+        name: "Chain".into(),
+        description: "".into(),
+        items: vec![],
+    });
+    let mut records = Vec::new();
+    // Two equivalent chains require transitive normalization at every level. This depth
+    // must not recurse, expand ancestor sets, or repeatedly scan the entire graph.
+    for level in 0..8192_u64 {
+        let left = level * 2 + 1;
+        let left_parent = if level == 0 { None } else { Some(left - 2) };
+        let right_parent = if level == 0 { None } else { Some(left - 1) };
+        records.push(semantic_record(left, left_parent.as_slice(), body.clone()));
+        records.push(semantic_record(
+            left + 1,
+            right_parent.as_slice(),
+            body.clone(),
+        ));
+    }
+    records.push(semantic_record(16_385, &[16_383], Body::Deleted));
+    records.reverse(); // Dependencies need not appear before children in the input.
+    let views = materialize(&records);
+    let view = &views["preset/semantic-fixture"];
+    assert_eq!(records[view.chosen].body, Body::Deleted);
+    assert_eq!(view.heads.len(), 1);
+    assert_eq!(view.all.len(), records.len());
+
+    let cyclic = vec![
+        semantic_record(1, &[2], body.clone()),
+        semantic_record(2, &[1], body.clone()),
+        semantic_record(3, &[1], body), // Dependent on the cycle also stays raw.
+        semantic_record(4, &[3], Body::Deleted),
+    ];
+    let (versions, complete) = semantic_versions(&cyclic, &[0, 1, 2, 3]);
+    assert!(!complete);
+    for record in &cyclic {
+        assert_eq!(versions[&record.id()], format!("record:{}", record.id()));
+    }
+    let views = materialize(&cyclic[..2]);
+    let view = &views["preset/semantic-fixture"];
+    assert_eq!(view.heads.len(), 1);
+    assert_eq!(cyclic[view.chosen].seq, 2); // Existing bounded cycle fallback.
+    let views = materialize(&cyclic);
+    assert_eq!(
+        cyclic[views["preset/semantic-fixture"].chosen].body,
+        Body::Deleted
+    );
+}
+
+#[test]
+fn review_tombstone_before_its_parent_merge_does_not_create_a_resurrection_merge() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = preset(&mut acer, "Original", vec![]);
+    acer.sync();
+    desk.sync();
+    let key = format!("preset/{id}");
+    for m in [&mut acer, &mut desk] {
+        let mut local = load_local(&m.paths).unwrap();
+        let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        let base = local.objects[&key].record.clone();
+        publish(
+            &m.paths,
+            &journal,
+            m.host,
+            &mut local,
+            &key,
+            base,
+            vec![],
+            Body::Preset(PresetBody {
+                name: m.host.into(),
+                description: "offline edit".into(),
+                items: vec![],
+            }),
+        )
+        .unwrap();
+    }
+    let (snapshot, _) = read_records(&acer.paths).unwrap();
+    let views = materialize(&snapshot);
+    let a_journal = acer.paths.devices().join(device_of(&acer));
+    let d_journal = desk.paths.devices().join(device_of(&desk));
+    let a_start = last_seq(
+        &Dir::open(&acer.paths, &["v1", "devices", &device_of(&acer)], false)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let d_start = last_seq(
+        &Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    for m in [&mut acer, &mut desk] {
+        let mut local = load_local(&m.paths).unwrap();
+        let journal = Dir::open(&m.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        resolve_conflicts(&m.paths, &journal, m.host, &mut local, &snapshot, &views).unwrap();
+    }
+    let held_d = dir.join("held-d");
+    fs::create_dir_all(&held_d).unwrap();
+    for e in fs::read_dir(&d_journal).unwrap().flatten() {
+        if parse_record_name(&e.file_name().to_string_lossy()).is_some_and(|s| s > d_start) {
+            fs::rename(e.path(), held_d.join(e.file_name())).unwrap();
+        }
+    }
+    acer.sync();
+    let a_merged = last_seq(
+        &Dir::open(&acer.paths, &["v1", "devices", &device_of(&acer)], false)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    for p in acer.store.presets().unwrap() {
+        acer.store.delete_preset(&p.id).unwrap();
+        acer.sync();
+    }
+    let held_a = dir.join("held-a");
+    fs::create_dir_all(&held_a).unwrap();
+    for e in fs::read_dir(&a_journal).unwrap().flatten() {
+        if parse_record_name(&e.file_name().to_string_lossy())
+            .is_some_and(|s| s > a_start && s <= a_merged)
+        {
+            fs::rename(e.path(), held_a.join(e.file_name())).unwrap();
+        }
+    }
+    for e in fs::read_dir(&held_d).unwrap().flatten() {
+        fs::rename(e.path(), d_journal.join(e.file_name())).unwrap();
+    }
+    let before = last_seq(
+        &Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    desk.sync();
+    let after = last_seq(
+        &Dir::open(&desk.paths, &["v1", "devices", &device_of(&desk)], false)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        before, after,
+        "unknown causal parents must not produce an automatic conflict merge"
+    );
+    for e in fs::read_dir(&held_a).unwrap().flatten() {
+        fs::rename(e.path(), a_journal.join(e.file_name())).unwrap();
+    }
+    desk.sync();
+    acer.sync();
+    desk.sync();
+    assert!(acer.preset_names().is_empty());
+    assert!(desk.preset_names().is_empty());
+}
+
+#[test]
+fn review_incomplete_history_defers_automatic_application_but_keeps_owner_edits() {
+    for selection in [false, true] {
+        let dir = shared();
+        let mut acer = machine(&dir, "saint-acer");
+        let mut desk = machine(&dir, "Santiago-PC");
+        let id = uuid::Uuid::new_v4().to_string();
+        let key = format!("{}/{id}", if selection { "selection" } else { "preset" });
+        let body = |name: &str| {
+            if selection {
+                Body::Selection(SelectionBody {
+                    name: name.into(),
+                    provider: "claude_code".into(),
+                    items: vec![],
+                    composites: vec![],
+                })
+            } else {
+                Body::Preset(PresetBody {
+                    name: name.into(),
+                    description: "".into(),
+                    items: vec![],
+                })
+            }
+        };
+        acer.sync();
+        let mut local = load_local(&acer.paths).unwrap();
+        let journal = Dir::open(&acer.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        let first = publish(
+            &acer.paths,
+            &journal,
+            acer.host,
+            &mut local,
+            &key,
+            None,
+            vec![],
+            body("Original"),
+        )
+        .unwrap();
+        desk.sync();
+        let second = publish(
+            &acer.paths,
+            &journal,
+            acer.host,
+            &mut local,
+            &key,
+            Some(first),
+            vec![],
+            body("Remote edit"),
+        )
+        .unwrap();
+        publish(
+            &acer.paths,
+            &journal,
+            acer.host,
+            &mut local,
+            &key,
+            Some(second),
+            vec![],
+            Body::Deleted,
+        )
+        .unwrap();
+        let path = acer
+            .paths
+            .devices()
+            .join(&local.device)
+            .join(record_name(2));
+        let held = dir.join("held-parent");
+        fs::rename(&path, &held).unwrap();
+        let before = record_files(&dir);
+        for _ in 0..2 {
+            let status = desk.sync();
+            assert!(
+                status
+                    .pending
+                    .iter()
+                    .any(|n| n.detail.contains("journal history"))
+            );
+            assert!(status.conflicts.is_empty());
+            assert!(status.removed.is_empty());
+            assert_eq!(record_files(&dir), before);
+        }
+        if selection {
+            assert_eq!(desk.store.selections().unwrap()[0].name, "Original");
+            desk.store
+                .put_selection(
+                    &id,
+                    &SelectionInput {
+                        id: None,
+                        name: "Owner edit".into(),
+                        provider: "claude_code".into(),
+                        items: vec![],
+                        composites: vec![],
+                    },
+                )
+                .unwrap();
+        } else {
+            assert_eq!(desk.preset_names(), vec!["Original"]);
+            desk.store
+                .put_preset(
+                    &id,
+                    &PresetInput {
+                        id: None,
+                        name: "Owner edit".into(),
+                        description: "".into(),
+                        items: vec![],
+                    },
+                )
+                .unwrap();
+        }
+        let status = desk.sync();
+        assert!(
+            status
+                .pending
+                .iter()
+                .any(|n| n.detail.contains("journal history"))
+        );
+        assert_eq!(
+            record_files(&dir),
+            before + 1,
+            "publish only the explicit owner edit"
+        );
+        let owner = load_local(&desk.paths).unwrap();
+        let (records, _) = read_records(&desk.paths).unwrap();
+        let edit = records.iter().find(|r| r.device == owner.device).unwrap();
+        assert_eq!(
+            edit.base.as_deref(),
+            Some(format!("{}:1", local.device).as_str())
+        );
+        let own_journal = Dir::open(&desk.paths, &["v1", "devices", &owner.device], false)
+            .unwrap()
+            .unwrap();
+        assert!(read_applied(&own_journal).unwrap().seen.is_empty());
+        fs::rename(held, path).unwrap();
+        let status = desk.sync();
+        assert!(status.pending.is_empty());
+        let (records, _) = read_records(&desk.paths).unwrap();
+        let views = materialize(&records);
+        assert!(views[&key].complete);
+        assert_eq!(body_name(&records[views[&key].chosen].body), "Owner edit");
+    }
+}
+
+#[test]
+fn review_cycles_never_apply_or_publish_automatic_resolutions() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.sync();
+    let mut local = load_local(&acer.paths).unwrap();
+    let journal = Dir::open(&acer.paths, &["v1", "devices", &local.device], false)
+        .unwrap()
+        .unwrap();
+    let key = format!("preset/{}", uuid::Uuid::new_v4());
+    let parent = format!("{}:2", local.device);
+    let first = publish(
+        &acer.paths,
+        &journal,
+        acer.host,
+        &mut local,
+        &key,
+        Some(parent),
+        vec![],
+        Body::Deleted,
+    )
+    .unwrap();
+    publish(
+        &acer.paths,
+        &journal,
+        acer.host,
+        &mut local,
+        &key,
+        Some(first),
+        vec![],
+        Body::Deleted,
+    )
+    .unwrap();
+    publish(
+        &acer.paths,
+        &journal,
+        acer.host,
+        &mut local,
+        &key,
+        None,
+        vec![],
+        Body::Preset(PresetBody {
+            name: "Concurrent".into(),
+            description: "".into(),
+            items: vec![],
+        }),
+    )
+    .unwrap();
+    publish(
+        &acer.paths,
+        &journal,
+        acer.host,
+        &mut local,
+        &key,
+        None,
+        vec![],
+        Body::Preset(PresetBody {
+            name: "Other concurrent edit".into(),
+            description: "".into(),
+            items: vec![],
+        }),
+    )
+    .unwrap();
+    let before = record_files(&dir);
+    for _ in 0..2 {
+        let status = desk.sync();
+        assert!(
+            status
+                .pending
+                .iter()
+                .any(|n| n.detail.contains("journal history"))
+        );
+        assert!(status.conflicts.is_empty());
+        assert!(desk.preset_names().is_empty());
+        assert_eq!(record_files(&dir), before);
+        let local = load_local(&desk.paths).unwrap();
+        let journal = Dir::open(&desk.paths, &["v1", "devices", &local.device], false)
+            .unwrap()
+            .unwrap();
+        assert!(read_applied(&journal).unwrap().seen.is_empty());
+    }
+}
+
+#[test]
+fn review_parent_in_another_object_does_not_complete_history() {
+    let mut records = vec![
+        semantic_record(1, &[], Body::Deleted),
+        semantic_record(2, &[1], Body::Deleted),
+    ];
+    records[0].object = "preset/another-object".into();
+    let views = materialize(&records);
+    assert!(views["preset/another-object"].complete);
+    assert!(!views["preset/semantic-fixture"].complete);
+}
+
+#[test]
+fn review_causal_pending_keeps_blob_wait_details() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.skill("design", "old");
+    acer.skill("design", "new");
+    acer.sync();
+    let (records, _) = read_records(&acer.paths).unwrap();
+    let Body::Capability(current) = &records[1].body else {
+        panic!()
+    };
+    let parent = acer
+        .paths
+        .devices()
+        .join(device_of(&acer))
+        .join(record_name(1));
+    let held_parent = dir.join("held-parent");
+    fs::rename(&parent, &held_parent).unwrap();
+    let blob = acer.paths.blobs().join(&current.files[0].sha256);
+    let held_blob = dir.join("held-blob");
+    fs::rename(&blob, &held_blob).unwrap();
+    let status = desk.sync();
+    let pending = &status.pending[0];
+    assert!(pending.detail.contains("journal history"));
+    assert!(
+        pending.detail.contains("; "),
+        "retain the existing blob wait detail"
+    );
+    fs::rename(held_blob, blob).unwrap();
+    let before = record_files(&dir);
+    let status = desk.sync();
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert!(
+        status
+            .pending
+            .iter()
+            .any(|n| n.detail.contains("journal history"))
+    );
+    assert_eq!(record_files(&dir), before);
+    fs::rename(held_parent, parent).unwrap();
+    assert!(desk.sync().pending.is_empty());
+    assert_eq!(desk.cap("design").revisions.len(), 2);
+    assert_eq!(record_files(&dir), before + 1); // Only the transported parent returned.
 }

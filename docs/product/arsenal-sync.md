@@ -39,6 +39,16 @@ versions of an object that no record replaced are its heads.
   keeps them as older revisions, a preset or selection gets a copy named `… (conflict, <host>)`.
   A merge record then makes one head again. A deletion never wins over an edit.
 
+A later owner edit or deletion replaces every visible head with the content that owner had
+already observed. This includes equal-content heads produced when both computers independently
+resolved the same conflict; those duplicate heads cannot resurrect a subsequently deleted object.
+Different concurrent edits are still preserved.
+Records with the same content and the same semantic parent versions represent one version, even
+when their physical record IDs differ or one arrives later. Parent equivalence is computed with a
+bounded, nonrecursive DAG pass. Missing parents or cyclic references keep an object pending:
+presets and selections wait before remote replacement/deletion, and automatic conflict merges
+wait before writing anything. Available capability revisions can still be imported incrementally.
+
 The same records give every computer the same result, in any order and after any time offline.
 Capabilities cannot be deleted in Arsenal, so they have no deletion records.
 
@@ -60,10 +70,14 @@ folder or file another computer replaces with a link, a pipe or a device is refu
 never lands outside it. A record or file is renamed into place relative to its folder as opened,
 and a journal record never replaces an existing file.
 
-Limits: 64 entries in `devices/`, 60,000 in any one folder, 50,000 records and 128 MiB of records
-in all. A larger shared folder makes the run fail with an error shown in Arsenal, and nothing is
-applied from part of it. One run reads at most 256 MiB of file contents; the rest is applied by
-the next run, a few seconds later.
+Limits: 16 device journals, 64 entries in `devices/`, 60,000 entries in any one folder, 50,000
+candidate journal files and 128 MiB of records in all. Invalid and unsupported records count too;
+directory entry limits also count names that are not UTF-8. A larger shared folder makes the run
+fail with an error shown in Arsenal, and nothing is applied from part of it. A capability declares
+at most 8 MiB of file contents before any blob is allocated. One run reads at most 256 MiB of file
+contents; subsequent runs continue with missing revisions rather than rereading already stored
+trees. Older revisions delivered after the current head are imported too, so pinned selections
+can become available without changing that head.
 
 A preset or selection that another computer deleted is deleted here only after its content is kept
 in `~/.local/state/wyss-console/arsenal-sync/trash/`, and Arsenal lists it under "Deleted on another
@@ -85,6 +99,11 @@ Arsenal shows the state under its header:
 - conflicts and refusals.
 
 A file written here is never presented as applied elsewhere.
+Acknowledgments cover a contiguous prefix of each device's journal. Missing or unsupported
+records, deferred objects and refused content stop that prefix; a later record cannot acknowledge
+an earlier change that has not arrived or was refused. An unchanged acknowledgment is not rewritten.
+The prefix uses the last batch actually processed: a record arriving between application and the
+final status read waits for the next run before it can be acknowledged.
 
 ## Syncthing
 

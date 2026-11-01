@@ -276,6 +276,25 @@ const DELETED: &str = "deleted";
 /// is applied here, what changed here is published. Safe to run at any time and any number of
 /// times; one that is interrupted leaves both sides consistent and the next one continues.
 pub fn reconcile(store: &mut Store, paths: &Paths, host: &str) -> Result<Status, String> {
+    reconcile_with_budget(store, paths, host, MAX_BLOB_BYTES_PER_RUN)
+}
+
+fn reconcile_with_budget(
+    store: &mut Store,
+    paths: &Paths,
+    host: &str,
+    budget: u64,
+) -> Result<Status, String> {
+    reconcile_before_ack(store, paths, host, budget, || {})
+}
+
+fn reconcile_before_ack(
+    store: &mut Store,
+    paths: &Paths,
+    host: &str,
+    mut budget: u64,
+    before_ack: impl FnOnce(),
+) -> Result<Status, String> {
     for dir in [&paths.local, &paths.staging()] {
         make_dir(dir).map_err(|e| format!("folder: {e}"))?;
     }
@@ -289,10 +308,10 @@ pub fn reconcile(store: &mut Store, paths: &Paths, host: &str) -> Result<Status,
     let host = clean_host(host);
     let journal =
         Dir::open(paths, &["v1", "devices", &local.device], true)?.ok_or("folder: unavailable")?;
-    let mut budget = MAX_BLOB_BYTES_PER_RUN;
     let before = local.generation;
     let mut published = 0_u64;
     let mut deferred: BTreeMap<String, Note> = BTreeMap::new();
+    let mut last_applied_records = Vec::new();
     for _ in 0..ROUNDS {
         let (records, refused_files) = read_records(paths)?;
         note_rejected(&mut local, &refused_files);
@@ -309,6 +328,21 @@ pub fn reconcile(store: &mut Store, paths: &Paths, host: &str) -> Result<Status,
             &mut deferred,
             &mut budget,
         )?;
+        for (key, view) in &views {
+            if !view.complete {
+                let detail = "journal history is missing parents or has invalid causal references; wait for transport or repair the source journal";
+                deferred
+                    .entry(key.clone())
+                    .and_modify(|pending| {
+                        pending.detail.push_str("; ");
+                        pending.detail.push_str(detail);
+                    })
+                    .or_insert_with(|| {
+                        note(kind_of(key), &object_name(&records[view.chosen]), detail)
+                    });
+            }
+        }
+        last_applied_records = records;
         let (records, _) = read_records(paths)?;
         let views = materialize(&records);
         wrote += resolve_conflicts(paths, &journal, &host, &mut local, &records, &views)?;
@@ -318,8 +352,17 @@ pub fn reconcile(store: &mut Store, paths: &Paths, host: &str) -> Result<Status,
             break;
         }
     }
+    before_ack();
     let (records, _) = read_records(paths)?;
-    write_applied(paths, &journal, &host, &local, &records, &deferred)?;
+    // Acknowledge only records from the final apply pass, not records received after it.
+    write_applied(
+        paths,
+        &journal,
+        &host,
+        &local,
+        &last_applied_records,
+        &deferred,
+    )?;
     if local.generation != before || published > 0 {
         save_local(paths, &local)?;
     }
@@ -394,21 +437,11 @@ fn apply_and_publish(
         let synced = local.objects.get(key).cloned();
         let synced_content = synced.as_ref().map_or(ABSENT, |s| s.content.as_str());
         let view = views.get(key);
-        // Already the same here as what was published (imported on both computers): adopt it.
-        if synced.is_none()
-            && let Some(view) = view
-            && content_of(&records[view.chosen].body) == content
-        {
-            local.objects.insert(
-                key.clone(),
-                Synced {
-                    record: Some(records[view.chosen].id()),
-                    content,
-                },
-            );
-            continue;
-        }
-        let dirty = content != synced_content && here.is_some();
+        // A matching current tree still needs any history delivered later.
+        let dirty = content != synced_content
+            && here.is_some()
+            && !(synced.is_none()
+                && view.is_some_and(|v| content_of(&records[v.chosen].body) == content));
         if dirty {
             let capability = here.expect("dirty means present");
             let base = synced.as_ref().and_then(|s| s.record.clone());
@@ -425,8 +458,8 @@ fn apply_and_publish(
                     key,
                     capability,
                     current,
-                    base,
-                    Vec::new(),
+                    base.clone(),
+                    equivalent_heads(records, view, synced_content, base.as_deref())?,
                 )?
             };
             wrote += 1;
@@ -441,15 +474,50 @@ fn apply_and_publish(
         }
         let Some(view) = view else { continue };
         let chosen = &records[view.chosen];
-        if synced.as_ref().and_then(|s| s.record.as_deref()) == Some(chosen.id().as_str()) {
-            continue;
+        let previously_refused: BTreeSet<String> = view
+            .all
+            .iter()
+            .map(|&i| records[i].id())
+            .filter(|id| local.refused.contains_key(id))
+            .collect();
+        let result = apply_capability_records(
+            store,
+            paths,
+            records,
+            view,
+            budget,
+            &mut local.refused,
+            &mut local.generation,
+        );
+        for record in view.all.iter().map(|&i| &records[i]) {
+            if record.id() != chosen.id()
+                && !previously_refused.contains(&record.id())
+                && let Some(why) = local.refused.get(&record.id())
+            {
+                push_note(
+                    &mut local.rejected,
+                    note(
+                        "capability",
+                        &object_name(record),
+                        &format!("{why} (from {})", record.host),
+                    ),
+                );
+            }
         }
-        if local.refused.contains_key(&chosen.id()) {
-            continue;
+        // Even an incomplete history import may have committed revisions (and the first
+        // revision implicitly becomes current). Checkpoint that state before retrying.
+        let after = store.current(identity).map_err(store_text)?;
+        if let Some(after) = &after {
+            local.objects.insert(
+                key.clone(),
+                Synced {
+                    record: synced.as_ref().and_then(|s| s.record.clone()),
+                    content: format!("tree:{}", after.tree_hash),
+                },
+            );
         }
-        match apply_capability(store, paths, records, view, budget) {
+        match result {
             Ok(tree) => {
-                local.generation += 1;
                 local.objects.insert(
                     key.clone(),
                     Synced {
@@ -559,8 +627,13 @@ fn apply_and_publish(
                 host,
                 local,
                 key,
-                base,
-                Vec::new(),
+                base.clone(),
+                equivalent_heads(
+                    records,
+                    view,
+                    synced_content.as_deref().unwrap_or(ABSENT),
+                    base.as_deref(),
+                )?,
                 body.clone(),
             )?;
             wrote += 1;
@@ -574,6 +647,9 @@ fn apply_and_publish(
             continue;
         }
         let Some(view) = view else { continue };
+        if !view.complete {
+            continue;
+        }
         let chosen = &records[view.chosen];
         if synced.as_ref().and_then(|s| s.record.as_deref()) == Some(chosen.id().as_str()) {
             continue;
@@ -685,7 +761,7 @@ fn resolve_conflicts(
     let mut wrote = 0;
     let objects: BTreeSet<&String> = records.iter().map(|r| &r.object).collect();
     for (key, view) in views {
-        if !view.conflict {
+        if !view.complete || !view.conflict {
             continue;
         }
         let chosen = &records[view.chosen];
@@ -695,6 +771,9 @@ fn resolve_conflicts(
             .map(|&i| &records[i])
             .filter(|r| r.id() != chosen.id())
             .collect();
+        if others.len() > MAX_MERGED {
+            return Err("too many concurrent heads; reconcile a smaller peer batch first".into());
+        }
         for loser in &others {
             if content_of(&loser.body) == content_of(&chosen.body) || loser.body == Body::Deleted {
                 continue;
@@ -750,7 +829,7 @@ fn resolve_conflicts(
                 ),
             );
         }
-        let merged: Vec<String> = others.iter().map(|r| r.id()).take(MAX_MERGED).collect();
+        let merged: Vec<String> = others.iter().map(|r| r.id()).collect();
         publish(
             paths,
             journal,
@@ -766,6 +845,29 @@ fn resolve_conflicts(
     Ok(wrote)
 }
 
+/// Supersede only heads whose content the local owner actually observed.
+fn equivalent_heads(
+    records: &[Record],
+    view: Option<&View>,
+    observed: &str,
+    base: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let merged: Vec<String> = view
+        .into_iter()
+        .flat_map(|v| &v.heads)
+        .map(|&i| &records[i])
+        .filter(|r| content_of(&r.body) == observed)
+        .map(Record::id)
+        .filter(|id| Some(id.as_str()) != base)
+        .collect();
+    if merged.len() > MAX_MERGED {
+        return Err(
+            "too many equivalent heads; reconcile a smaller peer batch before editing".into(),
+        );
+    }
+    Ok(merged)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Materializing: every computer derives the same objects from the same records
 
@@ -774,6 +876,8 @@ struct View {
     chosen: usize,
     heads: Vec<usize>,
     conflict: bool,
+    /// All parents belong to this object and its graph is acyclic.
+    complete: bool,
     /// Every record of the object, oldest first by rank.
     all: Vec<usize>,
 }
@@ -787,6 +891,68 @@ fn rank(record: &Record) -> (bool, i64, &str, u64) {
     )
 }
 
+/// Canonical logical versions within one object. Each DAG edge is visited once; cycles and
+/// nodes depending on cycles retain their physical identities. Missing parents remain raw IDs.
+/// Hashing the sorted semantic parents makes duplicate merges equivalent transitively, without
+/// expanding ancestry or recursing through attacker-controlled history.
+fn semantic_versions(records: &[Record], indices: &[usize]) -> (BTreeMap<String, String>, bool) {
+    let by_id: BTreeMap<String, usize> = indices.iter().map(|&i| (records[i].id(), i)).collect();
+    let mut parents = BTreeMap::new();
+    let mut children: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut remaining = BTreeMap::new();
+    let mut ready = BTreeSet::new();
+    let mut complete = true;
+    for &i in indices {
+        let record = &records[i];
+        let ids: BTreeSet<String> = record.base.iter().chain(&record.merged).cloned().collect();
+        let mut count = 0;
+        for parent in &ids {
+            if let Some(&parent_index) = by_id.get(parent) {
+                children.entry(parent_index).or_default().push(i);
+                count += 1;
+            } else {
+                complete = false;
+            }
+        }
+        parents.insert(i, ids);
+        remaining.insert(i, count);
+        if count == 0 {
+            ready.insert(i);
+        }
+    }
+    let mut versions = BTreeMap::new();
+    while let Some(i) = ready.pop_first() {
+        let canonical_parents: BTreeSet<String> = parents[&i]
+            .iter()
+            .map(|id| {
+                versions
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("record:{id}"))
+            })
+            .collect();
+        let key = serde_json::to_vec(&(content_of(&records[i].body), canonical_parents))
+            .expect("a semantic version serializes");
+        versions.insert(records[i].id(), format!("semantic:{}", store::digest(&key)));
+        for child in children.get(&i).into_iter().flatten() {
+            let count = remaining
+                .get_mut(child)
+                .expect("a child has a dependency count");
+            *count -= 1;
+            if *count == 0 {
+                ready.insert(*child);
+            }
+        }
+    }
+    complete &= versions.len() == indices.len();
+    for id in by_id.keys() {
+        versions
+            .entry(id.clone())
+            .or_insert_with(|| format!("record:{id}"));
+    }
+    (versions, complete)
+}
+
 fn materialize(records: &[Record]) -> BTreeMap<String, View> {
     let mut by_object: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, record) in records.iter().enumerate() {
@@ -795,18 +961,31 @@ fn materialize(records: &[Record]) -> BTreeMap<String, View> {
     let mut views = BTreeMap::new();
     for (object, mut indices) in by_object {
         indices.sort_by(|&a, &b| rank(&records[a]).cmp(&rank(&records[b])));
+        let (versions, complete) = semantic_versions(records, &indices);
         let superseded: BTreeSet<String> = indices
             .iter()
             .flat_map(|&i| {
                 let r = &records[i];
                 r.base.iter().cloned().chain(r.merged.iter().cloned())
             })
+            .map(|id| {
+                versions
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("record:{id}"))
+            })
             .collect();
-        let mut heads: Vec<usize> = indices
-            .iter()
-            .copied()
-            .filter(|&i| !superseded.contains(&records[i].id()))
-            .collect();
+        // Rank chooses the displayed member of a logical version, never whether a causal
+        // successor replaces it. Keep every physical record in `all` for revision history.
+        let mut representatives = BTreeMap::new();
+        for &i in &indices {
+            let version = &versions[&records[i].id()];
+            if !superseded.contains(version) {
+                representatives.insert(version, i);
+            }
+        }
+        let mut heads: Vec<usize> = representatives.into_values().collect();
+        heads.sort_by(|&a, &b| rank(&records[a]).cmp(&rank(&records[b])));
         if heads.is_empty() {
             // Only a cycle of references gets here; the newest record decides.
             heads.push(*indices.last().expect("an object has a record"));
@@ -825,6 +1004,7 @@ fn materialize(records: &[Record]) -> BTreeMap<String, View> {
                 chosen,
                 heads,
                 conflict: contents.len() > 1,
+                complete,
                 all: indices,
             },
         );
@@ -852,7 +1032,8 @@ enum Applying {
     Fail(String),
 }
 
-/// Stores every revision the records hold, oldest first, and makes the chosen one current.
+/// Stores missing revisions, oldest first, and makes the chosen one current when available.
+#[cfg(test)]
 fn apply_capability(
     store: &mut Store,
     paths: &Paths,
@@ -860,12 +1041,28 @@ fn apply_capability(
     view: &View,
     budget: &mut u64,
 ) -> Result<String, Applying> {
-    let blobs = match Dir::open(paths, &["v1", "blobs"], false) {
-        Ok(Some(blobs)) => blobs,
-        Ok(None) => return Err(Applying::Wait("file contents not received yet")),
-        Err(why) => return Err(Applying::Fail(why)),
-    };
+    apply_capability_records(
+        store,
+        paths,
+        records,
+        view,
+        budget,
+        &mut BTreeMap::new(),
+        &mut 0,
+    )
+}
+
+fn apply_capability_records(
+    store: &mut Store,
+    paths: &Paths,
+    records: &[Record],
+    view: &View,
+    budget: &mut u64,
+    refused: &mut BTreeMap<String, String>,
+    generation: &mut u64,
+) -> Result<String, Applying> {
     let chosen = &records[view.chosen];
+    let identity = &chosen.object["capability/".len()..];
     let mut order: Vec<&Record> = view
         .all
         .iter()
@@ -873,33 +1070,106 @@ fn apply_capability(
         .filter(|r| matches!(r.body, Body::Capability(_)) && r.id() != chosen.id())
         .collect();
     order.push(chosen);
-    let mut done: BTreeSet<String> = BTreeSet::new();
-    let last = order.len() - 1;
-    for (i, record) in order.into_iter().enumerate() {
+    let mut waiting = None;
+    let mut chosen_refused = None;
+    for record in order {
+        let is_chosen = record.id() == chosen.id();
+        if let Some(why) = refused.get(&record.id()) {
+            if is_chosen {
+                chosen_refused = Some(why.clone());
+            }
+            continue;
+        }
         let Body::Capability(body) = &record.body else {
             return Err(Applying::Refuse("not a capability".into()));
         };
-        let current = i == last;
-        if !current && !done.insert(body.tree_hash.clone()) {
+        // Held trees have already passed the import boundary. Neither read their blobs
+        // again nor charge them against this run's budget.
+        let current = store
+            .current(identity)
+            .map_err(|e| Applying::Fail(store_text(e)))?;
+        if let Some(current) = &current
+            && let Some(number) = store
+                .tree_revision(&current.id, &body.tree_hash)
+                .map_err(|e| Applying::Fail(store_text(e)))?
+        {
+            if is_chosen && current.revision != number {
+                store
+                    .restore(&current.id, number)
+                    .map_err(|e| Applying::Fail(store_text(e)))?;
+                *generation += 1;
+            }
             continue;
         }
-        let size: u64 = body.files.iter().map(|f| f.size).sum();
-        if size > *budget {
-            return Err(Applying::Wait(MORE_NEXT_RUN));
-        }
-        *budget -= size;
-        let new = assemble(&blobs, &record.object["capability/".len()..], body)?;
-        match store.import_revision(&new, current) {
-            Ok(_) => {}
-            Err(StoreError::Invalid) => return Err(Applying::Refuse("invalid capability".into())),
-            Err(StoreError::Busy) => return Err(Applying::Wait("library busy")),
-            Err(error) => return Err(Applying::Fail(store_text(error))),
+        let blobs = match Dir::open(paths, &["v1", "blobs"], false) {
+            Ok(Some(blobs)) => blobs,
+            Ok(None) => {
+                waiting = Some("file contents not received yet");
+                continue;
+            }
+            Err(why) => return Err(Applying::Fail(why)),
+        };
+        // A missing old blob must not consume the allowance needed by the current
+        // revision, forever. Check availability without allocating any blob contents.
+        let result = capability_ready(&blobs, body).and_then(|()| {
+            let size: u64 = body.files.iter().map(|f| f.size).sum();
+            if size > *budget {
+                return Err(Applying::Wait(MORE_NEXT_RUN));
+            }
+            *budget -= size;
+            let new = assemble(&blobs, identity, body)?;
+            match store.import_revision(&new, is_chosen) {
+                Ok(imported) => {
+                    if imported.outcome != store::Outcome::Unchanged {
+                        *generation += 1;
+                    }
+                    Ok(())
+                }
+                Err(StoreError::Invalid) => Err(Applying::Refuse("invalid capability".into())),
+                Err(StoreError::Busy) => Err(Applying::Wait("library busy")),
+                Err(error) => Err(Applying::Fail(store_text(error))),
+            }
+        });
+        match result {
+            Ok(()) => {}
+            Err(Applying::Wait(why)) => {
+                waiting = Some(why);
+            }
+            Err(Applying::Refuse(why)) => {
+                refused.insert(record.id(), why.clone());
+                if is_chosen {
+                    chosen_refused = Some(why);
+                }
+            }
+            Err(error) => return Err(error),
         }
     }
+    if let Some(why) = chosen_refused {
+        return Err(Applying::Refuse(why));
+    }
+    if let Some(why) = waiting {
+        return Err(Applying::Wait(why));
+    }
     let Body::Capability(body) = &chosen.body else {
-        unreachable!("the chosen record is a capability")
+        unreachable!()
     };
     Ok(body.tree_hash.clone())
+}
+
+fn capability_ready(blobs: &Dir, body: &CapabilityBody) -> Result<(), Applying> {
+    for reference in &body.files {
+        let file = blobs
+            .file(&reference.sha256)
+            .map_err(Applying::Refuse)?
+            .ok_or(Applying::Wait("file contents not received yet"))?;
+        let meta = file
+            .metadata()
+            .map_err(|e| Applying::Refuse(format!("blob: {e}")))?;
+        if meta.len() != reference.size {
+            return Err(Applying::Wait("file contents not received yet"));
+        }
+    }
+    Ok(())
 }
 
 /// The capability a record describes, with its files read back from the shared blobs and every
@@ -1133,21 +1403,26 @@ fn write_applied(
     deferred: &BTreeMap<String, Note>,
 ) -> Result<(), String> {
     let mut seen: BTreeMap<String, u64> = BTreeMap::new();
-    let mut blocked: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut by_device: BTreeMap<&str, BTreeMap<u64, &Record>> = BTreeMap::new();
     for record in records {
-        if deferred.contains_key(&record.object) {
-            let lowest = blocked.entry(record.device.as_str()).or_insert(u64::MAX);
-            *lowest = (*lowest).min(record.seq);
-        }
+        by_device
+            .entry(&record.device)
+            .or_default()
+            .insert(record.seq, record);
     }
-    for record in records {
-        let limit = blocked
-            .get(record.device.as_str())
-            .copied()
-            .unwrap_or(u64::MAX);
-        if record.seq < limit {
-            let entry = seen.entry(record.device.clone()).or_insert(0);
-            *entry = (*entry).max(record.seq);
+    for (device, journal_records) in by_device {
+        let mut prefix = 0_u64;
+        for (seq, record) in journal_records {
+            if seq != prefix + 1
+                || deferred.contains_key(&record.object)
+                || local.refused.contains_key(&record.id())
+            {
+                break;
+            }
+            prefix = seq;
+        }
+        if prefix > 0 {
+            seen.insert(device.to_owned(), prefix);
         }
     }
     let previous = read_applied(journal);
@@ -1197,8 +1472,11 @@ fn read_records(paths: &Paths) -> Result<Shared, String> {
         .filter(|name| device_ok(name))
         .collect();
     names.sort();
-    names.truncate(MAX_DEVICES);
+    if names.len() > MAX_DEVICES {
+        return Err("too many sync devices; remove obsolete peer folders before retrying".into());
+    }
     let mut bytes = 0_u64;
+    let mut candidates = 0_usize;
     for device in names {
         let dir = match devices.child(&device, false) {
             Ok(Some(dir)) => dir,
@@ -1217,7 +1495,8 @@ fn read_records(paths: &Paths) -> Result<Shared, String> {
             .filter_map(|name| Some((parse_record_name(&name)?, name)))
             .collect();
         files.sort();
-        if records.len() + files.len() > MAX_RECORDS {
+        candidates += files.len();
+        if candidates > MAX_RECORDS {
             return Err("the shared folder holds more records than this version reads".into());
         }
         for (seq, name) in files {
@@ -1317,6 +1596,7 @@ fn check_capability(identity: &str, body: &CapabilityBody) -> Result<(), &'stati
         return Err("bad file list");
     }
     let mut seen = BTreeSet::new();
+    let mut total = 0_u64;
     let mut entries: Vec<(&str, &str)> = Vec::with_capacity(body.files.len());
     for file in &body.files {
         if !hex64(&file.sha256)
@@ -1334,6 +1614,10 @@ fn check_capability(identity: &str, body: &CapabilityBody) -> Result<(), &'stati
                 .any(|part| part.is_empty() || part == "." || part == "..")
         {
             return Err("bad path");
+        }
+        total = total.checked_add(file.size).ok_or("tree too large")?;
+        if total > MAX_TREE_BYTES as u64 {
+            return Err("tree too large");
         }
         entries.push((file.path.as_str(), file.sha256.as_str()));
     }
@@ -1935,9 +2219,9 @@ impl Dir {
     fn names(&self, limit: usize) -> Result<Vec<String>, String> {
         let entries = fs::read_dir(self.at(".")).map_err(|e| format!("folder: {e}"))?;
         let mut names = Vec::new();
-        for entry in entries {
+        for (count, entry) in entries.enumerate() {
             let entry = entry.map_err(|e| format!("folder: {e}"))?;
-            if names.len() >= limit {
+            if count >= limit {
                 return Err("the shared folder holds more files than this version reads".into());
             }
             if let Ok(name) = entry.file_name().into_string() {
