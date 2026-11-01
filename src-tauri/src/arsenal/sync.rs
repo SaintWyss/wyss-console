@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -38,7 +39,15 @@ pub const SCHEMA: &str = "wyss.arsenal.sync.v1";
 /// A record lists file digests, never contents.
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const MAX_DEVICES: usize = 16;
-const MAX_RECORDS_PER_DEVICE: usize = 200_000;
+/// Entries read from one folder of the shared folder, and records and bytes read in all: past
+/// them a run fails closed and applies nothing, rather than reading without end.
+const MAX_DEVICE_ENTRIES: usize = 64;
+const MAX_DIR_ENTRIES: usize = 60_000;
+const MAX_RECORDS: usize = 50_000;
+const MAX_RECORDS_BYTES: u64 = 128 * 1024 * 1024;
+/// File contents read in one run; what does not fit is applied by the next run.
+const MAX_BLOB_BYTES_PER_RUN: u64 = 256 * 1024 * 1024;
+const MORE_NEXT_RUN: &str = "more to apply; continues in the next run";
 const MAX_MERGED: usize = 16;
 const MAX_NOTES: usize = 50;
 /// Rounds of apply-and-publish in one reconciliation; a conflict needs at most two.
@@ -158,6 +167,9 @@ pub struct Status {
     pub pending: Vec<Note>,
     pub conflicts: Vec<Note>,
     pub rejected: Vec<Note>,
+    /// Presets and selections deleted here because another computer deleted them, each with
+    /// where its copy is kept.
+    pub removed: Vec<Note>,
     pub peers: Vec<Peer>,
 }
 
@@ -224,9 +236,6 @@ impl Paths {
     fn blobs(&self) -> PathBuf {
         self.root().join("blobs")
     }
-    fn blob(&self, hash: &str) -> PathBuf {
-        self.blobs().join(hash)
-    }
     fn staging(&self) -> PathBuf {
         self.local.join("staging")
     }
@@ -245,6 +254,8 @@ struct Local {
     refused: BTreeMap<String, String>,
     conflicts: Vec<Note>,
     rejected: Vec<Note>,
+    #[serde(default)]
+    removed: Vec<Note>,
     generation: u64,
     last_success: Option<i64>,
 }
@@ -265,48 +276,50 @@ const DELETED: &str = "deleted";
 /// is applied here, what changed here is published. Safe to run at any time and any number of
 /// times; one that is interrupted leaves both sides consistent and the next one continues.
 pub fn reconcile(store: &mut Store, paths: &Paths, host: &str) -> Result<Status, String> {
-    for dir in [
-        &paths.local,
-        &paths.staging(),
-        &paths.devices(),
-        &paths.blobs(),
-    ] {
+    for dir in [&paths.local, &paths.staging()] {
         make_dir(dir).map_err(|e| format!("folder: {e}"))?;
+    }
+    for parts in [["v1", "devices"], ["v1", "blobs"]] {
+        Dir::open(paths, &parts, true)?;
     }
     let lock = File::create(paths.local.join("lock")).map_err(|e| format!("lock: {e}"))?;
     let _guard = nix::fcntl::Flock::lock(lock, nix::fcntl::FlockArg::LockExclusiveNonblock)
         .map_err(|_| "busy".to_owned())?;
     let mut local = load_local(paths)?;
     let host = clean_host(host);
-    make_dir(&paths.devices().join(&local.device)).map_err(|e| format!("folder: {e}"))?;
+    let journal =
+        Dir::open(paths, &["v1", "devices", &local.device], true)?.ok_or("folder: unavailable")?;
+    let mut budget = MAX_BLOB_BYTES_PER_RUN;
     let before = local.generation;
     let mut published = 0_u64;
     let mut deferred: BTreeMap<String, Note> = BTreeMap::new();
     for _ in 0..ROUNDS {
-        let (records, refused_files) = read_records(paths);
+        let (records, refused_files) = read_records(paths)?;
         note_rejected(&mut local, &refused_files);
         let views = materialize(&records);
         deferred.clear();
         let mut wrote = apply_and_publish(
             store,
             paths,
+            &journal,
             &host,
             &mut local,
             &records,
             &views,
             &mut deferred,
+            &mut budget,
         )?;
-        let (records, _) = read_records(paths);
+        let (records, _) = read_records(paths)?;
         let views = materialize(&records);
-        wrote += resolve_conflicts(store, paths, &host, &mut local, &records, &views)?;
+        wrote += resolve_conflicts(paths, &journal, &host, &mut local, &records, &views)?;
         published += wrote;
         save_local(paths, &local)?;
         if wrote == 0 {
             break;
         }
     }
-    let (records, _) = read_records(paths);
-    write_applied(paths, &host, &local, &records, &deferred)?;
+    let (records, _) = read_records(paths)?;
+    write_applied(paths, &journal, &host, &local, &records, &deferred)?;
     if local.generation != before || published > 0 {
         save_local(paths, &local)?;
     }
@@ -326,8 +339,15 @@ pub fn read_status(paths: &Paths, host: &str) -> Status {
     let host = clean_host(host);
     match load_local_existing(paths) {
         Some(local) => {
-            let (records, _) = read_records(paths);
-            status(paths, &host, &local, &records, Vec::new())
+            let mut status = match read_records(paths) {
+                Ok((records, _)) => status(paths, &host, &local, &records, Vec::new()),
+                Err(error) => Status {
+                    error: Some(error),
+                    ..status(paths, &host, &local, &[], Vec::new())
+                },
+            };
+            status.last_run = None;
+            status
         }
         None => Status {
             enabled: true,
@@ -338,14 +358,17 @@ pub fn read_status(paths: &Paths, host: &str) -> Status {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_and_publish(
     store: &mut Store,
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &mut Local,
     records: &[Record],
     views: &BTreeMap<String, View>,
     deferred: &mut BTreeMap<String, Note>,
+    budget: &mut u64,
 ) -> Result<u64, String> {
     let mut wrote = 0;
     // Capabilities first: presets and selections refer to them.
@@ -390,12 +413,13 @@ fn apply_and_publish(
             let capability = here.expect("dirty means present");
             let base = synced.as_ref().and_then(|s| s.record.clone());
             let id = if base.is_none() && view.is_none() {
-                publish_history(store, paths, host, local, key, capability)?
+                publish_history(store, paths, journal, host, local, key, capability)?
             } else {
                 let current = revision_of(capability, capability.current);
                 publish_capability(
                     store,
                     paths,
+                    journal,
                     host,
                     local,
                     key,
@@ -423,7 +447,7 @@ fn apply_and_publish(
         if local.refused.contains_key(&chosen.id()) {
             continue;
         }
-        match apply_capability(store, paths, records, view) {
+        match apply_capability(store, paths, records, view, budget) {
             Ok(tree) => {
                 local.generation += 1;
                 local.objects.insert(
@@ -529,7 +553,16 @@ fn apply_and_publish(
         if edited {
             let base = synced.as_ref().and_then(|s| s.record.clone());
             let body = here.cloned().unwrap_or(Body::Deleted);
-            let id = publish(paths, host, local, key, base, Vec::new(), body.clone())?;
+            let id = publish(
+                paths,
+                journal,
+                host,
+                local,
+                key,
+                base,
+                Vec::new(),
+                body.clone(),
+            )?;
             wrote += 1;
             local.objects.insert(
                 key.clone(),
@@ -548,7 +581,17 @@ fn apply_and_publish(
         match &chosen.body {
             Body::Deleted => {
                 let id = &key[key.find('/').map_or(0, |i| i + 1)..];
-                if here.is_some() {
+                if let Some(body) = here {
+                    // What another computer deletes stays recoverable here.
+                    let kept = keep_deleted(paths, key, body)?;
+                    push_note(
+                        &mut local.removed,
+                        note(
+                            kind_of(key),
+                            &body_name(body),
+                            &format!("deleted on {}; a copy is kept in {kept}", chosen.host),
+                        ),
+                    );
                     let removed = if key.starts_with("preset/") {
                         store.delete_preset(id)
                     } else {
@@ -632,14 +675,13 @@ fn apply_and_publish(
 /// Ends each conflict: the chosen head stays, every other head is kept (as an older revision of a
 /// capability, as a copy of a preset or selection), and a merge record makes one head again.
 fn resolve_conflicts(
-    store: &mut Store,
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &mut Local,
     records: &[Record],
     views: &BTreeMap<String, View>,
 ) -> Result<u64, String> {
-    let _ = store;
     let mut wrote = 0;
     let objects: BTreeSet<&String> = records.iter().map(|r| &r.object).collect();
     for (key, view) in views {
@@ -673,7 +715,16 @@ fn resolve_conflicts(
                 let copy_key =
                     format!("{kind}/{}", derived_uuid(&format!("{key}\0{}", loser.id())));
                 if !objects.contains(&copy_key) {
-                    publish(paths, host, local, &copy_key, None, Vec::new(), copy)?;
+                    publish(
+                        paths,
+                        journal,
+                        host,
+                        local,
+                        &copy_key,
+                        None,
+                        Vec::new(),
+                        copy,
+                    )?;
                     wrote += 1;
                 }
                 format!(
@@ -700,8 +751,9 @@ fn resolve_conflicts(
             );
         }
         let merged: Vec<String> = others.iter().map(|r| r.id()).take(MAX_MERGED).collect();
-        let id = publish(
+        publish(
             paths,
+            journal,
             host,
             local,
             key,
@@ -710,7 +762,6 @@ fn resolve_conflicts(
             chosen.body.clone(),
         )?;
         wrote += 1;
-        let _ = id;
     }
     Ok(wrote)
 }
@@ -807,7 +858,13 @@ fn apply_capability(
     paths: &Paths,
     records: &[Record],
     view: &View,
+    budget: &mut u64,
 ) -> Result<String, Applying> {
+    let blobs = match Dir::open(paths, &["v1", "blobs"], false) {
+        Ok(Some(blobs)) => blobs,
+        Ok(None) => return Err(Applying::Wait("file contents not received yet")),
+        Err(why) => return Err(Applying::Fail(why)),
+    };
     let chosen = &records[view.chosen];
     let mut order: Vec<&Record> = view
         .all
@@ -826,7 +883,12 @@ fn apply_capability(
         if !current && !done.insert(body.tree_hash.clone()) {
             continue;
         }
-        let new = assemble(paths, &record.object["capability/".len()..], body)?;
+        let size: u64 = body.files.iter().map(|f| f.size).sum();
+        if size > *budget {
+            return Err(Applying::Wait(MORE_NEXT_RUN));
+        }
+        *budget -= size;
+        let new = assemble(&blobs, &record.object["capability/".len()..], body)?;
         match store.import_revision(&new, current) {
             Ok(_) => {}
             Err(StoreError::Invalid) => return Err(Applying::Refuse("invalid capability".into())),
@@ -842,15 +904,11 @@ fn apply_capability(
 
 /// The capability a record describes, with its files read back from the shared blobs and every
 /// file checked as an import from disk would check it.
-fn assemble(
-    paths: &Paths,
-    identity: &str,
-    body: &CapabilityBody,
-) -> Result<NewCapability, Applying> {
+fn assemble(blobs: &Dir, identity: &str, body: &CapabilityBody) -> Result<NewCapability, Applying> {
     let mut files = Vec::with_capacity(body.files.len());
     let mut total = 0_u64;
     for file in &body.files {
-        let bytes = match read_blob(paths, &file.sha256, file.size) {
+        let bytes = match read_blob(blobs, &file.sha256, file.size) {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return Err(Applying::Wait("file contents not received yet")),
             Err(why) => return Err(Applying::Refuse(why)),
@@ -876,15 +934,17 @@ fn assemble(
     })
 }
 
-fn read_blob(paths: &Paths, hash: &str, size: u64) -> Result<Option<Vec<u8>>, String> {
-    let path = paths.blob(hash);
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("blob: {error}")),
+fn read_blob(blobs: &Dir, hash: &str, size: u64) -> Result<Option<Vec<u8>>, String> {
+    if !hex64(hash) {
+        return Err("a shared file has a bad name".into());
+    }
+    let file = match blobs.file(hash) {
+        Ok(Some(file)) => file,
+        Ok(None) => return Ok(None),
+        Err(why) => return Err(format!("blob: {why}")),
     };
     let meta = file.metadata().map_err(|e| format!("blob: {e}"))?;
-    if !meta.is_file() || meta.len() != size {
+    if meta.len() != size {
         // A blob still being written by the synchronizer has the wrong size for now.
         return Ok(None);
     }
@@ -904,6 +964,7 @@ fn read_blob(paths: &Paths, hash: &str, size: u64) -> Result<Option<Vec<u8>>, St
 fn publish_history(
     store: &Store,
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &mut Local,
     key: &str,
@@ -921,6 +982,7 @@ fn publish_history(
         let id = publish_capability(
             store,
             paths,
+            journal,
             host,
             local,
             key,
@@ -938,6 +1000,7 @@ fn publish_history(
 fn publish_capability(
     store: &Store,
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &mut Local,
     key: &str,
@@ -949,10 +1012,11 @@ fn publish_capability(
     let content = store
         .revision_content(&capability.id, revision.number)
         .map_err(store_text)?;
+    let blobs = Dir::open(paths, &["v1", "blobs"], true)?.ok_or("folder: unavailable")?;
     let mut files = Vec::with_capacity(content.len());
     for (path, bytes) in &content {
         let hash = store::digest(bytes);
-        write_blob(paths, &hash, bytes)?;
+        write_blob(paths, &blobs, &hash, bytes)?;
         files.push(FileRef {
             path: path.clone(),
             sha256: hash,
@@ -969,12 +1033,14 @@ fn publish_capability(
         tree_hash: revision.tree_hash.clone(),
         files,
     });
-    publish(paths, host, local, key, base, merged, body)
+    publish(paths, journal, host, local, key, base, merged, body)
 }
 
 /// Writes one record into this device's journal, whole or not at all.
+#[allow(clippy::too_many_arguments)]
 fn publish(
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &mut Local,
     key: &str,
@@ -982,9 +1048,8 @@ fn publish(
     merged: Vec<String>,
     body: Body,
 ) -> Result<String, String> {
-    let dir = paths.devices().join(&local.device);
     // A journal that already holds later records (bookkeeping restored from a backup) continues after them.
-    let seq = local.next_seq.max(last_seq(&dir) + 1).max(1);
+    let seq = local.next_seq.max(last_seq(journal)? + 1).max(1);
     let record = Record {
         schema: SCHEMA.to_owned(),
         device: local.device.clone(),
@@ -997,22 +1062,33 @@ fn publish(
         body,
     };
     let bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
-    write_new(paths, &dir.join(record_name(seq)), &bytes)?;
+    write_new(paths, journal, &record_name(seq), &bytes, false)?;
     local.next_seq = seq + 1;
     Ok(record.id())
 }
 
-fn write_blob(paths: &Paths, hash: &str, bytes: &[u8]) -> Result<(), String> {
-    let target = paths.blob(hash);
-    if target.exists() {
+fn write_blob(paths: &Paths, blobs: &Dir, hash: &str, bytes: &[u8]) -> Result<(), String> {
+    if fs::symlink_metadata(blobs.at(hash)).is_ok() {
         return Ok(());
     }
-    write_new(paths, &target, bytes)
+    match write_new(paths, blobs, hash, bytes, false) {
+        // Named by its content: one already there is the same file.
+        Err(error) if error.contains("exists") => Ok(()),
+        other => other,
+    }
 }
 
-/// Writes a file in the private staging folder and renames it into place, so the synchronizer
-/// never sees part of it. The staging folder is on the same file system as the shared one.
-fn write_new(paths: &Paths, target: &Path, bytes: &[u8]) -> Result<(), String> {
+/// Writes a file in the private staging folder and renames it into `dir`, so the synchronizer
+/// never sees part of it. The staging folder is on the same file system as the shared one. The
+/// rename is relative to the folder as opened, so a link planted in the shared folder cannot
+/// redirect it; a file already there is replaced only when `replace` says so.
+fn write_new(
+    paths: &Paths,
+    dir: &Dir,
+    name: &str,
+    bytes: &[u8],
+    replace: bool,
+) -> Result<(), String> {
     let temp = paths
         .staging()
         .join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
@@ -1026,20 +1102,31 @@ fn write_new(paths: &Paths, target: &Path, bytes: &[u8]) -> Result<(), String> {
         file.write_all(bytes).map_err(|e| format!("write: {e}"))?;
         file.sync_all().map_err(|e| format!("write: {e}"))?;
     }
-    if let Err(error) = fs::rename(&temp, target) {
+    let flags = if replace {
+        nix::fcntl::RenameFlags::empty()
+    } else {
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE
+    };
+    if let Err(error) = nix::fcntl::renameat2(
+        None,
+        temp.as_path(),
+        Some(dir.file.as_raw_fd()),
+        Path::new(name),
+        flags,
+    ) {
         let _ = fs::remove_file(&temp);
-        return Err(format!("publish: {error}"));
+        return Err(match error {
+            nix::errno::Errno::EEXIST => format!("publish: {name} exists"),
+            other => format!("publish: {other}"),
+        });
     }
-    if let Some(parent) = target.parent()
-        && let Ok(dir) = File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+    let _ = dir.file.sync_all();
     Ok(())
 }
 
 fn write_applied(
     paths: &Paths,
+    journal: &Dir,
     host: &str,
     local: &Local,
     records: &[Record],
@@ -1063,10 +1150,7 @@ fn write_applied(
             *entry = (*entry).max(record.seq);
         }
     }
-    let path = paths.devices().join(&local.device).join("applied.json");
-    let previous: Option<Applied> = fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let previous = read_applied(journal);
     if previous
         .as_ref()
         .is_some_and(|p| p.seen == seen && p.host == host)
@@ -1081,58 +1165,98 @@ fn write_applied(
         seen,
     };
     let bytes = serde_json::to_vec_pretty(&applied).map_err(|e| e.to_string())?;
-    write_new(paths, &path, &bytes)
+    write_new(paths, journal, "applied.json", &bytes, true)
+}
+
+/// A device's acknowledgments, if its folder holds a plain, small, well-formed `applied.json`.
+fn read_applied(dir: &Dir) -> Option<Applied> {
+    let file = dir.file("applied.json").ok()??;
+    let mut bytes = Vec::new();
+    file.take(64 * 1024 + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > 64 * 1024 {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
 }
 
 // ---------------------------------------------------------------------------------------------
 // Reading the shared folder
 
-/// Every valid record of every device, and the files that were refused with why.
-fn read_records(paths: &Paths) -> (Vec<Record>, Vec<(String, String)>) {
+/// Every valid record of every device, and the files that were refused with why. A shared folder
+/// larger than this version reads is an error: nothing is applied from part of it.
+type Shared = (Vec<Record>, Vec<(String, String)>);
+fn read_records(paths: &Paths) -> Result<Shared, String> {
     let mut records = Vec::new();
     let mut refused = Vec::new();
-    let Ok(devices) = fs::read_dir(paths.devices()) else {
-        return (records, refused);
+    let Some(devices) = Dir::open(paths, &["v1", "devices"], false)? else {
+        return Ok((records, refused));
     };
     let mut names: Vec<String> = devices
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .names(MAX_DEVICE_ENTRIES)?
+        .into_iter()
         .filter(|name| device_ok(name))
         .collect();
     names.sort();
     names.truncate(MAX_DEVICES);
+    let mut bytes = 0_u64;
     for device in names {
-        let dir = paths.devices().join(&device);
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
+        let dir = match devices.child(&device, false) {
+            Ok(Some(dir)) => dir,
+            Ok(None) => continue,
+            Err(_) => {
+                refused.push((
+                    display(&paths.devices().join(&device)),
+                    "not a plain folder".to_owned(),
+                ));
+                continue;
+            }
         };
-        let mut files: Vec<(u64, PathBuf)> = entries
-            .flatten()
-            .filter_map(|entry| {
-                let name = entry.file_name().into_string().ok()?;
-                Some((parse_record_name(&name)?, entry.path()))
-            })
+        let mut files: Vec<(u64, String)> = dir
+            .names(MAX_DIR_ENTRIES)?
+            .into_iter()
+            .filter_map(|name| Some((parse_record_name(&name)?, name)))
             .collect();
         files.sort();
-        files.truncate(MAX_RECORDS_PER_DEVICE);
-        for (seq, path) in files {
-            match read_record(&path, &device, seq) {
+        if records.len() + files.len() > MAX_RECORDS {
+            return Err("the shared folder holds more records than this version reads".into());
+        }
+        for (seq, name) in files {
+            match read_record(&dir, &name, &device, seq, &mut bytes) {
                 Ok(Some(record)) => records.push(record),
                 // A newer format: left for a newer version of the application.
                 Ok(None) => {}
-                Err(why) => refused.push((display(&path), why.to_owned())),
+                Err(why) => refused.push((
+                    display(&paths.devices().join(&device).join(&name)),
+                    why.to_owned(),
+                )),
+            }
+            if bytes > MAX_RECORDS_BYTES {
+                return Err("the shared folder holds more records than this version reads".into());
             }
         }
     }
-    (records, refused)
+    Ok((records, refused))
 }
 
-fn read_record(path: &Path, device: &str, seq: u64) -> Result<Option<Record>, &'static str> {
-    let meta = fs::symlink_metadata(path).map_err(|_| "unreadable")?;
-    if !meta.is_file() || meta.len() > MAX_RECORD_BYTES {
+fn read_record(
+    dir: &Dir,
+    name: &str,
+    device: &str,
+    seq: u64,
+    total: &mut u64,
+) -> Result<Option<Record>, &'static str> {
+    let file = dir
+        .file(name)
+        .map_err(|_| "not a record file")?
+        .ok_or("unreadable")?;
+    let mut bytes = Vec::new();
+    file.take(MAX_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "unreadable")?;
+    *total += bytes.len() as u64;
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err("not a record file");
     }
-    let bytes = fs::read(path).map_err(|_| "unreadable")?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| "not JSON")?;
     if value.get("schema").and_then(|s| s.as_str()) != Some(SCHEMA) {
         return Ok(None);
@@ -1354,18 +1478,20 @@ fn status(
         peer.host = record.host.clone();
         peer.last_heard = peer.last_heard.max(Some(record.at));
     }
-    if let Ok(entries) = fs::read_dir(paths.devices()) {
-        for entry in entries.flatten() {
-            let Ok(device) = entry.file_name().into_string() else {
-                continue;
-            };
+    let devices = Dir::open(paths, &["v1", "devices"], false).ok().flatten();
+    let names = devices
+        .as_ref()
+        .and_then(|d| d.names(MAX_DEVICE_ENTRIES).ok())
+        .unwrap_or_default();
+    if let Some(devices) = &devices {
+        for device in names {
             if device == local.device || !device_ok(&device) {
                 continue;
             }
-            let applied: Option<Applied> = fs::read(entry.path().join("applied.json"))
-                .ok()
-                .filter(|bytes| bytes.len() < 64 * 1024)
-                .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+            let Some(dir) = devices.child(&device, false).ok().flatten() else {
+                continue;
+            };
+            let applied = read_applied(&dir);
             let Some(applied) = applied.filter(|a| a.device == device) else {
                 continue;
             };
@@ -1398,6 +1524,7 @@ fn status(
         pending,
         conflicts: local.conflicts.clone(),
         rejected: local.rejected.clone(),
+        removed: local.removed.clone(),
         peers: peers.into_values().collect(),
     }
 }
@@ -1455,6 +1582,9 @@ fn run(
             Ok(mut store) => reconcile(&mut store, &paths, &host),
             Err(_) => Err("library unavailable".into()),
         };
+        let more = outcome
+            .as_ref()
+            .is_ok_and(|s| s.pending.iter().any(|n| n.detail == MORE_NEXT_RUN));
         if let Ok(mut current) = status.lock() {
             match outcome {
                 Ok(next) => *current = next,
@@ -1465,7 +1595,8 @@ fn run(
                 }
             }
         }
-        match wake.recv_timeout(Duration::from_secs(600)) {
+        let wait = if more { 5 } else { 600 };
+        match wake.recv_timeout(Duration::from_secs(wait)) {
             Ok(()) => {
                 // Many files arrive together: wait for them to settle, then run once.
                 std::thread::sleep(Duration::from_millis(1500));
@@ -1482,15 +1613,25 @@ fn watch(paths: &Paths, nudge: Sender<()>) {
     let Ok(inotify) = Inotify::init(InitFlags::IN_CLOEXEC) else {
         return;
     };
-    let flags =
-        AddWatchFlags::IN_MOVED_TO | AddWatchFlags::IN_CLOSE_WRITE | AddWatchFlags::IN_CREATE;
-    let _ = make_dir(&paths.devices());
-    let _ = make_dir(&paths.blobs());
+    // A watch only asks for a run, which then reads the folder as `Dir` does: no link followed.
+    let flags = AddWatchFlags::IN_MOVED_TO
+        | AddWatchFlags::IN_CLOSE_WRITE
+        | AddWatchFlags::IN_CREATE
+        | AddWatchFlags::IN_DONT_FOLLOW
+        | AddWatchFlags::IN_ONLYDIR;
+    let _ = Dir::open(paths, &["v1", "devices"], true);
+    let _ = Dir::open(paths, &["v1", "blobs"], true);
     let mut watched: BTreeSet<PathBuf> = BTreeSet::new();
     let add = |inotify: &Inotify, watched: &mut BTreeSet<PathBuf>| {
         let mut dirs = vec![paths.devices(), paths.blobs()];
         if let Ok(entries) = fs::read_dir(paths.devices()) {
-            dirs.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+            dirs.extend(
+                entries
+                    .flatten()
+                    .take(MAX_DEVICE_ENTRIES)
+                    .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                    .map(|e| e.path()),
+            );
         }
         for dir in dirs {
             if !watched.contains(&dir) && inotify.add_watch(&dir, flags).is_ok() {
@@ -1592,10 +1733,17 @@ fn note(kind: &str, name: &str, detail: &str) -> Note {
 
 fn object_name(record: &Record) -> String {
     match &record.body {
+        Body::Deleted => record.object.clone(),
+        body => body_name(body),
+    }
+}
+
+fn body_name(body: &Body) -> String {
+    match body {
         Body::Capability(c) => c.name.clone(),
         Body::Preset(p) => p.name.clone(),
         Body::Selection(s) => s.name.clone(),
-        Body::Deleted => record.object.clone(),
+        Body::Deleted => String::new(),
     }
 }
 
@@ -1647,16 +1795,13 @@ fn parse_record_name(name: &str) -> Option<u64> {
         .then(|| digits.parse().ok())?
 }
 
-fn last_seq(dir: &Path) -> u64 {
-    fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|e| parse_record_name(&e.file_name().to_string_lossy()))
-                .max()
-                .unwrap_or(0)
-        })
-        .unwrap_or(0)
+fn last_seq(dir: &Dir) -> Result<u64, String> {
+    Ok(dir
+        .names(MAX_DIR_ENTRIES)?
+        .iter()
+        .filter_map(|name| parse_record_name(name))
+        .max()
+        .unwrap_or(0))
 }
 
 fn device_ok(name: &str) -> bool {
@@ -1704,6 +1849,142 @@ fn host_name() -> String {
     fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|name| name.trim().to_owned())
         .unwrap_or_default()
+}
+
+/// A folder of the shared folder, opened without following a symbolic link at any level of it:
+/// a link another computer plants there cannot redirect a read or a write. The folder that holds
+/// the shared one (`~/.local/share`) is this computer's own and is resolved as usual.
+struct Dir {
+    file: File,
+}
+
+impl Dir {
+    fn open(paths: &Paths, parts: &[&str], create: bool) -> Result<Option<Dir>, String> {
+        let base = paths.shared.parent().ok_or("folder: bad path")?;
+        let anchor = base.parent().ok_or("folder: bad path")?;
+        let mut names = Vec::new();
+        for part in [base, paths.shared.as_path()] {
+            names.push(
+                part.file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or("folder: bad path")?
+                    .to_owned(),
+            );
+        }
+        names.extend(parts.iter().map(|part| (*part).to_owned()));
+        if create {
+            make_dir(anchor).map_err(|e| format!("folder: {e}"))?;
+        }
+        let file = match open_flags(anchor, true, false) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !create => {
+                return Ok(None);
+            }
+            Err(error) => return Err(format!("folder: {error}")),
+        };
+        let mut dir = Dir { file };
+        for name in names {
+            match dir.child(&name, create)? {
+                Some(next) => dir = next,
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(dir))
+    }
+
+    /// A name in this folder as the system can open it, through the folder's descriptor.
+    fn at(&self, name: &str) -> PathBuf {
+        PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd())).join(name)
+    }
+
+    fn child(&self, name: &str, create: bool) -> Result<Option<Dir>, String> {
+        if !plain_name(name) {
+            return Err("folder: bad name".into());
+        }
+        if create {
+            match fs::DirBuilder::new().mode(0o700).create(self.at(name)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(format!("folder: {error}")),
+            }
+        }
+        match open_flags(&self.at(name), true, true) {
+            Ok(file) => Ok(Some(Dir { file })),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !create => Ok(None),
+            Err(_) => Err(format!("folder: {name} is not a plain folder")),
+        }
+    }
+
+    /// A plain file of this folder: never a link, a pipe or a device.
+    fn file(&self, name: &str) -> Result<Option<File>, String> {
+        if !plain_name(name) {
+            return Err("bad name".into());
+        }
+        let file = match open_flags(&self.at(name), false, true) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("not a plain file".into()),
+        };
+        match file.metadata() {
+            Ok(meta) if meta.is_file() => Ok(Some(file)),
+            _ => Err("not a plain file".into()),
+        }
+    }
+
+    /// The names in this folder, at most `limit` of them; more is an error, counted while reading.
+    fn names(&self, limit: usize) -> Result<Vec<String>, String> {
+        let entries = fs::read_dir(self.at(".")).map_err(|e| format!("folder: {e}"))?;
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("folder: {e}"))?;
+            if names.len() >= limit {
+                return Err("the shared folder holds more files than this version reads".into());
+            }
+            if let Ok(name) = entry.file_name().into_string() {
+                names.push(name);
+            }
+        }
+        Ok(names)
+    }
+}
+
+fn plain_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains('/') && !name.contains('\0')
+}
+
+fn open_flags(path: &Path, directory: bool, no_follow: bool) -> std::io::Result<File> {
+    use nix::libc;
+    let mut flags = libc::O_CLOEXEC | libc::O_NONBLOCK;
+    if directory {
+        flags |= libc::O_DIRECTORY;
+    }
+    if no_follow {
+        flags |= libc::O_NOFOLLOW;
+    }
+    OpenOptions::new().read(true).custom_flags(flags).open(path)
+}
+
+/// Keeps what another computer's deletion removes from this library, in this computer's own
+/// folder, and says where.
+fn keep_deleted(paths: &Paths, key: &str, body: &Body) -> Result<String, String> {
+    let dir = paths.local.join("trash");
+    make_dir(&dir).map_err(|e| format!("trash: {e}"))?;
+    let name = format!(
+        "{}-{}.json",
+        key.replace('/', "-"),
+        uuid::Uuid::new_v4().simple()
+    );
+    let bytes = serde_json::to_vec_pretty(body).map_err(|e| e.to_string())?;
+    let path = dir.join(name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|e| format!("trash: {e}"))?;
+    file.write_all(&bytes).map_err(|e| format!("trash: {e}"))?;
+    file.sync_all().map_err(|e| format!("trash: {e}"))?;
+    Ok(display(&path))
 }
 
 fn make_dir(dir: &Path) -> std::io::Result<()> {

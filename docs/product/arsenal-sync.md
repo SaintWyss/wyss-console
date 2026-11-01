@@ -55,6 +55,22 @@ A capability is stored only if:
 A refused record is reported once and not tried again. Nothing received is run, and receiving
 changes no provider's files. A record of a newer format is left for a newer version.
 
+The shared folder is read and written without following a symbolic link at any level of it: a
+folder or file another computer replaces with a link, a pipe or a device is refused, and a write
+never lands outside it. A record or file is renamed into place relative to its folder as opened,
+and a journal record never replaces an existing file.
+
+Limits: 64 entries in `devices/`, 60,000 in any one folder, 50,000 records and 128 MiB of records
+in all. A larger shared folder makes the run fail with an error shown in Arsenal, and nothing is
+applied from part of it. One run reads at most 256 MiB of file contents; the rest is applied by
+the next run, a few seconds later.
+
+A preset or selection that another computer deleted is deleted here only after its content is kept
+in `~/.local/state/wyss-console/arsenal-sync/trash/`, and Arsenal lists it under "Deleted on another
+computer" with where the copy is. Records are not signed: any device that can write the shared
+folder can already write the rest of the synchronized home, so a signature would not narrow who
+can change this computer.
+
 ## When it runs
 
 In the window's process, while the window is open: at start, after each change made in Arsenal,

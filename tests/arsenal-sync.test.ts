@@ -20,6 +20,7 @@ const status = (over: Partial<SyncStatus> = {}): SyncStatus => ({
   pending: [],
   conflicts: [],
   rejected: [],
+  removed: [],
   peers: [
     {
       device: 'b'.repeat(32),
@@ -115,6 +116,7 @@ it('shows the line with its details and asks for a run on request', () => {
   expect(text).toContain('Santiago-PC');
   expect(text).toContain('applied 4 of 4 change(s) from here');
   expect(text).toContain('leaky');
+  expect(text).not.toContain('Deleted on another computer');
   expect(document.querySelector('[role="status"]')).not.toBeNull();
   [...document.querySelectorAll('button')]
     .find((b) => b.textContent === 'Check now')!
@@ -157,4 +159,29 @@ it('does not take the desktop’s status on faith', () => {
   expect(() => parseSyncStatus({ ...status(), peers: 'x' })).toThrow();
   expect(() => parseSyncStatus({ ...status(), generation: '1' })).toThrow();
   expect(parseSyncStatus(status()).peers[0]!.host).toBe('Santiago-PC');
+});
+
+it('reports what another computer deleted, and that a copy is kept here', () => {
+  const removed = [
+    {
+      at: NOW - 60,
+      kind: 'preset',
+      name: 'Review',
+      detail:
+        'deleted on Santiago-PC; a copy is kept in ~/.local/state/wyss-console/arsenal-sync/trash/x.json',
+    },
+  ];
+  const summary = syncSummary(status({ removed }), NOW);
+  expect(summary.label).toBe('Needs a look');
+  expect(summary.text).toContain(
+    'deleted on another computer, a copy kept here',
+  );
+  component = mount(SyncLine, {
+    target: document.body,
+    props: { sync: status({ removed }), onsyncnow: () => {} },
+  });
+  flushSync();
+  const text = document.body.textContent?.replace(/\s+/g, ' ') ?? '';
+  expect(text).toContain('Deleted on another computer');
+  expect(text).toContain('a copy is kept in');
 });

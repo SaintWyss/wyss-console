@@ -871,6 +871,8 @@ export interface SyncStatus {
   pending: SyncNote[];
   conflicts: SyncNote[];
   rejected: SyncNote[];
+  /** Presets and selections deleted here because another computer deleted them; a copy is kept. */
+  removed: SyncNote[];
   peers: SyncPeer[];
 }
 
@@ -910,6 +912,7 @@ export function parseSyncStatus(value: unknown): SyncStatus {
     pending: list(v.pending, 'pending', parseSyncNote),
     conflicts: list(v.conflicts, 'conflicts', parseSyncNote),
     rejected: list(v.rejected, 'rejected', parseSyncNote),
+    removed: list(v.removed, 'removed', parseSyncNote),
     peers: list(v.peers, 'peers', parseSyncPeer),
   };
 }

@@ -390,7 +390,7 @@ fn malformed_unsupported_and_hostile_records_are_refused_and_change_nothing() {
     fs::create_dir_all(&journal).unwrap();
     let put_blob = |bytes: &[u8]| {
         let hash = store::digest(bytes);
-        fs::write(acer.paths.blob(&hash), bytes).unwrap();
+        fs::write(acer.paths.blobs().join(&hash), bytes).unwrap();
         FileRef {
             path: "SKILL.md".into(),
             sha256: hash,
@@ -645,4 +645,115 @@ fn a_peer_acknowledges_what_it_applied() {
     assert_eq!(peer.host, "Santiago-PC");
     assert_eq!(peer.applied_mine, peer.published_mine);
     assert!(peer.published_mine > 0);
+}
+
+fn device_of(m: &Machine) -> String {
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(m.paths.local.join("state.json")).unwrap()).unwrap();
+    state["device"].as_str().unwrap().to_owned()
+}
+
+fn empty(dir: &Path) -> bool {
+    fs::read_dir(dir).unwrap().next().is_none()
+}
+
+#[test]
+fn a_link_planted_in_the_shared_folder_redirects_no_write_and_no_read() {
+    use std::os::unix::fs::symlink;
+    let dir = shared();
+    let outside = dir.with_extension("outside");
+    fs::create_dir_all(&outside).unwrap();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.sync();
+    desk.sync();
+    // Another computer replaces this one's journal folder with a link to a folder of its choice.
+    let journal = acer.paths.devices().join(device_of(&acer));
+    fs::rename(&journal, dir.with_extension("moved")).unwrap();
+    symlink(&outside, &journal).unwrap();
+    preset(&mut acer, "Redirected", vec![]);
+    let error = reconcile(&mut acer.store, &acer.paths, acer.host).unwrap_err();
+    assert!(error.contains("not a plain folder"), "{error}");
+    assert!(empty(&outside), "nothing is written through the link");
+    // The same at the shared files' folder.
+    fs::remove_file(&journal).unwrap();
+    fs::rename(dir.with_extension("moved"), &journal).unwrap();
+    let blobs = acer.paths.blobs();
+    fs::rename(&blobs, dir.with_extension("blobs-moved")).unwrap();
+    symlink(&outside, &blobs).unwrap();
+    acer.skill("redirected", "# Redirected\n");
+    assert!(reconcile(&mut acer.store, &acer.paths, acer.host).is_err());
+    assert!(empty(&outside));
+    fs::remove_file(&blobs).unwrap();
+    fs::rename(dir.with_extension("blobs-moved"), &blobs).unwrap();
+    acer.sync();
+    // A peer folder that is a link, and a record that is a pipe, are refused, not followed or waited on.
+    fs::create_dir_all(outside.join("r")).unwrap();
+    symlink(outside.join("r"), acer.paths.devices().join("e".repeat(32))).unwrap();
+    let peer = desk.paths.devices().join(device_of(&desk));
+    nix::unistd::mkfifo(
+        &peer.join("r-0000009999.json"),
+        nix::sys::stat::Mode::S_IRWXU,
+    )
+    .unwrap();
+    let status = acer.sync();
+    let refused: Vec<&str> = status.rejected.iter().map(|n| n.detail.as_str()).collect();
+    assert!(refused.contains(&"not a plain folder"), "{refused:?}");
+    assert!(refused.contains(&"not a record file"), "{refused:?}");
+    assert_eq!(acer.preset_names(), vec!["Redirected"]);
+    let _ = fs::remove_file(peer.join("r-0000009999.json"));
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["Redirected"]);
+    assert!(desk.names().contains(&"redirected".to_owned()));
+}
+
+#[test]
+fn a_shared_folder_larger_than_this_version_reads_fails_closed() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    acer.sync();
+    let before = acer.names();
+    for n in 0..MAX_DEVICE_ENTRIES {
+        fs::create_dir_all(acer.paths.devices().join(format!("{n:032x}"))).unwrap();
+    }
+    let error = reconcile(&mut acer.store, &acer.paths, acer.host).unwrap_err();
+    assert!(
+        error.contains("more files than this version reads"),
+        "{error}"
+    );
+    assert_eq!(acer.names(), before);
+    let status = read_status(&acer.paths, acer.host);
+    assert!(status.error.is_some());
+}
+
+#[test]
+fn what_another_computer_deletes_is_kept_here_and_reported() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let gone = preset(&mut acer, "Deleted elsewhere", vec![]);
+    acer.sync();
+    desk.sync();
+    acer.store.delete_preset(&gone).unwrap();
+    acer.sync();
+    let status = desk.sync();
+    assert!(desk.preset_names().is_empty());
+    assert_eq!(status.removed.len(), 1);
+    let note = &status.removed[0];
+    assert_eq!(note.name, "Deleted elsewhere");
+    assert!(
+        note.detail.contains("deleted on saint-acer"),
+        "{}",
+        note.detail
+    );
+    let kept: Vec<PathBuf> = fs::read_dir(desk.paths.local.join("trash"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert_eq!(kept.len(), 1);
+    let body: Body = serde_json::from_slice(&fs::read(&kept[0]).unwrap()).unwrap();
+    assert!(matches!(body, Body::Preset(p) if p.name == "Deleted elsewhere"));
+    // The computer that deleted it keeps no copy: it was deleted there by its owner.
+    assert!(!acer.paths.local.join("trash").exists());
 }

@@ -32,10 +32,14 @@ export function syncSummary(sync: SyncStatus, now: number): SyncSummary {
     };
   const conflicts = sync.conflicts.filter((n) => recent(n.at)).length;
   const rejected = sync.rejected.filter((n) => recent(n.at)).length;
-  if (conflicts > 0 || rejected > 0) {
+  const removed = sync.removed.filter((n) => recent(n.at)).length;
+  if (conflicts > 0 || rejected > 0 || removed > 0) {
     const parts = [
       conflicts > 0 ? `${count(conflicts, 'conflict')} kept both versions` : '',
       rejected > 0 ? `${count(rejected, 'item')} refused` : '',
+      removed > 0
+        ? `${count(removed, 'item')} deleted on another computer, a copy kept here`
+        : '',
     ].filter(Boolean);
     return {
       tone: 'warn',

@@ -17,6 +17,7 @@
       { title: 'Waiting', items: sync.pending },
       { title: 'Conflicts kept both versions', items: sync.conflicts },
       { title: 'Refused', items: sync.rejected },
+      { title: 'Deleted on another computer', items: sync.removed },
     ].filter((group) => group.items.length > 0),
   );
 </script>

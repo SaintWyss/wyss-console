@@ -422,6 +422,7 @@ mockIPC((command, payload) => {
         pending: [],
         conflicts: [],
         rejected: [],
+        removed: [],
         peers: [
           {
             device: 'b'.repeat(32),
