@@ -1,4 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import Sidebar from '../src/lib/shell/Sidebar.svelte';
 import {
@@ -110,4 +112,20 @@ it('draws every compatibility, discovery and delegation state with a symbol, not
   expect(compatibilityMark('supported').tone).toBe('ok');
   expect(compatibilityMark('unsupported').tone).toBe('error');
   expect(delegationMark('timed_out').tone).toBe('error');
+});
+
+it('never stretches a checkbox or radio across its row in Arsenal forms', () => {
+  // A regression seen in the installed app: `width: 100%` on every input of the selection
+  // editor made each checkbox a full row and pushed the capability name to the far edge.
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/lib/features/arsenal/ArsenalView.svelte'),
+    'utf8',
+  );
+  const style = source.slice(source.indexOf('<style>'));
+  for (const rule of style.matchAll(/([^{}]+)\{[^}]*\bwidth:\s*100%/g))
+    for (const selector of rule[1]!.split(/,(?![^(]*\))/))
+      if (/\binput\b/.test(selector))
+        expect(selector, selector.trim()).toMatch(
+          /:not\(\[type='checkbox'\], \[type='radio'\]\)/,
+        );
 });

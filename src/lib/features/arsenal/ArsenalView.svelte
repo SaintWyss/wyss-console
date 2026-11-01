@@ -1684,9 +1684,10 @@
     font-weight: 500;
     color: var(--muted);
   }
-  .arsenal-filters input,
+  /* Fields fill their column; a checkbox or radio keeps its own size. */
+  .arsenal-filters input:not([type='checkbox'], [type='radio']),
   .arsenal-filters select,
-  .arsenal-editor input,
+  .arsenal-editor input:not([type='checkbox'], [type='radio']),
   .arsenal-editor select,
   .arsenal-editor textarea {
     width: 100%;
@@ -1865,9 +1866,17 @@
   }
   .arsenal-check {
     display: flex !important;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px !important;
-    min-height: 44px;
+    justify-content: flex-start;
+    gap: 4px 8px !important;
+    min-height: 36px;
+    color: var(--text) !important;
+    font-weight: 500 !important;
+    text-align: left;
+  }
+  .arsenal-check input {
+    flex: 0 0 auto;
   }
   .arsenal-status {
     font-size: var(--text-md);
