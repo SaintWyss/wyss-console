@@ -14,6 +14,7 @@
     AGENT_LABEL,
     HOOKS_LABEL,
     PERMISSION_LABEL,
+    BYPASS_WARNING,
     emptyBody,
     failureText,
   } from './present';
@@ -284,6 +285,9 @@
                 >
               {/each}
             </select>
+            {#if form.permission === 'bypass'}
+              <p class="native-warning" role="note">{BYPASS_WARNING}</p>
+            {/if}
           </div>
           <div class="native-field">
             <label for="p-hooks">Hooks</label>

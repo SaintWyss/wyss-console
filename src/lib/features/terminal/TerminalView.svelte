@@ -11,6 +11,21 @@
   import type { ConsoleSessionId } from '../../contracts/identities';
   import { registerWorkspace } from '../native/bridge';
   import TerminalPanel from './TerminalPanel.svelte';
+  import {
+    getLaunch,
+    listLaunches,
+    runBefore,
+    type LaunchList,
+  } from '../../desktop/launch-client';
+  import {
+    previewProfile,
+    readProfiles,
+    startNative,
+  } from '../../desktop/native-client';
+  import type { Profile } from '../../contracts/native';
+  import { arsenalClient } from '../../desktop/arsenal-client';
+  import { BYPASS_WARNING, failureText } from '../native/present';
+  import { isFullAccess, openLaunch } from './launch';
   let {
     onworkspace,
     onagents,
@@ -32,6 +47,77 @@
   let area = $state<HTMLDivElement>();
   let searchFor = $state<ConsoleSessionId>();
   let legend = $state(false);
+  /** The launch panel (ADR 0059): the owner's launch files, read when it opens. */
+  let launchesOpen = $state(false);
+  let launches = $state<LaunchList | null>(null);
+  let launchProfiles = $state<Profile[]>([]);
+  let launchBusy = $state<string | null>(null);
+  let launchNote = $state<string | null>(null);
+  let launchError = $state<string | null>(null);
+  function explain(error: unknown): string {
+    const e = error as {
+      code?: string;
+      reasons?: string[];
+      failure?: { code: string };
+    };
+    if (e?.failure?.code) return failureText(e.failure.code);
+    if (e?.reasons?.length) return e.reasons[0];
+    return error instanceof Error
+      ? error.message
+      : 'The launch could not be opened.';
+  }
+  async function toggleLaunches() {
+    launchesOpen = !launchesOpen;
+    if (!launchesOpen) return;
+    launchError = null;
+    try {
+      launches = await listLaunches();
+      launchProfiles = await readProfiles().catch(() => []);
+    } catch (error) {
+      launches = null;
+      launchError = explain(error);
+    }
+  }
+  async function open(id: string) {
+    const m = manager;
+    if (!m || launchBusy) return;
+    launchBusy = id;
+    launchNote = null;
+    launchError = null;
+    try {
+      const opened = await openLaunch(id, {
+        getLaunch,
+        runBefore,
+        profiles: readProfiles,
+        remembered: (project, agent) =>
+          arsenalClient.projectSelection(project, agent).catch(() => null),
+        plan: (selection, agent, project) =>
+          arsenalClient.terminalPlan(selection, agent, project),
+        preview: (agent, profile, arsenal) =>
+          previewProfile(agent, profile, arsenal),
+        start: (agent, project, profile, preview, arsenal) =>
+          startNative(
+            agent,
+            project,
+            profile,
+            { rows: 24, cols: 80 },
+            null,
+            preview,
+            arsenal,
+          ),
+        bind: (session, selection, hash) =>
+          arsenalClient.bindTerminal(session, selection, hash),
+        openTerminal: (title, cwd, input) => m.launch(title, cwd, input),
+        openNative: (reply) => m.createNative(reply),
+      });
+      launchesOpen = false;
+      launchNote = opened.notes.join(' ') || null;
+    } catch (error) {
+      launchError = explain(error);
+    } finally {
+      launchBusy = null;
+    }
+  }
   const activeId = $derived(workspace.active);
   const count = $derived(workspace.sessions.length);
   const activeTab = $derived(
@@ -207,6 +293,13 @@
         </div>
       {/each}
     </div>
+    <button
+      class="new-terminal"
+      aria-expanded={launchesOpen}
+      aria-controls="launch-panel"
+      title="Launches from your files in ~/.config/wyss-console/launch"
+      onclick={() => void toggleLaunches()}>Launch ▾</button
+    >
     {#if onagents}
       <button class="new-terminal" onclick={() => onagents?.()}
         >Start agent…</button
@@ -249,6 +342,66 @@
       </dd>
     </dl>
   {/if}
+  {#if launchesOpen}
+    <div id="launch-panel" class="launch-panel" aria-label="Launches">
+      {#if launches === null && !launchError}
+        <p class="launch-empty">Reading launches…</p>
+      {:else if launches}
+        {#if launches.launches.length === 0}
+          <p class="launch-empty">
+            No launches. Add a file in <code>{launches.folder}</code>.
+          </p>
+        {:else}
+          <ul class="launch-list">
+            {#each launches.launches as launch (launch.id)}
+              {@const full = isFullAccess(launch, launchProfiles)}
+              <li>
+                <button
+                  class="launch-item"
+                  disabled={launchBusy !== null}
+                  aria-busy={launchBusy === launch.id}
+                  title={launch.kind === 'commands'
+                    ? launch.commands.join(' ; ')
+                    : `${launch.agent === 'claude_code' ? 'Claude Code' : 'Codex'}${launch.profile ? ` · ${launch.profile}` : ''} in ${launch.directory}`}
+                  onclick={() => void open(launch.id)}
+                >
+                  <span class="launch-name"
+                    >{launchBusy === launch.id
+                      ? `${launch.name}…`
+                      : launch.name}</span
+                  >
+                  <span class="launch-kind"
+                    >{launch.kind === 'commands'
+                      ? 'Terminal'
+                      : launch.agent === 'claude_code'
+                        ? 'Claude Code'
+                        : 'Codex'}</span
+                  >
+                  {#if full}
+                    <span class="badge" data-tone="warn" title={BYPASS_WARNING}
+                      >Full access</span
+                    >
+                  {/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#each launches.refused as bad (bad.id)}
+          <p class="launch-refused">
+            <code>{bad.id}.toml</code>: {bad.error}
+          </p>
+        {/each}
+        <p class="launch-folder">
+          Edit them in <code>{launches.folder}</code>.
+        </p>
+      {/if}
+    </div>
+  {/if}
+  {#if launchError}<p role="alert" class="workspace-error">
+      {launchError}
+    </p>{/if}
+  {#if launchNote}<p role="status" class="launch-note">{launchNote}</p>{/if}
   {#if workspace.error}<p role="alert" class="workspace-error">
       {workspace.error}
     </p>{/if}

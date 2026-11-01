@@ -616,6 +616,10 @@ mod tests {
             "allow-native-profile-restore",
             "allow-native-profile-export",
             "allow-native-profile-import",
+            // Launch files (ADR 0059): named by their file, read by the desktop.
+            "allow-launch-list",
+            "allow-launch-get",
+            "allow-launch-before",
             // The host that holds the terminals past the window (F9).
             "allow-host-terminals",
             "allow-host-info",

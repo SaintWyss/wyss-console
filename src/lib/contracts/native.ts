@@ -27,7 +27,7 @@ export const SESSION_STATES = [
 ] as const;
 export type SessionState = (typeof SESSION_STATES)[number];
 
-export const PERMISSIONS = ['ask', 'read_only', 'edits'] as const;
+export const PERMISSIONS = ['ask', 'read_only', 'edits', 'bypass'] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 export const HOOKS_MODES = ['inherit', 'off'] as const;
 export type HooksMode = (typeof HOOKS_MODES)[number];

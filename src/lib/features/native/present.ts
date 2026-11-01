@@ -139,7 +139,11 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   ask: 'Ask before acting',
   read_only: 'Read only (plan)',
   edits: 'Accept edits (Claude Code only)',
+  bypass: 'Full access: no prompts, no sandbox (bypass)',
 };
+/** Said wherever full access is chosen or shown: what it costs. */
+export const BYPASS_WARNING =
+  'Full access: the agent asks nothing and runs every command and edit without a sandbox, with your account’s rights.';
 export const HOOKS_LABEL: Record<HooksMode, string> = {
   inherit: 'As configured',
   off: 'Off for this session (Claude Code only)',

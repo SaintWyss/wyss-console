@@ -46,6 +46,29 @@ const CLAUDE: Evidence = Evidence {
     limitation: "Exact 2.1.309 Native provider-resolved/effective values and account entitlement are not observed",
 };
 
+/// The build installed on both computers on 2026-11-01. Qualified the way 2.1.309 was: every
+/// flag a profile passes is in this exact build's `--help`, including full access.
+const CLAUDE_316: Evidence = Evidence {
+    status: Status::SyntaxVerified,
+    qualified_version: Some("2.1.316 (Claude Code)"),
+    checked_on: Some("2026-11-01"),
+    operations: &[
+        "model via --model",
+        "reasoning effort via --effort (low, medium, high, xhigh, max)",
+        "permission mode via --permission-mode",
+        "full access via --dangerously-skip-permissions",
+        "session JSON overlay via --settings",
+    ],
+    interface: Some(
+        "--model, --effort, --permission-mode, --dangerously-skip-permissions and --settings",
+    ),
+    format: Some("argv flags plus a JSON settings overlay"),
+    scope: Some("one Native child process; Wyss does not write global or project settings"),
+    reload_semantics: Some("No Native overlay hot-reload acceptance; effective use is unverified"),
+    source: Some("2.1.316 --version/--help on saint-acer and Santiago-PC"),
+    limitation: "Syntax only: effective values, overlay behavior on this build and account entitlement are not observed",
+};
+
 const CODEX: Evidence = Evidence {
     status: Status::SyntaxVerified,
     qualified_version: Some("codex-cli 0.159.0"),
@@ -55,8 +78,9 @@ const CODEX: Evidence = Evidence {
         "reasoning effort via -c model_reasoning_effort=...",
         "sandbox via -s",
         "approval mode via -a",
+        "full access via --dangerously-bypass-approvals-and-sandbox (--help, 2026-11-01)",
     ],
-    interface: Some("-m, -c KEY=VALUE, -s and -a"),
+    interface: Some("-m, -c KEY=VALUE, -s, -a and --dangerously-bypass-approvals-and-sandbox"),
     format: Some("argv flags plus -c KEY=VALUE parsed as a TOML value"),
     scope: Some("one Native child process; ~/.codex/config.toml is not written"),
     reload_semantics: Some("No Native turn or session reload was tested; -c is a launch override"),
@@ -114,6 +138,7 @@ const UNKNOWN: Evidence = Evidence {
 pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
     match (agent, version) {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE.qualified_version.unwrap() => CLAUDE,
+        (AgentId::ClaudeCode, Some(v)) if v == CLAUDE_316.qualified_version.unwrap() => CLAUDE_316,
         (AgentId::Codex, Some(v)) if v == CODEX.qualified_version.unwrap() => CODEX,
         (AgentId::Opencode, Some(v)) if v == OPENCODE.qualified_version.unwrap() => OPENCODE,
         (AgentId::Hermes, _) => HERMES_PROFILE_UNVERIFIED,
@@ -277,7 +302,35 @@ mod tests {
 
         let codex = evidence(AgentId::Codex, Some("codex-cli 0.159.0"));
         assert_eq!(codex.status, Status::SyntaxVerified);
-        assert_eq!(codex.interface, Some("-m, -c KEY=VALUE, -s and -a"));
+        assert_eq!(
+            codex.interface,
+            Some("-m, -c KEY=VALUE, -s, -a and --dangerously-bypass-approvals-and-sandbox")
+        );
+        assert!(
+            codex
+                .operations
+                .iter()
+                .any(|o| o.contains("--dangerously-bypass-approvals-and-sandbox"))
+        );
+
+        let installed = evidence(AgentId::ClaudeCode, Some("2.1.316 (Claude Code)"));
+        assert_eq!(installed.status, Status::SyntaxVerified);
+        assert!(
+            installed
+                .operations
+                .contains(&"full access via --dangerously-skip-permissions")
+        );
+        assert!(permits_profile_overrides(
+            AgentId::ClaudeCode,
+            Some("2.1.316 (Claude Code)")
+        ));
+        for neighbour in ["2.1.315 (Claude Code)", "2.1.317 (Claude Code)", "2.1.316"] {
+            assert_eq!(
+                evidence(AgentId::ClaudeCode, Some(neighbour)).status,
+                Status::Unverified,
+                "{neighbour}"
+            );
+        }
         assert_eq!(
             codex.scope,
             Some("one Native child process; ~/.codex/config.toml is not written")

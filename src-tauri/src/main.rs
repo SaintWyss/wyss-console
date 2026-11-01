@@ -23,6 +23,9 @@ mod handoff;
 mod host;
 #[cfg(target_os = "linux")]
 mod native;
+// Launch configurations (ADR 0059): the owner's files, read by the desktop.
+#[cfg(target_os = "linux")]
+mod launch;
 // The project-centered workspace (M1, ADR 0052): presentation metadata over the owners.
 #[cfg(target_os = "linux")]
 mod native_dialog;
@@ -128,6 +131,7 @@ fn main() {
             .merge(orchestration_commands::extension())
             .merge(host::commands::extension())
             .merge(native::extension())
+            .merge(launch::extension())
             .merge(projects::commands::extension())
             .merge(credentials::commands::extension())
             .merge(arsenal::commands::extension());

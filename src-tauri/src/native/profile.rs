@@ -10,8 +10,9 @@ pub const MAX_NOTES: usize = 500;
 pub const MAX_SKILLS: usize = 64;
 pub const MAX_DEPTH: usize = 8;
 
-/// A start flag the provider has, as one closed word. `bypassPermissions` and
-/// `danger-full-access` are deliberately not in it.
+/// A start flag the provider has, as one closed word. Full access is its own explicit word
+/// (`bypass`, ADR 0059), never reached through another one; `danger-full-access` alone is not
+/// in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
@@ -21,7 +22,14 @@ pub enum Permission {
     ReadOnly,
     /// Edits are accepted without asking (Claude Code only).
     Edits,
+    /// Nothing is asked and nothing is contained: the provider's own skip-everything flag
+    /// (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`).
+    Bypass,
 }
+
+/// What `Permission::Bypass` costs, shown before a start and on the session.
+pub const BYPASS_COST: &str = "Full access: the agent asks nothing and runs every command and \
+     edit without a sandbox, with your account's rights.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -276,9 +284,26 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
                 Permission::Ask => "manual",
                 Permission::ReadOnly => "plan",
                 Permission::Edits => "acceptEdits",
+                Permission::Bypass => {
+                    literal(&mut plan, &["--dangerously-skip-permissions"]);
+                    plan.applied
+                        .push("Permissions: skipped (--dangerously-skip-permissions).".to_owned());
+                    plan.with_cost.push(BYPASS_COST.to_owned());
+                    ""
+                }
             };
-            literal(&mut plan, &["--permission-mode", mode]);
-            plan.applied.push(format!("Permission mode: {mode}."));
+            if !mode.is_empty() {
+                literal(&mut plan, &["--permission-mode", mode]);
+                plan.applied.push(format!("Permission mode: {mode}."));
+            }
+        }
+        (AgentId::Codex, Some(Permission::Bypass)) => {
+            literal(&mut plan, &["--dangerously-bypass-approvals-and-sandbox"]);
+            plan.applied.push(
+                "Codex: no approvals and no sandbox (--dangerously-bypass-approvals-and-sandbox)."
+                    .to_owned(),
+            );
+            plan.with_cost.push(BYPASS_COST.to_owned());
         }
         (AgentId::Codex, Some(Permission::Ask)) => {
             literal(&mut plan, &["-s", "workspace-write", "-a", "on-request"]);
@@ -376,6 +401,19 @@ pub fn templates() -> Vec<(&'static str, Body)> {
                 applies_to: vec![AgentId::ClaudeCode],
                 hooks: Some(HooksMode::Off),
                 notes: "No hooks in this session. Claude Code only.".to_owned(),
+                ..Body::default()
+            },
+        ),
+        (
+            "template-full-access",
+            Body {
+                name: "Full access (bypass)".to_owned(),
+                applies_to: both.clone(),
+                permission: Some(Permission::Bypass),
+                notes: "No permission prompts and no sandbox, as \
+                        claude --dangerously-skip-permissions and \
+                        codex --dangerously-bypass-approvals-and-sandbox."
+                    .to_owned(),
                 ..Body::default()
             },
         ),

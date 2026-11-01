@@ -871,7 +871,11 @@ pub async fn native_profiles(link: State<'_, HostLink>) -> Answer {
 
 /// What a profile body needs of the host beyond protocol 1: nothing for a body that existed
 /// before efforts did, so that an older host kept running across an upgrade still takes it.
+/// The newest host feature the body needs; a host that has it has every older one.
 pub(crate) fn needed_feature(body: &Body) -> Option<&'static str> {
+    if body.permission == Some(super::profile::Permission::Bypass) {
+        return Some("native_permission_bypass_v1");
+    }
     body.effort.is_some().then_some("profile_effort")
 }
 

@@ -1005,6 +1005,95 @@ code,
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-lg);
 }
+/* Launches (ADR 0059): the owner's launch files, under the tab strip like the key legend. */
+.launch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.launch-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.launch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out;
+}
+.launch-item:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent-line);
+}
+.launch-item:disabled {
+  opacity: 0.5;
+}
+.launch-item[aria-busy='true'] {
+  opacity: 1;
+  border-color: var(--accent-line);
+}
+.launch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launch-kind {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.launch-empty,
+.launch-folder {
+  margin: 0;
+  color: var(--muted);
+}
+.launch-refused {
+  margin: 0;
+  color: var(--warn);
+}
+.launch-note {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  border-left: 2px solid var(--warn);
+}
+.native-warning {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  font-size: var(--text-sm);
+  color: var(--warn);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch-item {
+    transition: none;
+  }
+}
 .workspace-error {
   padding: 8px 12px;
   font-size: var(--text-sm);

@@ -70,6 +70,8 @@ interface OwnedSession extends TerminalSession {
   restored?: boolean;
   /** Where a shell that has to be made again starts (from a saved layout). */
   cwd?: string;
+  /** Typed once the terminal runs: a launch's commands. */
+  input?: string;
 }
 export const SESSION_LIMIT = 16;
 
@@ -330,6 +332,24 @@ export class TerminalSessionManager {
     this.activate(id);
     return id;
   }
+  /**
+   * A launch's terminal (ADR 0059): a new tab titled as the launch, in its folder, with its
+   * commands typed once its shell runs.
+   */
+  launch(
+    title: string,
+    cwd: string,
+    input: string,
+  ): ConsoleSessionId | undefined {
+    const id = this.create();
+    const session = id && this.sessions.find((s) => s.id === id);
+    if (!session) return;
+    session.title = title;
+    session.cwd = cwd;
+    session.input = input;
+    this.publish();
+    return id;
+  }
   /** A new terminal beside the pane `of`, in its tab. */
   split(of: ConsoleSessionId, dir: Direction): ConsoleSessionId | undefined {
     const tab = this.tabOfSession(of);
@@ -399,6 +419,9 @@ export class TerminalSessionManager {
       controller.setActive(this.shown(id), this.active === id);
       void controller.start().finally(() => {
         this.created(id);
+        if (session.input && session.view.state === 'running')
+          controller.type(session.input);
+        session.input = undefined;
         const info = session.adopted;
         // A screen the host's parser kept was drawn already; only when none was, the program is
         // asked to draw its own again.

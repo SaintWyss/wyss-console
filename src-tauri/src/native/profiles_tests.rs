@@ -24,7 +24,7 @@ fn body(name: &str) -> Body {
 fn templates_ship_read_only_and_a_copy_is_how_one_becomes_editable() {
     let (store, dir) = store();
     let templates: Vec<_> = store.list().into_iter().filter(|s| s.template).collect();
-    assert_eq!(templates.len(), 4);
+    assert_eq!(templates.len(), 5);
     let id = &templates[0].id;
     assert_eq!(
         store.save(id, body("x")),
@@ -378,4 +378,71 @@ fn only_a_body_that_carries_an_effort_needs_the_newer_host() {
     // …and what it would send an older host for a body without an effort has no new key.
     let sent = serde_json::to_value(&with_model).unwrap();
     assert!(sent.get("effort").is_none(), "{sent}");
+}
+
+#[test]
+fn full_access_is_one_explicit_word_with_its_cost_said_and_needs_the_newer_host() {
+    use super::commands::needed_feature;
+    use super::profile::{BYPASS_COST, Resolved, plan};
+    let mut full = body("Full");
+    full.permission = Some(Permission::Bypass);
+    full.validate().unwrap();
+    let resolved = Resolved {
+        body: full.clone(),
+        from: Default::default(),
+    };
+    let claude = plan(&resolved, AgentId::ClaudeCode, true);
+    assert_eq!(words(&claude), vec!["--dangerously-skip-permissions"]);
+    assert!(claude.with_cost.contains(&BYPASS_COST.to_owned()));
+    let codex = plan(&resolved, AgentId::Codex, true);
+    assert_eq!(
+        words(&codex),
+        vec!["--dangerously-bypass-approvals-and-sandbox"]
+    );
+    assert!(codex.with_cost.contains(&BYPASS_COST.to_owned()));
+    // Providers whose permissions are not managed get nothing, and are told so.
+    let opencode = plan(&resolved, AgentId::Opencode, true);
+    assert!(words(&opencode).is_empty());
+    assert!(!opencode.not_applicable.is_empty());
+    // The other words never reach full access.
+    for other in [Permission::Ask, Permission::ReadOnly, Permission::Edits] {
+        let mut b = body("p");
+        b.permission = Some(other);
+        let r = Resolved {
+            body: b,
+            from: Default::default(),
+        };
+        for agent in [AgentId::ClaudeCode, AgentId::Codex] {
+            let w = words(&plan(&r, agent, true)).join(" ");
+            assert!(!w.contains("dangerously"), "{other:?} {agent:?}: {w}");
+        }
+    }
+    // An older host cannot keep the word: it is refused before it is sent.
+    assert_eq!(needed_feature(&full), Some("native_permission_bypass_v1"));
+    full.effort = Some("high".into());
+    assert_eq!(needed_feature(&full), Some("native_permission_bypass_v1"));
+    assert_eq!(
+        serde_json::to_value(Permission::Bypass).unwrap(),
+        serde_json::json!("bypass")
+    );
+}
+
+#[test]
+fn the_full_access_template_ships_read_only_for_both_agents() {
+    let (store, dir) = store();
+    let template = store
+        .list()
+        .into_iter()
+        .find(|s| s.template && s.body.name == "Full access (bypass)")
+        .expect("template");
+    assert_eq!(template.body.permission, Some(Permission::Bypass));
+    assert_eq!(
+        template.body.applies_to,
+        vec![AgentId::ClaudeCode, AgentId::Codex]
+    );
+    assert_eq!(
+        store.save(&template.id, body("x")),
+        Err(ProfileError::ReadOnlyTemplate)
+    );
+    fs::remove_dir_all(dir).ok();
 }

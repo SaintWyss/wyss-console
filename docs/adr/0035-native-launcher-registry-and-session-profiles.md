@@ -64,7 +64,8 @@ library the authority links.
    a name, the agents it is written for, one parent (depth at most 8, no cycle), a model name
    (a restricted pattern, never starting with a dash), a permission word, a hooks word, a list
    of skill names to switch off, notes (refused when they look like a secret). Dangerous modes
-   (`bypassPermissions`, `danger-full-access`) are not words of the schema. Every save is a new
+   (`bypassPermissions`, `danger-full-access`) are not words of the schema; ADR 0059 later added
+   full access as its own explicit word, `bypass`, with its cost shown wherever it is chosen. Every save is a new
    version (20 kept; bringing one back moves a pointer); a running session keeps the version it
    started with. Export and import move one file through native dialogs; an import drops the
    parent, never overwrites (a suffix is added to a clashing name) and grants nothing. Four

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import {
   TerminalSessionManager,
@@ -514,4 +514,73 @@ it('activating the already selected tab returns focus to its terminal', async ()
   await vi.advanceTimersByTimeAsync(60);
   expect(renders[0].value.focus).toHaveBeenCalledTimes(before + 1);
   expect(count('create_terminal')).toHaveLength(1);
+});
+
+describe('launches (ADR 0059)', () => {
+  let launcher: TerminalSessionManager;
+  beforeEach(() => {
+    launcher = new TerminalSessionManager(
+      (value) => {
+        state = value;
+      },
+      (host, update, adopted, title, cwd) => {
+        const render = renderer();
+        renders.push(render);
+        return new TerminalController(
+          host,
+          render.value,
+          update,
+          adopted,
+          title,
+          cwd,
+        );
+      },
+    );
+  });
+  afterEach(async () => {
+    await launcher.dispose();
+  });
+  const typed = () =>
+    count('terminal_write')
+      .map((c) =>
+        new TextDecoder().decode(Uint8Array.from(c.request.data as number[])),
+      )
+      .join('');
+
+  it('opens its own tab in its folder, titled as the launch, and types its commands once the shell runs', async () => {
+    createDelay = deferred<TerminalInfo>();
+    const id = launcher.launch(
+      'Actualizar sistema',
+      '/home/me',
+      'sysupdate\r',
+    )!;
+    expect(state.sessions.find((s) => s.id === id)?.title).toBe(
+      'Actualizar sistema',
+    );
+    expect(state.tabs).toHaveLength(1);
+    launcher.attach(id, document.createElement('div'));
+    await flush();
+    expect(count('create_terminal')[0].request).toMatchObject({
+      cwd: '/home/me',
+      title: 'Actualizar sistema',
+    });
+    // Nothing is typed before the shell runs.
+    expect(typed()).toBe('');
+    createDelay.resolve(infos[0]);
+    await flush();
+    expect(typed()).toBe('sysupdate\r');
+    // Typed once: a later redraw or focus types nothing again.
+    launcher.activate(id);
+    await flush();
+    expect(typed()).toBe('sysupdate\r');
+  });
+
+  it('types nothing into a terminal that failed to start', async () => {
+    createError = true;
+    const id = launcher.launch('Broken', '/home/me', 'rm -rf ~\r')!;
+    launcher.attach(id, document.createElement('div'));
+    await flush();
+    expect(state.sessions.find((s) => s.id === id)?.view.state).toBe('failed');
+    expect(count('terminal_write')).toHaveLength(0);
+  });
 });

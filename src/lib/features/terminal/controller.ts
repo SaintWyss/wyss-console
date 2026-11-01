@@ -93,6 +93,13 @@ export class TerminalController {
    * `active`: the terminal is shown and takes part in layout. `focus`: it is also the one the
    * keyboard goes to. Panes of one tab are all shown, and only one has the focus.
    */
+  /**
+   * Text sent to the program as if it were typed, once the terminal runs: a launch's commands
+   * (ADR 0059). Before that, and after it stops, nothing is sent.
+   */
+  type(text: string) {
+    this.enqueueText(text);
+  }
   setActive(active: boolean, focus = true) {
     this.active = active;
     this.renderer.setActive(active);
