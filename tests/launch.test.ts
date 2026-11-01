@@ -214,3 +214,29 @@ it('full access is shown only for a session whose named profile is bypass for it
     ),
   ).toBe(false);
 });
+
+it('full access is shown for a profile that inherits it, and a broken chain gives nothing', () => {
+  const child = (id: string, name: string, parent: string | null) => {
+    const p = profile(id, name, null);
+    (p.body as { extends: string | null }).extends = parent;
+    return p;
+  };
+  const list = [
+    ...PROFILES,
+    child('p-kid', 'Kid', 'p-full'),
+    child('p-grandkid', 'Grandkid', 'p-kid'),
+    child('p-orphan', 'Orphan', 'p-gone'),
+    child('p-a', 'Loop A', 'p-b'),
+    child('p-b', 'Loop B', 'p-a'),
+  ];
+  expect(isFullAccess(session({ profile: 'Kid' }), list)).toBe(true);
+  expect(isFullAccess(session({ profile: 'Grandkid' }), list)).toBe(true);
+  expect(isFullAccess(session({ profile: 'Orphan' }), list)).toBe(false);
+  expect(isFullAccess(session({ profile: 'Loop A' }), list)).toBe(false);
+  // A nearer profile that sets another word wins over an inherited bypass.
+  const safer = profile('p-safer', 'Safer', 'ask');
+  (safer.body as { extends: string | null }).extends = 'p-full';
+  expect(isFullAccess(session({ profile: 'Safer' }), [...list, safer])).toBe(
+    false,
+  );
+});

@@ -319,7 +319,7 @@ pub fn list(places: &Places) -> Result<List, String> {
             Err(error) => refused.push(Refused { id, error }),
         }
     }
-    launches.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    launches.sort_by_key(|launch| launch.name.to_lowercase());
     Ok(List {
         folder: display(&places.folder, &places.home),
         launches,
@@ -370,9 +370,16 @@ fn run_one(command: &str, folder: &Path, timeout: Duration) -> String {
         return "not_started".into();
     };
     let started = Instant::now();
+    let group = nix::unistd::Pid::from_raw(-(child.id() as i32));
+    // Whatever the command left running in its group is stopped with it: a `before` line never
+    // outlives its own run, whether it ends or times out.
+    let stop = || {
+        let _ = nix::sys::signal::kill(group, nix::sys::signal::Signal::SIGKILL);
+    };
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                stop();
                 return match status.code() {
                     Some(0) => "ok".into(),
                     Some(code) => format!("exit {code}"),
@@ -383,8 +390,7 @@ fn run_one(command: &str, folder: &Path, timeout: Duration) -> String {
                 std::thread::sleep(Duration::from_millis(50));
             }
             _ => {
-                let group = nix::unistd::Pid::from_raw(-(child.id() as i32));
-                let _ = nix::sys::signal::kill(group, nix::sys::signal::Signal::SIGKILL);
+                stop();
                 let _ = child.wait();
                 return "timeout".into();
             }

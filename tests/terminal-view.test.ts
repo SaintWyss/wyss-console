@@ -273,6 +273,9 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-native-profile-restore',
     'allow-native-profile-export',
     'allow-native-profile-import',
+    'allow-launch-list',
+    'allow-launch-get',
+    'allow-launch-before',
     // The host that holds the terminals past the window (F9): what it holds, whether it is
     // a host process, and a redraw of a program's screen after a window attaches.
     'allow-host-terminals',

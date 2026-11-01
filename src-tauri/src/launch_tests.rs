@@ -245,3 +245,24 @@ fn a_before_command_that_hangs_is_stopped_with_what_it_started() {
     std::thread::sleep(Duration::from_millis(2500));
     assert!(!marker.exists(), "the background child was stopped too");
 }
+
+#[test]
+fn what_a_before_command_leaves_running_is_stopped_when_it_ends() {
+    let places = places();
+    let marker = places.home.join("work/left-behind");
+    write(
+        &places,
+        "bg.toml",
+        &format!(
+            "name = \"Bg\"\nbefore = [\"(sleep 1; touch {}) &\"]\n[session]\nagent = \"codex\"\n",
+            marker.display()
+        ),
+    );
+    let outcomes = run_before(&get(&places, "bg").unwrap(), BEFORE_TIMEOUT);
+    assert_eq!(outcomes[0].result, "ok");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        !marker.exists(),
+        "a background child outlived its before line"
+    );
+}

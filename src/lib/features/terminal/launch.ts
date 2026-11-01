@@ -59,13 +59,32 @@ export function profileFor(
   );
 }
 
-/** Whether the profile a session launch names gives full access. */
+/**
+ * The permission a profile starts with once what it extends is merged in, as the host merges it:
+ * the nearest profile that sets one decides. A chain that is broken, too deep or a cycle gives
+ * `null`, and the host refuses to start it anyway.
+ */
+export function effectivePermission(
+  profiles: Profile[],
+  profile: Profile,
+): Profile['body']['permission'] {
+  const byId = new Map(profiles.map((p) => [p.id, p]));
+  const seen = new Set<string>();
+  let current: Profile | undefined = profile;
+  for (let depth = 0; current && depth < 8; depth++) {
+    if (seen.has(current.id)) return null;
+    seen.add(current.id);
+    if (current.body.permission) return current.body.permission;
+    current = current.body.extends ? byId.get(current.body.extends) : undefined;
+  }
+  return null;
+}
+
+/** Whether the profile a session launch names gives full access, itself or by what it extends. */
 export function isFullAccess(launch: Launch, profiles: Profile[]): boolean {
   if (launch.kind !== 'session' || !launch.profile) return false;
-  return (
-    profileFor(profiles, launch.profile, launch.agent)?.body.permission ===
-    'bypass'
-  );
+  const profile = profileFor(profiles, launch.profile, launch.agent);
+  return !!profile && effectivePermission(profiles, profile) === 'bypass';
 }
 
 /**
