@@ -6,6 +6,7 @@
 pub mod analysis;
 pub mod commands;
 pub mod store;
+pub mod sync;
 pub mod terminal;
 
 use std::collections::BTreeMap;
@@ -24,13 +25,36 @@ pub struct Arsenal {
     store: Result<Arc<Mutex<Store>>, Error>,
     /// The details of the last scan, by identity. Read by `arsenal_candidate`, replaced by each scan.
     details: Arc<Mutex<BTreeMap<String, commands::CandidateDetail>>>,
+    /// Synchronization with the owner's other computers, when the library opened and it is not off.
+    sync: Option<sync::Handle>,
 }
 
 impl Arsenal {
     pub fn start() -> Self {
+        let store = open().map(|store| Arc::new(Mutex::new(store)));
+        let sync = match (&store, sync::Paths::from_env()) {
+            (Ok(store), Some(paths)) => Some(sync::start(store.clone(), paths)),
+            _ => None,
+        };
         Self {
-            store: open().map(|store| Arc::new(Mutex::new(store))),
+            store,
             details: Arc::new(Mutex::new(BTreeMap::new())),
+            sync,
+        }
+    }
+
+    /// Synchronization's status; `enabled: false` when it does not run here.
+    pub(super) fn sync_status(&self) -> sync::Status {
+        self.sync
+            .as_ref()
+            .map(sync::Handle::status)
+            .unwrap_or_default()
+    }
+
+    /// Asks synchronization to run soon: after a change to the library, or when the owner asks.
+    pub(super) fn nudge_sync(&self) {
+        if let Some(sync) = &self.sync {
+            sync.nudge();
         }
     }
 

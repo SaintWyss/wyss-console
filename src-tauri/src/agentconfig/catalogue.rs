@@ -1118,6 +1118,23 @@ fn description(bytes: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+/// Why a file received from another computer may not be stored: the reasons discovery leaves a file
+/// out or blocks a capability for, applied to bytes that did not come from a scan. `None` is safe.
+pub(crate) fn unsafe_file(path: &str, bytes: &[u8]) -> Option<&'static str> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    if credential_name(name) {
+        return Some("credential_name");
+    }
+    if bytes.len() > MAX_FILE_BYTES {
+        return Some("file_too_large");
+    }
+    match std::str::from_utf8(bytes) {
+        Err(_) => Some("binary_file"),
+        Ok(text) if verdict(text).0 => Some("may_hold_secret"),
+        Ok(_) => None,
+    }
+}
+
 /// A file that is credentials by its name. Narrow on purpose: design token files are not credentials,
 /// and what a file says is checked as text in `take_file`.
 fn credential_name(name: &str) -> bool {

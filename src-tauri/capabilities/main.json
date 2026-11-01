@@ -76,6 +76,8 @@
     "allow-arsenal-terminal-bind",
     "allow-arsenal-terminal-bindings",
     "allow-arsenal-project-selection",
+    "allow-arsenal-sync-status",
+    "allow-arsenal-sync-now",
     "allow-native-launcher",
     "allow-native-readiness",
     "allow-native-preview",

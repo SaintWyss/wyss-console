@@ -15,6 +15,7 @@
     Summary,
   } from '../../contracts/arsenal';
   import { blockedText } from './messages';
+  import SyncLine from './SyncLine.svelte';
   import {
     candidateMark,
     compatibilityMark,
@@ -444,6 +445,10 @@
     Installed does not mean imported. A selection reaches a terminal only when
     you start one with it from Workspace.
   </p>
+
+  {#if arsenal.sync?.enabled}
+    <SyncLine sync={arsenal.sync} onsyncnow={() => controller.syncNow()} />
+  {/if}
 
   <div class="arsenal-tabs" role="tablist" aria-label="Arsenal sections">
     {#each TABS as tab, index (tab.id)}

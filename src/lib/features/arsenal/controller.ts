@@ -10,6 +10,7 @@ import type {
   Preview,
   LibraryItem,
   Selection,
+  SyncStatus,
 } from '../../contracts/arsenal';
 import {
   arsenalClient,
@@ -72,6 +73,8 @@ export interface ArsenalState {
   preview: Preview | null;
   /** What started terminals carry, newest first. */
   bindings: Binding[];
+  /** Synchronization with the owner's other computers; `null` until it was read once. */
+  sync: SyncStatus | null;
 }
 
 /**
@@ -97,6 +100,7 @@ export class ArsenalController {
     selections: [],
     preview: null,
     bindings: [],
+    sync: null,
   };
   private visible = false;
   private disposed = false;
@@ -120,10 +124,53 @@ export class ArsenalController {
     if (this.disposed || visible === this.visible) return;
     this.visible = visible;
     if (visible) void this.refresh();
+    this.watchSync(visible);
   }
 
   dispose() {
     this.disposed = true;
+    this.watchSync(false);
+  }
+
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private syncGeneration: number | null = null;
+
+  /** Synchronization's status is read while the view is shown, and only then. */
+  private watchSync(on: boolean) {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = null;
+    if (!on || this.disposed) return;
+    void this.readSync();
+    this.syncTimer = setInterval(() => void this.readSync(), 4000);
+  }
+
+  /** Reads the status; when synchronization changed the library since the last read, reads that too. */
+  async readSync() {
+    try {
+      const sync = await this.client.syncStatus();
+      if (this.disposed) return;
+      const changed =
+        this.syncGeneration !== null && sync.generation !== this.syncGeneration;
+      this.syncGeneration = sync.generation;
+      this.set({ sync });
+      if (changed) {
+        void this.refresh();
+        void this.loadPresets();
+        void this.loadSelections();
+      }
+    } catch {
+      // A desktop that does not synchronize answers nothing; the status stays as it was.
+    }
+  }
+
+  /** Asks for a run now. Its result shows on the next read. */
+  async syncNow() {
+    try {
+      this.set({ sync: await this.client.syncNow() });
+    } catch {
+      return;
+    }
+    setTimeout(() => void this.readSync(), 2500);
   }
 
   setTab(tab: ArsenalTab) {

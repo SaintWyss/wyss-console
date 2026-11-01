@@ -407,6 +407,31 @@ mockIPC((command, payload) => {
       return empty ? [] : selections;
     case 'arsenal_terminal_bindings':
       return [];
+    case 'arsenal_sync_status':
+    case 'arsenal_sync_now':
+      return {
+        enabled: true,
+        folder: '~/.local/share/wyss-console-sync/arsenal',
+        device: 'a'.repeat(32),
+        host: 'saint-acer',
+        generation: 3,
+        last_run: now - 20,
+        last_success: now - 20,
+        error: null,
+        published: 412,
+        pending: [],
+        conflicts: [],
+        rejected: [],
+        peers: [
+          {
+            device: 'b'.repeat(32),
+            host: 'Santiago-PC',
+            last_heard: now - 95,
+            applied_mine: 412,
+            published_mine: 412,
+          },
+        ],
+      };
     case 'native_launcher':
       return launcher;
     case 'native_readiness':

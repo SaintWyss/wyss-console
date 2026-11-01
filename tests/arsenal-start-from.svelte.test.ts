@@ -78,6 +78,7 @@ function start() {
     preview: null,
     chosenDetail: null,
     bindings: [],
+    sync: null,
   });
   const controller = {
     setTab: vi.fn((tab: ArsenalTab) => {

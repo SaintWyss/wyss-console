@@ -165,6 +165,57 @@ pub fn identity(provider: &str, kind: &str, source: &str, name: &str) -> String 
     digest(format!("{provider}\0{kind}\0{source}\0{name}").as_bytes())
 }
 
+/// One capability as synchronization reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncCapability {
+    pub id: String,
+    pub identity: String,
+    pub provider: String,
+    pub source: String,
+    pub kind: String,
+    pub name: String,
+    pub current: i64,
+    pub revisions: Vec<SyncRevision>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncRevision {
+    pub number: i64,
+    pub tree_hash: String,
+    pub origin: String,
+    pub description: String,
+}
+
+/// A preset or selection id: the lowercase hyphenated UUID form this store writes.
+pub fn uuid_ok(id: &str) -> bool {
+    id.len() == 36
+        && id.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_digit() || ('a'..='f').contains(&c),
+        })
+}
+
+/// An identity is 64 lowercase hex digits, with `#n` when one scan holds the name twice. For an
+/// account-wide capability it is exactly what `identity` derives from what it is; a project's
+/// capability mixes in its project, so only the form is checked.
+fn identity_ok(new: &NewCapability) -> bool {
+    let (hash, suffix) = new
+        .identity
+        .split_once('#')
+        .map_or((new.identity.as_str(), None), |(hash, n)| (hash, Some(n)));
+    let form = hash.len() == 64
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && suffix
+            .is_none_or(|n| !n.is_empty() && n.len() <= 3 && n.bytes().all(|b| b.is_ascii_digit()));
+    if !form {
+        return false;
+    }
+    new.source.contains("_project_")
+        || new.identity == identity(&new.provider, &new.kind, &new.source, &new.name)
+}
+
 /// What an import copies. `files` are the relative paths and bytes of the whole tree.
 pub struct NewCapability {
     pub identity: String,
@@ -680,6 +731,241 @@ impl Store {
             content.push((file.path, bytes));
         }
         Ok(content)
+    }
+
+    /// Every capability with its identity and all its revisions, oldest first, for synchronization.
+    pub fn sync_capabilities(&self) -> Result<Vec<SyncCapability>, Error> {
+        let mut statement = self.db.prepare(
+            "SELECT id, identity, provider, source, kind, name, current_revision FROM capability \
+             ORDER BY identity",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(SyncCapability {
+                id: row.get(0)?,
+                identity: row.get(1)?,
+                provider: row.get(2)?,
+                source: row.get(3)?,
+                kind: row.get(4)?,
+                name: row.get(5)?,
+                current: row.get(6)?,
+                revisions: Vec::new(),
+            })
+        })?;
+        let mut capabilities = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut revisions = self.db.prepare(
+            "SELECT number, tree_hash, origin, description FROM revision \
+             WHERE capability_id = ?1 ORDER BY number",
+        )?;
+        for capability in &mut capabilities {
+            capability.revisions = revisions
+                .query_map([&capability.id], |row| {
+                    Ok(SyncRevision {
+                        number: row.get(0)?,
+                        tree_hash: row.get(1)?,
+                        origin: row.get(2)?,
+                        description: row.get(3)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+        }
+        Ok(capabilities)
+    }
+
+    /// Adds a revision with this content to the capability its identity names, unless the
+    /// capability already holds that content, and makes it current when asked. A new identity
+    /// creates the capability. Content that is already stored is never stored twice.
+    pub fn import_revision(
+        &mut self,
+        new: &NewCapability,
+        current: bool,
+    ) -> Result<Imported, Error> {
+        validate(new)?;
+        if !identity_ok(new) {
+            return Err(Error::Invalid);
+        }
+        let tree = tree_digest(&new.files);
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let known: Option<(String, i64, String, String, String, String)> = tx
+            .query_row(
+                "SELECT id, current_revision, provider, source, kind, name FROM capability \
+                 WHERE identity = ?1",
+                [&new.identity],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let imported = match known {
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO capability (id, identity, provider, source, kind, name, \
+                     current_revision, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
+                    params![
+                        id,
+                        new.identity,
+                        new.provider,
+                        new.source,
+                        new.kind,
+                        new.name,
+                        now
+                    ],
+                )?;
+                insert_revision(&tx, &id, 1, &tree, new, now)?;
+                Imported {
+                    capability: id,
+                    revision: 1,
+                    outcome: Outcome::Created,
+                }
+            }
+            Some((id, number, provider, source, kind, name)) => {
+                // One identity is one capability: content claiming another provider is refused.
+                if (provider, source, kind, name)
+                    != (
+                        new.provider.clone(),
+                        new.source.clone(),
+                        new.kind.clone(),
+                        new.name.clone(),
+                    )
+                {
+                    return Err(Error::Invalid);
+                }
+                let held: Option<i64> = tx
+                    .query_row(
+                        "SELECT number FROM revision WHERE capability_id = ?1 AND tree_hash = ?2 \
+                         ORDER BY number DESC LIMIT 1",
+                        params![id, tree],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let (target, added) = match held {
+                    Some(target) => (target, false),
+                    None => {
+                        let last: i64 = tx.query_row(
+                            "SELECT MAX(number) FROM revision WHERE capability_id = ?1",
+                            [&id],
+                            |row| row.get(0),
+                        )?;
+                        let next = last.checked_add(1).ok_or(Error::Invalid)?;
+                        insert_revision(&tx, &id, next, &tree, new, now)?;
+                        (next, true)
+                    }
+                };
+                let moved = current && target != number;
+                if moved {
+                    tx.execute(
+                        "UPDATE capability SET current_revision = ?2, updated_at = ?3 WHERE id = ?1",
+                        params![id, target, now],
+                    )?;
+                }
+                Imported {
+                    capability: id,
+                    revision: target,
+                    outcome: if added || moved {
+                        Outcome::NewRevision
+                    } else {
+                        Outcome::Unchanged
+                    },
+                }
+            }
+        };
+        tx.commit()?;
+        Ok(imported)
+    }
+
+    /// The revision of a capability that holds this content, if any.
+    pub fn tree_revision(&self, id: &str, tree: &str) -> Result<Option<i64>, Error> {
+        let number = self
+            .db
+            .query_row(
+                "SELECT number FROM revision WHERE capability_id = ?1 AND tree_hash = ?2 \
+                 ORDER BY number DESC LIMIT 1",
+                params![id, tree],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(number)
+    }
+
+    /// Writes a preset under a known id: created when new, replaced when it exists. Used by
+    /// synchronization, which keeps one id for one preset on every computer.
+    pub fn put_preset(&mut self, id: &str, input: &PresetInput) -> Result<(), Error> {
+        if !uuid_ok(id) {
+            return Err(Error::Invalid);
+        }
+        check_text(&input.name, 80, true)?;
+        check_text(&input.description, 500, false)?;
+        check_items(&input.items)?;
+        let items = encode_items(&input.items)?;
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        check_references(&tx, &input.items)?;
+        tx.execute(
+            "INSERT INTO preset (id, name, description, items, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, \
+             description = excluded.description, items = excluded.items, \
+             updated_at = excluded.updated_at",
+            params![id, input.name.trim(), input.description, items, now],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Writes a selection under a known id, as `put_preset` does.
+    pub fn put_selection(&mut self, id: &str, input: &SelectionInput) -> Result<(), Error> {
+        if !uuid_ok(id) {
+            return Err(Error::Invalid);
+        }
+        check_text(&input.name, 80, true)?;
+        if !is_provider(&input.provider) {
+            return Err(Error::Invalid);
+        }
+        check_items(&input.items)?;
+        check_composites(&input.composites)?;
+        let items = encode_items(&input.items)?;
+        let composites = serde_json::to_string(&input.composites).map_err(|_| Error::Invalid)?;
+        let now = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        check_references(&tx, &input.items)?;
+        tx.execute(
+            "INSERT INTO selection (id, name, provider, items, created_at, updated_at, composites) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6) ON CONFLICT(id) DO UPDATE SET \
+             name = excluded.name, provider = excluded.provider, items = excluded.items, \
+             updated_at = excluded.updated_at, composites = excluded.composites",
+            params![
+                id,
+                input.name.trim(),
+                input.provider,
+                items,
+                now,
+                composites
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// SQLite's full integrity check: `ok` or the first problem.
+    #[cfg(test)]
+    pub fn integrity(&self) -> Result<String, Error> {
+        Ok(self
+            .db
+            .query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))?)
     }
 
     /// Records what a terminal started with. A session is recorded once; the oldest records go

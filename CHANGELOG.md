@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-01 — Arsenal synchronizes between computers
+
+- **Two-way Arsenal synchronization** through a Syncthing-shared folder
+  (`~/.local/share/wyss-console-sync/arsenal`). It carries:
+  - capabilities, with every revision and file;
+  - presets, selections and deletions.
+
+  Each computer keeps its own database; only an append-only journal per computer and
+  digest-named blobs travel. Concurrent edits keep both versions (a `(conflict, host)` copy or an
+  older revision), and a deletion never wins over an edit. Received content passes the store's
+  validation and the import-from-disk credential rules, and is never run.
+
+- **Arsenal status line:** what this computer published, what the other one acknowledged applying,
+  what waits, conflicts and refusals. "Check now" runs it.
+- **No schema change:** an older version still opens the library. See `docs/product/arsenal-sync.md`.
+
 ## 2026-10-31 — An opaque, readable window; one design system
 
 - **The window is opaque.** It is no longer created transparent on KDE and asks KWin for no blur

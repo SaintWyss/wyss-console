@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   parseBinding,
   parseBindings,
+  parseSyncStatus,
   parseTerminalPlan,
   parseCandidateDetail,
   parseDetail,
@@ -18,6 +19,7 @@ import {
   type ArsenalFailure,
   type ArsenalProvider,
   type Binding,
+  type SyncStatus,
   type LibraryItem,
   type TerminalPlan,
   type CandidateDetail,
@@ -144,6 +146,10 @@ export const arsenalClient = {
       request: { session_id, selection, config_hash },
     }),
   bindings: () => answer<Binding[]>('arsenal_terminal_bindings', parseBindings),
+  /** Synchronization with the owner's other computers. Reading it changes nothing. */
+  syncStatus: () => answer<SyncStatus>('arsenal_sync_status', parseSyncStatus),
+  /** Asks for a synchronization run now; answers the status before it. */
+  syncNow: () => answer<SyncStatus>('arsenal_sync_now', parseSyncStatus),
   projectSelection: (project: string, agent_id: AgentId) =>
     answer<string | null>(
       'arsenal_project_selection',

@@ -836,3 +836,80 @@ export function parseBinding(value: unknown): Binding {
 export function parseBindings(value: unknown): Binding[] {
   return list(value, 'bindings', parseBinding);
 }
+
+/** One thing synchronization reports: a conflict it settled, something refused or still waiting. */
+export interface SyncNote {
+  at: number;
+  kind: string;
+  name: string;
+  detail: string;
+}
+
+/** Another computer, as far as this one can tell from the shared folder. */
+export interface SyncPeer {
+  device: string;
+  host: string;
+  /** When it last wrote a record or an acknowledgment; never proof that it is online. */
+  last_heard: number | null;
+  /** How many of this computer's records it acknowledged having applied, of how many there are. */
+  applied_mine: number;
+  published_mine: number;
+}
+
+/** Arsenal synchronization with the owner's other computers. */
+export interface SyncStatus {
+  enabled: boolean;
+  folder: string;
+  device: string;
+  host: string;
+  /** Bumped each time synchronization changed this library: the window reads it again. */
+  generation: number;
+  last_run: number | null;
+  last_success: number | null;
+  error: string | null;
+  published: number;
+  pending: SyncNote[];
+  conflicts: SyncNote[];
+  rejected: SyncNote[];
+  peers: SyncPeer[];
+}
+
+function parseSyncNote(value: unknown): SyncNote {
+  const v = record(value, 'sync note');
+  return {
+    at: integer(v.at, 'at'),
+    kind: text(v.kind, 'kind'),
+    name: text(v.name, 'name'),
+    detail: text(v.detail, 'detail'),
+  };
+}
+
+function parseSyncPeer(value: unknown): SyncPeer {
+  const v = record(value, 'sync peer');
+  return {
+    device: text(v.device, 'device'),
+    host: text(v.host, 'host'),
+    last_heard: nullable(v.last_heard, (n) => integer(n, 'last_heard')),
+    applied_mine: integer(v.applied_mine, 'applied_mine'),
+    published_mine: integer(v.published_mine, 'published_mine'),
+  };
+}
+
+export function parseSyncStatus(value: unknown): SyncStatus {
+  const v = record(value, 'sync status');
+  return {
+    enabled: flag(v.enabled, 'enabled'),
+    folder: text(v.folder, 'folder'),
+    device: text(v.device, 'device'),
+    host: text(v.host, 'host'),
+    generation: integer(v.generation, 'generation'),
+    last_run: nullable(v.last_run, (n) => integer(n, 'last_run')),
+    last_success: nullable(v.last_success, (n) => integer(n, 'last_success')),
+    error: nullable(v.error, (n) => text(n, 'error')),
+    published: integer(v.published, 'published'),
+    pending: list(v.pending, 'pending', parseSyncNote),
+    conflicts: list(v.conflicts, 'conflicts', parseSyncNote),
+    rejected: list(v.rejected, 'rejected', parseSyncNote),
+    peers: list(v.peers, 'peers', parseSyncPeer),
+  };
+}

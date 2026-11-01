@@ -16,6 +16,7 @@ use super::store::{
     self, Binding, Detail, Error, Imported, NewCapability, Preset, PresetInput, Selection,
     SelectionInput, Store, Summary,
 };
+use super::sync;
 use super::terminal::{self, TerminalPlan};
 use crate::agentconfig::catalogue::{
     self, Candidate, Composite, Excluded, FileDigest, LaunchScan, ManagedBy, Scan, SourceReport,
@@ -255,6 +256,8 @@ const COMMANDS: &[&str] = &[
     "arsenal_terminal_bind",
     "arsenal_terminal_bindings",
     "arsenal_project_selection",
+    "arsenal_sync_status",
+    "arsenal_sync_now",
 ];
 
 /// What the desktop binary hands to the library for Arsenal: the commands and the state they use.
@@ -279,7 +282,9 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_terminal_plan,
             arsenal_terminal_bind,
             arsenal_terminal_bindings,
-            arsenal_project_selection
+            arsenal_project_selection,
+            arsenal_sync_status,
+            arsenal_sync_now
         ]),
         install: Box::new(|builder| builder.manage(Arsenal::start())),
         on_exit: None,
@@ -642,6 +647,7 @@ async fn arsenal_import(
         store.import(&new).map_err(ArsenalError::from)
     })
     .await
+    .inspect(|_| arsenal.nudge_sync())
 }
 
 #[tauri::command]
@@ -655,6 +661,7 @@ fn arsenal_restore(
             detail_view(store, &request.capability, None)
         })
         .map_err(ArsenalError::from)
+        .inspect(|_| arsenal.nudge_sync())
 }
 
 #[tauri::command]
@@ -672,6 +679,7 @@ fn arsenal_preset_write(
     arsenal
         .with_store(|store| store.save_preset(&request))
         .map_err(ArsenalError::from)
+        .inspect(|_| arsenal.nudge_sync())
 }
 
 #[tauri::command]
@@ -682,6 +690,7 @@ fn arsenal_preset_delete(
     arsenal
         .with_store(|store| store.delete_preset(&request.id))
         .map_err(ArsenalError::from)
+        .inspect(|_| arsenal.nudge_sync())
 }
 
 #[tauri::command]
@@ -699,6 +708,7 @@ fn arsenal_selection_write(
     arsenal
         .with_store(|store| store.save_selection(&request))
         .map_err(ArsenalError::from)
+        .inspect(|_| arsenal.nudge_sync())
 }
 
 #[tauri::command]
@@ -709,6 +719,21 @@ fn arsenal_selection_delete(
     arsenal
         .with_store(|store| store.delete_selection(&request.id))
         .map_err(ArsenalError::from)
+        .inspect(|_| arsenal.nudge_sync())
+}
+
+/// Synchronization with the owner's other computers: what this computer published and applied,
+/// what waits, what conflicted and what was refused. Reading it changes nothing.
+#[tauri::command]
+fn arsenal_sync_status(arsenal: State<'_, Arsenal>) -> sync::Status {
+    arsenal.sync_status()
+}
+
+/// Asks synchronization to run now. The answer is the status before that run; the next read shows it.
+#[tauri::command]
+fn arsenal_sync_now(arsenal: State<'_, Arsenal>) -> sync::Status {
+    arsenal.nudge_sync();
+    arsenal.sync_status()
 }
 
 #[tauri::command]
