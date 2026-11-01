@@ -233,6 +233,7 @@ impl Paths {
     fn devices(&self) -> PathBuf {
         self.root().join("devices")
     }
+    #[cfg(test)]
     fn blobs(&self) -> PathBuf {
         self.root().join("blobs")
     }
@@ -448,11 +449,14 @@ fn apply_and_publish(
         let here = by_identity.get(identity);
         let content = here.map_or(ABSENT.to_owned(), |c| format!("tree:{}", current_tree(c)));
         let view = views.get(key);
-        let synced = local
-            .objects
-            .get(key)
-            .cloned()
-            .or_else(|| received(records, view, &content));
+        let known = local.objects.get(key).cloned();
+        let synced = match &known {
+            None => received(records, view, &content, None),
+            Some(s) if here.is_some() && s.content != content => {
+                received(records, view, &content, Some(s)).or(known.clone())
+            }
+            Some(_) => known.clone(),
+        };
         let synced_content = synced.as_ref().map_or(ABSENT, |s| s.content.as_str());
         // A matching current tree still needs any history delivered later.
         let dirty = content != synced_content && here.is_some();
@@ -609,13 +613,22 @@ fn apply_and_publish(
     for key in &keys {
         let here = objects.get(key);
         let content = here.map(content_of);
-        let synced = local.objects.get(key).cloned().or_else(|| {
-            let received = content
+        let known = local.objects.get(key).cloned();
+        let observed = content.clone().unwrap_or_else(|| DELETED.to_owned());
+        let synced = match &known {
+            None => content
                 .as_ref()
-                .and_then(|content| received(records, views.get(key), content))?;
-            local.objects.insert(key.clone(), received.clone());
-            Some(received)
-        });
+                .and_then(|content| received(records, views.get(key), content, None)),
+            Some(s) if s.content != observed => {
+                received(records, views.get(key), &observed, Some(s)).or(known.clone())
+            }
+            Some(_) => known.clone(),
+        };
+        if synced != known
+            && let Some(synced) = &synced
+        {
+            local.objects.insert(key.clone(), synced.clone());
+        }
         let synced_content = synced.as_ref().map(|s| s.content.clone());
         let edited = match (&content, &synced_content) {
             (Some(content), Some(synced)) => content != synced,
@@ -852,26 +865,63 @@ fn resolve_conflicts(
     Ok(wrote)
 }
 
-/// For an object this computer has no bookkeeping for, the newest received version whose content
-/// the library already holds. A run that committed an application and then failed or was stopped
-/// before saving its bookkeeping left exactly that; without it, the next run would publish the
-/// received content back as a local edit and, once the sender moved on, report a false conflict.
-fn received(records: &[Record], view: Option<&View>, content: &str) -> Option<Synced> {
+/// The newest received version whose content the library already holds: for an object with no
+/// bookkeeping here, any version; otherwise only a causal successor of the version the bookkeeping
+/// names. A run that committed an application and then failed or was stopped before saving its
+/// bookkeeping left exactly that; without it, the next run would publish the received content back
+/// as a local edit and, once the sender moved on, report a false conflict. Content equal to an older
+/// version stays an owner's edit (a revert), never adopted.
+fn received(
+    records: &[Record],
+    view: Option<&View>,
+    content: &str,
+    after: Option<&Synced>,
+) -> Option<Synced> {
     let view = view?;
+    let eligible: Option<BTreeSet<String>> = match after {
+        None => None,
+        Some(synced) => Some(successors(records, view, synced.record.as_deref()?)),
+    };
+    let ok = |r: &Record| {
+        content_of(&r.body) == content && eligible.as_ref().is_none_or(|ids| ids.contains(&r.id()))
+    };
     let chosen = &records[view.chosen];
-    let record = if content_of(&chosen.body) == content {
+    let record = if ok(chosen) {
         chosen
     } else {
         view.all
             .iter()
             .rev()
             .map(|&i| &records[i])
-            .find(|r| content_of(&r.body) == content)?
+            .find(|r| ok(r))?
     };
     Some(Synced {
         record: Some(record.id()),
         content: content.to_owned(),
     })
+}
+
+/// Every record of the object that descends from `base` through base or merge references.
+fn successors(records: &[Record], view: &View, base: &str) -> BTreeSet<String> {
+    let mut children: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for record in view.all.iter().map(|&i| &records[i]) {
+        for parent in record.base.iter().chain(&record.merged) {
+            children
+                .entry(parent.as_str())
+                .or_default()
+                .push(record.id());
+        }
+    }
+    let mut found = BTreeSet::new();
+    let mut next = vec![base.to_owned()];
+    while let Some(id) = next.pop() {
+        for child in children.get(id.as_str()).into_iter().flatten() {
+            if found.insert(child.clone()) {
+                next.push(child.clone());
+            }
+        }
+    }
+    found
 }
 
 /// Supersede only heads whose content the local owner actually observed.
@@ -1921,6 +1971,29 @@ fn run(
     }
 }
 
+/// The folders to watch that are not watched yet, each opened as `Dir` opens it, never through a
+/// link: the watch is placed through that descriptor, so a link planted in the shared folder cannot
+/// point it elsewhere.
+fn watch_dirs(paths: &Paths, watched: &BTreeSet<String>) -> Vec<(String, Dir)> {
+    let mut dirs: Vec<(String, Dir)> = Vec::new();
+    if let Ok(Some(blobs)) = Dir::open(paths, &["v1", "blobs"], false) {
+        dirs.push(("blobs".into(), blobs));
+    }
+    if let Ok(Some(devices)) = Dir::open(paths, &["v1", "devices"], false) {
+        for name in devices.names(MAX_DEVICE_ENTRIES).unwrap_or_default() {
+            if device_ok(&name)
+                && !watched.contains(&name)
+                && let Ok(Some(device)) = devices.child(&name, false)
+            {
+                dirs.push((name, device));
+            }
+        }
+        dirs.push(("devices".into(), devices));
+    }
+    dirs.retain(|(name, _)| !watched.contains(name));
+    dirs
+}
+
 fn watch(paths: &Paths, nudge: Sender<()>) {
     use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
     let Ok(inotify) = Inotify::init(InitFlags::IN_CLOEXEC) else {
@@ -1934,21 +2007,12 @@ fn watch(paths: &Paths, nudge: Sender<()>) {
         | AddWatchFlags::IN_ONLYDIR;
     let _ = Dir::open(paths, &["v1", "devices"], true);
     let _ = Dir::open(paths, &["v1", "blobs"], true);
-    let mut watched: BTreeSet<PathBuf> = BTreeSet::new();
-    let add = |inotify: &Inotify, watched: &mut BTreeSet<PathBuf>| {
-        let mut dirs = vec![paths.devices(), paths.blobs()];
-        if let Ok(entries) = fs::read_dir(paths.devices()) {
-            dirs.extend(
-                entries
-                    .flatten()
-                    .take(MAX_DEVICE_ENTRIES)
-                    .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-                    .map(|e| e.path()),
-            );
-        }
-        for dir in dirs {
-            if !watched.contains(&dir) && inotify.add_watch(&dir, flags).is_ok() {
-                watched.insert(dir);
+    let mut watched: BTreeSet<String> = BTreeSet::new();
+    let add = |inotify: &Inotify, watched: &mut BTreeSet<String>| {
+        let dirs = watch_dirs(paths, watched);
+        for (name, dir) in dirs {
+            if !watched.contains(&name) && inotify.add_watch(&dir.at("."), flags).is_ok() {
+                watched.insert(name);
             }
         }
     };

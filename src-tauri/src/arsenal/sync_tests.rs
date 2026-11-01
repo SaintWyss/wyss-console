@@ -342,6 +342,11 @@ fn ack_an_interrupted_reconciliation_resumes_without_duplicates_or_false_acknowl
     // The next runs on both computers converge without a conflict, a copy or a resurrection.
     let status = desk.sync();
     assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    assert_eq!(
+        own_records(&desk),
+        0,
+        "what was received is not published back"
+    );
     acer.sync();
     let status = desk.sync();
     assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
@@ -414,6 +419,164 @@ fn ack_an_interrupted_first_application_is_not_republished_after_the_sender_move
     assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
     acer.sync();
     assert_eq!(acer.preset_names(), vec!["Uses design, edited"]);
+}
+
+fn rename_preset(m: &mut Machine, id: &str, name: &str) {
+    m.store
+        .put_preset(
+            id,
+            &PresetInput {
+                id: None,
+                name: name.into(),
+                description: "d".into(),
+                items: vec![],
+            },
+        )
+        .unwrap();
+}
+
+/// Stops a run on `m` after the library committed its first round, before the bookkeeping.
+fn interrupted_run(m: &mut Machine) {
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reconcile_at(
+            &mut m.store,
+            &m.paths,
+            m.host,
+            MAX_BLOB_BYTES_PER_RUN,
+            &mut |point| {
+                if point == Point::Applied {
+                    panic!("interrupted");
+                }
+            },
+        )
+    }));
+    assert!(stopped.is_err());
+}
+
+#[test]
+fn ack_an_interrupted_run_past_several_received_versions_is_not_republished() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = preset(&mut acer, "First", vec![]);
+    acer.skill("design", "one");
+    acer.sync();
+    desk.sync();
+    assert_eq!(own_records(&desk), 0);
+    // Two received versions past what the bookkeeping names, for a preset and a capability.
+    rename_preset(&mut acer, &id, "E1");
+    acer.skill("design", "two");
+    acer.sync();
+    rename_preset(&mut acer, &id, "E2");
+    acer.skill("design", "three");
+    acer.sync();
+    interrupted_run(&mut desk);
+    assert_eq!(desk.preset_names(), vec!["E2"]);
+    // While the desk is down, the owner keeps editing on the Acer.
+    rename_preset(&mut acer, &id, "E3");
+    acer.skill("design", "four");
+    acer.sync();
+    let status = desk.sync();
+    assert!(
+        status.conflicts.is_empty(),
+        "false conflict: {:?}",
+        status.conflicts
+    );
+    assert_eq!(
+        own_records(&desk),
+        0,
+        "received content republished as a local edit"
+    );
+    let status = acer.sync();
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    for m in [&acer, &desk] {
+        assert_eq!(m.preset_names(), vec!["E3"]);
+        assert_eq!(m.cap("design").revisions.len(), 4);
+    }
+    assert_eq!(desk.tree("design"), acer.tree("design"));
+    assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
+}
+
+#[test]
+fn ack_an_interrupted_edit_then_deletion_is_not_republished() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = preset(&mut acer, "First", vec![]);
+    acer.sync();
+    desk.sync();
+    rename_preset(&mut acer, &id, "E1");
+    acer.sync();
+    acer.store.delete_preset(&id).unwrap();
+    acer.sync();
+    interrupted_run(&mut desk);
+    assert!(desk.preset_names().is_empty());
+    let status = desk.sync();
+    assert!(status.conflicts.is_empty(), "{:?}", status.conflicts);
+    assert_eq!(
+        own_records(&desk),
+        0,
+        "a received deletion is not published back"
+    );
+    acer.sync();
+    assert!(acer.preset_names().is_empty());
+    assert_eq!(acked(&desk, &acer), own_records(&acer) as u64);
+}
+
+#[test]
+fn ack_a_local_revert_to_an_older_version_stays_an_owner_edit() {
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    let id = preset(&mut acer, "First", vec![]);
+    acer.sync();
+    desk.sync();
+    rename_preset(&mut acer, &id, "Second");
+    acer.sync();
+    desk.sync();
+    assert_eq!(desk.preset_names(), vec!["Second"]);
+    // The owner, on the desk, puts the older name back: an edit, not a received version.
+    rename_preset(&mut desk, &id, "First");
+    desk.sync();
+    assert_eq!(own_records(&desk), 1, "the revert is published");
+    acer.sync();
+    assert_eq!(acer.preset_names(), vec!["First"]);
+    assert_eq!(desk.preset_names(), vec!["First"]);
+}
+
+#[test]
+fn review_the_watcher_never_watches_through_a_planted_link() {
+    use std::os::unix::fs::symlink;
+    let dir = shared();
+    let mut acer = machine(&dir, "saint-acer");
+    let mut desk = machine(&dir, "Santiago-PC");
+    acer.sync();
+    desk.sync();
+    let outside = dir.with_extension("watch-outside");
+    fs::create_dir_all(outside.join("e".repeat(32))).unwrap();
+    let names = |dirs: Vec<(String, Dir)>| -> BTreeSet<String> {
+        dirs.into_iter().map(|(name, _)| name).collect()
+    };
+    let all = names(watch_dirs(&acer.paths, &BTreeSet::new()));
+    assert!(all.contains("devices") && all.contains("blobs"));
+    assert!(all.contains(&device_of(&acer)) && all.contains(&device_of(&desk)));
+    // A peer folder that is a link is not watched.
+    symlink(
+        outside.join("e".repeat(32)),
+        acer.paths.devices().join("f".repeat(32)),
+    )
+    .unwrap();
+    assert!(!names(watch_dirs(&acer.paths, &BTreeSet::new())).contains(&"f".repeat(32)));
+    // Nor is anything under a `devices` folder replaced by a link.
+    let devices = acer.paths.devices();
+    fs::rename(&devices, dir.with_extension("devices-moved")).unwrap();
+    symlink(&outside, &devices).unwrap();
+    let left = names(watch_dirs(&acer.paths, &BTreeSet::new()));
+    assert_eq!(left, BTreeSet::from(["blobs".to_owned()]), "{left:?}");
+    // Folders already watched are not returned again.
+    fs::remove_file(&devices).unwrap();
+    fs::rename(dir.with_extension("devices-moved"), &devices).unwrap();
+    assert!(watch_dirs(&acer.paths, &all).is_empty());
 }
 
 /// One computer: its own library and bookkeeping, and the folder both computers share.

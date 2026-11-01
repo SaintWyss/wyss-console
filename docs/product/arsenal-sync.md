@@ -105,9 +105,14 @@ an earlier change that has not arrived or was refused. An unchanged acknowledgme
 The prefix uses the last batch actually processed: a record arriving after that batch was read
 waits for the next run before it can be acknowledged. A run that fails or stops writes no
 acknowledgment. The acknowledgment is written after the library committed and the bookkeeping was
-saved; a run stopped between a commit and its bookkeeping is recognized by the next one, which
-matches what the library holds against every received version of the object, so a received change
-is never published back as a local edit or reported as a conflict.
+saved; a run stopped between a commit and its bookkeeping is recognized by the next one: when what
+the library holds matches a received version that descends from the one its bookkeeping names (or
+any received version, for an object it has no bookkeeping for), that version is adopted, so a
+received change is never published back as a local edit or reported as a conflict. Content equal to
+an older version stays the owner's edit (a revert) and is published.
+
+The watcher (inotify) opens every folder it watches the way the run reads them, without following a
+link at any level, and watches through that opened folder.
 
 ## Syncthing
 
