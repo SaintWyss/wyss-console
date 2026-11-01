@@ -1218,9 +1218,11 @@ code,
 .session-row:hover {
   background: var(--surface-raised);
 }
+/* Selected: a solid tint and a 3 px bar at the left edge, so it is not told by color alone. */
 .session-row[aria-pressed='true'] {
-  border-color: var(--line-strong);
-  background: linear-gradient(90deg, var(--accent-soft), transparent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .session-name {
   font-size: var(--text-md);
@@ -2111,8 +2113,9 @@ code,
   background: var(--surface-raised);
 }
 .event-row[aria-pressed='true'] {
-  border-color: var(--line-strong);
-  background: linear-gradient(90deg, var(--accent-soft), transparent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .event-time {
   grid-area: 1 / 1;
@@ -2893,7 +2896,7 @@ li.native-row .native-note {
 }
 .tab-agent {
   margin-right: 6px;
-  font-size: 9px;
+  font-size: var(--text-xs);
   color: var(--accent);
   vertical-align: 1px;
 }
@@ -3737,7 +3740,7 @@ li.native-row .native-note {
   list-style: none;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--terminal-bg);
 }
 .m3-transcript li[data-role='user'] .m3-role {
   color: var(--accent-strong);

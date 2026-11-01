@@ -87,7 +87,7 @@
     <h3 class="native-heading">Delegated agents</h3>
     {#if delegations.length > 0}
       <p class="delegations-tally" aria-live="polite">
-        {#each tally as entry (entry.tone)}
+        {#each tally as entry (entry.label)}
           <span class="badge" data-tone={entry.tone}
             ><span aria-hidden="true">{entry.symbol}</span>
             {entry.count}

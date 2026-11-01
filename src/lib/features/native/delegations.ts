@@ -58,23 +58,33 @@ export interface TallyEntry {
   count: number;
 }
 
-const TALLY: { tone: StateTone; label: string }[] = [
-  { tone: 'pending', label: 'running' },
-  { tone: 'ok', label: 'done' },
-  { tone: 'error', label: 'failed' },
-  { tone: 'neutral', label: 'cancelled' },
+/** Each status counted under its own word; tones only color them. */
+const TALLY: { status: string; label: string }[] = [
+  { status: 'running', label: 'running' },
+  { status: 'succeeded', label: 'done' },
+  { status: 'failed', label: 'failed' },
+  { status: 'timed_out', label: 'timed out' },
+  { status: 'interrupted', label: 'interrupted' },
+  { status: 'cancelled', label: 'cancelled' },
 ];
+const KNOWN = new Set(TALLY.map((entry) => entry.status));
 
-/** How many are running, done, failed and cancelled. A count of zero is left out. */
+/** How many are in each status. A count of zero is left out; a status the window does not
+ *  know is counted as "other", never folded into another one. */
 export function delegationTally(
   delegations: readonly Delegation[],
 ): TallyEntry[] {
-  return TALLY.flatMap(({ tone, label }) => {
-    const marks = delegations
-      .map((d) => delegationMark(d.status))
-      .filter((m) => m.tone === tone);
-    return marks.length > 0
-      ? [{ tone, label, symbol: marks[0]!.symbol, count: marks.length }]
-      : [];
+  const count = (match: (status: string) => boolean) =>
+    delegations.filter((d) => match(d.status)).length;
+  const entries = TALLY.map(({ status, label }) => ({
+    ...delegationMark(status),
+    label,
+    count: count((s) => s === status),
+  }));
+  entries.push({
+    ...delegationMark('unknown'),
+    label: 'other',
+    count: count((s) => !KNOWN.has(s)),
   });
+  return entries.filter((entry) => entry.count > 0);
 }

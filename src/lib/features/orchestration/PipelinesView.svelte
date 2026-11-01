@@ -2007,7 +2007,7 @@
     background: var(--terminal-bg);
     padding: 10px;
     border-radius: 8px;
-    font: 11px/1.5 var(--font-mono);
+    font: var(--text-xs) / 1.5 var(--font-mono);
   }
   details summary {
     cursor: pointer;

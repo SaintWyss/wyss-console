@@ -124,6 +124,41 @@ it('never lets what is behind the window show through: no blur, no glass mode', 
     expect(source).not.toMatch(/backdrop-filter|blur\(|data-glass|glass-/);
     expect(source).not.toMatch(/--(frame|glow-[a-z]+)\b/);
   }
+  // No background anywhere is see-through or fades out: no rgba/hsla, no gradient, no alpha hex.
+  // `transparent` alone stays allowed: it shows its opaque parent, never the desktop.
+  for (const source of sources)
+    for (const [, value] of source.matchAll(
+      /background(?:-color|-image)?\s*:\s*([^;}]+)/g,
+    )) {
+      expect(value, `background: ${value}`).not.toMatch(
+        /rgba\(|hsla\(|gradient\(|#[0-9a-f]{8}\b|#[0-9a-f]{4}\b/i,
+      );
+      expect(value, `background: ${value}`).not.toMatch(/\/\s*0?\.\d/);
+    }
+  // No text below the 12 px floor of the type scale.
+  for (const source of sources)
+    for (const [, size] of source.matchAll(
+      /font(?:-size)?\s*:\s*(\d+(?:\.\d+)?)px/g,
+    ))
+      expect(Number(size), `font ${size}px`).toBeGreaterThanOrEqual(12);
+  // A selected row is marked by shape as well as tint.
+  for (const row of ['session-row', 'event-row'])
+    expect(stylesheet).toMatch(
+      new RegExp(
+        `\\.${row}\\[aria-pressed='true'\\]\\s*\\{[^}]*box-shadow:\\s*inset 3px 0 0 var\\(--accent\\);`,
+        's',
+      ),
+    );
+  // The window itself is created opaque, and nothing asks the compositor for blur.
+  const desktop = readFileSync(
+    resolve(process.cwd(), 'src-tauri/src/desktop.rs'),
+    'utf8',
+  );
+  expect(desktop).toMatch(/\.transparent\(false\)/);
+  expect(desktop).not.toMatch(/mod glass|BLUR_BEHIND|\.transparent\(true\)/);
+  expect(
+    readdirSync(resolve(process.cwd(), 'src-tauri/src/desktop')),
+  ).not.toContain('glass.rs');
   // The shell and its chrome paint opaque tokens.
   expect(stylesheet).toMatch(/\.shell\s*\{[^}]*background:\s*var\(--bg\);/s);
   expect(stylesheet).toMatch(
