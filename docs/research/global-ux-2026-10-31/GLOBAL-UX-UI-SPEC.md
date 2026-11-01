@@ -8,17 +8,17 @@ Configuration, Settings y el resto de las vistas que heredan los componentes com
 
 UXP-3c8a6f
 
-- `frontend-design` — `/home/saintwyss/.claude/skills/frontend-design/SKILL.md`. Informó: la consola es una
+- `frontend-design` — `~/.claude/skills/frontend-design/SKILL.md`. Informó: la consola es una
   herramienta de trabajo; el carácter sale de la jerarquía de superficies, del acento cian ya
   reconocible y de estados honestos, no de decoración. La apuesta única es la **franja de estado**:
   una barra de 3 px a la izquierda de cada fila/tarjeta con estado (activo, verificado, fallido,
   en curso), que se repite igual en terminales, delegaciones y Arsenal. Falta validar: lectura en frío
   por el dueño.
-- `ui-ux-pro-max` — `/home/saintwyss/.claude/skills/ui-ux-pro-max/SKILL.md`. Informó: tema oscuro de
+- `ui-ux-pro-max` — `~/.claude/skills/ui-ux-pro-max/SKILL.md`. Informó: tema oscuro de
   herramienta de desarrollo con paleta pizarra, contraste AA calculado, foco visible, estado nunca
   solo por color, `prefers-reduced-motion`, escala tipográfica fija y espaciado de 4 px. Se descarta
   su patrón de landing (Hero + CTA), que no aplica a una app de escritorio.
-- Estilo único de la capa 3: `minimalist-ui` — `/home/saintwyss/.claude/skills/minimalist-ui/SKILL.md`.
+- Estilo único de la capa 3: `minimalist-ui` — `~/.claude/skills/minimalist-ui/SKILL.md`.
   Se toma: superficies planas, borde de 1 px, radios ≤ 8 px, sin gradientes ni vidrio, sombras solo
   en capas flotantes, mono para metadatos, `kbd`. Se descarta: serif editorial, macro-espaciado,
   animaciones de entrada por scroll y manchas ambientales (chocan con densidad y opacidad).
