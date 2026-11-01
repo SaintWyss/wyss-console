@@ -63,8 +63,10 @@ def build(lines, markers=None, tamper=None, drop_end=False, key=b"k" * 32):
 
 
 def res_for(lines, ev, **over):
-    r = {"analysis": oracle.analyse(RUN, lines, SK), "evidence": ev, "inside": {"exit": 0},
-         "isolation": {"integrity": True, "no_leftovers": True}, "validator": None,
+    r = {"analysis": oracle.analyse(RUN, lines, SK), "evidence": ev, "inside": {"exit": 0, "timed_out": False},
+         "isolation": {"integrity": True, "namespace_verified": True, "no_leftovers": True,
+                       "no_unexpected_proxy": True, "owned_files_unchanged": True,
+                       "not_killed_for_storage": True, "launcher_complete": True}, "validator": None,
          "markers_present": [], "work_ran": [], "victim_present": True, "stdout": "ok from mock", "stderr": ""}
     r.update(over)
     return r
@@ -126,9 +128,11 @@ case("forged_stream_record_detected", efg["tampered"] and any("bad_record" in p 
 le, ee = build([req_line(["alpha"])], drop_end=True)
 case("missing_END_inconclusive", oracle.judge(BASE, res_for(le, ee), RUN, SK)["verdict"] == "INCONCLUSIVE")
 lw, ew = build([req_line(["alpha"])], key=b"k" * 32)
-recs, probs, _ = stream.verify(b"other-key" * 4, "".join(
-    ["x"]))  # wrong key on an empty stream
-case("wrong_key_stream_incomplete", "missing_END" in probs)
+import io
+signed = io.StringIO()
+stream.Emitter(b"k" * 32, signed).emit("END")
+recs, probs, _ = stream.verify(b"other-key" * 4, signed.getvalue())
+case("wrong_key_stream_incomplete", not recs and any(p.startswith("bad_record") for p in probs))
 # isolation precedence
 case("isolation_failure_stops", oracle.judge(BASE, res_for(lines, ev, isolation={"integrity": False}),
                                              RUN, SK)["verdict"] == "STOP_ISOLATION")

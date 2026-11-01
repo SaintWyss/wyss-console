@@ -29,15 +29,87 @@ NEGATIVE_KEYS = ("desc_absent", "body_absent", "markers_absent", "work_absent",
 LIST_HEADER = "The following skills are available for use with the Skill tool:"
 NAME_RE = re.compile(r"\\n- ([A-Za-z0-9._:-]+): ")
 
+# case_inside emits this protocol. REQUEST cannot exist until the fixture is frozen;
+# file exports cannot begin until SUT_DONE and FINAL have both been emitted.
+RECORD_TRANSITIONS = {
+    "before_start": {"START": "before_fixture"},
+    "before_fixture": {"FIXTURE": "running"},
+    "running": {"REQUEST": "running", "WRITE_ERROR": "running", "SUT_DONE": "before_final"},
+    "before_final": {"FINAL": "exporting"},
+    "exporting": {"FILE_CHUNK": "exporting", "FILE_END": "exporting", "FILE_ERROR": "exporting", "END": "ended"},
+    "ended": {},
+}
+
+# Exact boolean observations produced by run_case.isolation_checks. False is a known
+# violation (STOP_ISOLATION); absent/None/non-bool is unknown (INCONCLUSIVE), never true.
+ISOLATION_KEYS = ("integrity", "namespace_verified", "no_leftovers", "no_unexpected_proxy",
+                  "owned_files_unchanged", "not_killed_for_storage", "launcher_complete")
+
+
+def record_contract_problems(records):
+    phase, problems = "before_start", []
+    for rec in records:
+        kind = rec.get("kind") if isinstance(rec, dict) else None
+        if not isinstance(kind, str):
+            problems.append("invalid_record_kind")
+            continue
+        next_phase = RECORD_TRANSITIONS[phase].get(kind)
+        if next_phase is None:
+            problems.append(f"record_out_of_phase:{kind}:{phase}")
+        else:
+            phase = next_phase
+    if phase != "ended":
+        problems.append("record_lifecycle_incomplete:" + phase)
+    return problems
+
+
+def isolation_verdict(observations):
+    if not isinstance(observations, dict):
+        return "INCONCLUSIVE", ["isolation_missing"]
+    failed = [k for k in ISOLATION_KEYS if observations.get(k) is False]
+    if failed:
+        return "STOP_ISOLATION", failed
+    unknown = [k for k in ISOLATION_KEYS if observations.get(k) is not True]
+    extra = sorted(set(observations) - set(ISOLATION_KEYS))
+    if unknown or extra:
+        return "INCONCLUSIVE", ["isolation_unknown:" + k for k in unknown] + ["isolation_unexpected:" + k for k in extra]
+    return "PASS", []
+
 
 def lint(case):
     """Spec errors make the case unusable (no verdict can be PASS)."""
     e = case.get("expect", {})
     errs = []
+    if not isinstance(e, dict):
+        return ["expect_not_object"]
+    lists = set(POSITIVE_KEYS + NEGATIVE_KEYS) - {"tool_attempt"}
+    allowed = lists | {"requests", "tool_attempt", "victim_present", "agents", "validator", "exit_code", "clean_exit"}
+    errs += ["unknown_expectation:" + k for k in e if k not in allowed]
     if "requests" not in e:
         errs.append("missing_requests_range")
-    pos = [k for k in POSITIVE_KEYS if k in e] + (["victim_removed"] if e.get("victim_present") is False else [])
-    neg = [k for k in NEGATIVE_KEYS if k in e] + (["victim_kept"] if e.get("victim_present") is True else [])
+    else:
+        bounds = e["requests"]
+        if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2
+                and all(type(n) is int for n in bounds) and 0 <= bounds[0] <= bounds[1]):
+            errs.append("invalid_requests_range")
+    for k in lists & e.keys():
+        if not isinstance(e[k], list) or not all(isinstance(s, str) and s.strip() for s in e[k]):
+            errs.append("invalid_expectation:" + k)
+    for k in ("victim_present", "agents", "validator", "clean_exit"):
+        if k in e and type(e[k]) is not bool:
+            errs.append("invalid_expectation:" + k)
+    if "exit_code" in e and type(e["exit_code"]) is not int:
+        errs.append("invalid_expectation:exit_code")
+    if "tool_attempt" in e:
+        ta = e["tool_attempt"]
+        if not (isinstance(ta, dict) and set(ta) <= {"id", "text_contains", "is_error"}
+                and isinstance(ta.get("text_contains"), str) and ta["text_contains"].strip()
+                and type(ta.get("is_error")) is bool
+                and isinstance(ta.get("id", "toolu_mock_0"), str) and ta.get("id", "toolu_mock_0")):
+            errs.append("invalid_expectation:tool_attempt")
+    pos = [k for k in POSITIVE_KEYS if e.get(k)] + (["victim_removed"] if e.get("victim_present") is False else [])
+    neg = [k for k in NEGATIVE_KEYS if e.get(k) or (k == "listed_fixture_exact" and e.get(k) == [])] \
+        + (["victim_kept"] if e.get("victim_present") is True else [])
     if not pos:
         errs.append("no_positive_expectation")
     if not neg:
@@ -92,21 +164,59 @@ def analyse(run, req_lines, fixture_skills):
 
 def verify_evidence(records, problems, req_lines, markers_files):
     """markers_files: {relpath: sha256} computed by the HOST after the run."""
-    out = {"stream_problems": list(problems)}
+    problems = list(problems)
+    problems.extend(record_contract_problems(records))
+    records = [r for r in records if isinstance(r, dict)]
+    for r in records:
+        kind = r.get("kind")
+        if kind in ("FIXTURE", "FINAL") and not all(isinstance(r.get(k), dict) for k in ("home", "work")):
+            problems.append("invalid_tree_record")
+        if kind == "SUT_DONE" and not isinstance(r.get("result"), dict):
+            problems.append("invalid_result_record")
+        if kind in ("WRITE_ERROR", "FILE_ERROR"):
+            problems.append("evidence_write_error")
+    out = {"stream_problems": problems}
     streamed = [r["sha256"] for r in records if r.get("kind") == "REQUEST"]
     on_disk = [hashlib.sha256(l.encode()).hexdigest() for l in req_lines]
     out["requests_match_stream"] = streamed == on_disk
     final = next((r for r in records if r.get("kind") == "FINAL"), None)
-    if final is None:
+    if final is None or not isinstance(final.get("markers"), dict):
         out["markers_match_final"] = None
+        problems.append("missing_final_markers")
     else:
         fm = {k: v for k, v in final["markers"].items()}
-        hm = {k: v for k, v in markers_files.items() if k in fm}
-        out["markers_match_final"] = fm == hm and set(fm) <= set(markers_files)
+        out["markers_match_final"] = fm == markers_files
+        if req_lines and "requests.jsonl" not in fm:
+            problems.append("missing_request_export")
     out["tampered"] = bool(problems and any(p.startswith("bad_record") for p in problems)) \
         or out["requests_match_stream"] is False or out["markers_match_final"] is False
     out["complete"] = not problems and final is not None
     return out
+
+
+def runtime_problems(inside, mode, expected_exit=0):
+    """A complete evidence stream does not imply a successful or completely drained run."""
+    if not isinstance(inside, dict):
+        return ["missing_sut_result"]
+    bad = [k for k in ("harness_error", "teardown_error", "stop_errors") if inside.get(k)]
+    if inside.get("timed_out") is not False:
+        bad.append("sut_timeout_unknown_or_true")
+    if mode == "H":
+        if type(inside.get("exit")) is not int or inside["exit"] != expected_exit:
+            bad.append("sut_exit_unexpected")
+    elif mode == "I":
+        ex = inside.get("exit")
+        if not isinstance(ex, dict) or ex.get("clean") is not True or ex.get("forced") is not False or ex.get("code") != 0:
+            bad.append("pty_exit_not_clean")
+        if inside.get("response_rendered") is not True:
+            bad.append("response_not_rendered")
+        if inside.get("pty_eof") is not True:
+            bad.append("pty_drain_incomplete")
+        if inside.get("screen_unknown") != 0 or inside.get("screen_pending") != 0:
+            bad.append("screen_unsupported_or_incomplete")
+    else:
+        bad.append("unknown_mode")
+    return bad
 
 
 def judge(case, res, run, fixture_skills):
@@ -114,8 +224,16 @@ def judge(case, res, run, fixture_skills):
     markers_present, work_ran, victim_present, stdout, stderr."""
     e = case.get("expect", {})
     a, ev = res["analysis"], res["evidence"]
+    iso_verdict, iso_reasons = isolation_verdict(res.get("isolation"))
     spec_errors = lint(case)
-    iso = res["isolation"]
+    if spec_errors:
+        verdict = "STOP_ISOLATION" if iso_verdict == "STOP_ISOLATION" else "FAIL" if ev["tampered"] else "INCONCLUSIVE"
+        return {"verdict": verdict,
+                "reasons": iso_reasons + ["spec:" + s for s in spec_errors], "checks": {}, "unknown": [],
+                "spec_errors": spec_errors, "validator_matches": None}
+    for k in ("desc_present", "desc_absent", "body_present", "body_absent"):
+        if any(n not in fixture_skills for n in e.get(k, [])):
+            spec_errors.append("unknown_fixture:" + k)
     checks, unknown = {}, []
 
     def put(name, value):
@@ -165,26 +283,33 @@ def judge(case, res, run, fixture_skills):
             put("tool_result_text", ta["text_contains"] in hits[0]["text"])
             put("tool_result_is_error", hits[0]["is_error"] is ta["is_error"])
     if "exit_code" in e:
-        put("exit_code", (res["inside"].get("exit") == e["exit_code"]) if res["inside"] else None)
+        exit_value = (res["inside"] or {}).get("exit")
+        exit_value = exit_value.get("code") if isinstance(exit_value, dict) else exit_value
+        put("exit_code", exit_value == e["exit_code"] if exit_value is not None else None)
     if "clean_exit" in e:
-        put("clean_exit", ((res["inside"].get("exit") or {}).get("clean") is True) if res["inside"] else None)
+        exit_value = (res["inside"] or {}).get("exit")
+        put("clean_exit", exit_value.get("clean") is e["clean_exit"] if isinstance(exit_value, dict) else None)
     validator_match = None
     if "validator" in e:
         validator_match = (res["validator"] is not None and res["validator"]["accepted"] == e["validator"])
         put("validator_matches", validator_match)
 
     reasons = []
-    if not all(iso.values()):
+    if iso_verdict == "STOP_ISOLATION":
         verdict = "STOP_ISOLATION"
-        reasons = [k for k, v in iso.items() if not v]
+        reasons = iso_reasons
     elif ev["tampered"]:
         verdict, reasons = "FAIL", ["evidence_tampered"]
     elif spec_errors:
         verdict, reasons = "INCONCLUSIVE", ["spec:" + s for s in spec_errors]
     elif not ev["complete"] or res["inside"] is None:
         verdict, reasons = "INCONCLUSIVE", ["evidence_incomplete"] + ev["stream_problems"]
+    elif runtime_problems(res["inside"], case.get("mode", "H"), e.get("exit_code", 0)):
+        verdict, reasons = "INCONCLUSIVE", runtime_problems(res["inside"], case.get("mode", "H"), e.get("exit_code", 0))
     elif any(v is False for v in checks.values()):
         verdict, reasons = "FAIL", sorted(k for k, v in checks.items() if not v)
+    elif iso_verdict == "INCONCLUSIVE":
+        verdict, reasons = "INCONCLUSIVE", iso_reasons
     elif unknown:
         verdict, reasons = "INCONCLUSIVE", ["unknown:" + u for u in unknown]
     elif not checks:

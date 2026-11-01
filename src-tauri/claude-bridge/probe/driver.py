@@ -25,7 +25,7 @@ class BridgeSession:
             extra += ["--ro-bind", self.etc + "/managed-settings.json", "/etc/claude-code/managed-settings.json"]
         cmd = sandbox.argv(home=self.home, workdir="/work/ws", ro=[venv, BRIDGE_DIR, HERE], env=env,
                            command=[venv + "/bin/python", "-I", HERE + "/in_sandbox.py"], extra=extra)
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={})
         self.q = queue.Queue()
         self.stderr = []
         threading.Thread(target=self._pump, daemon=True).start()

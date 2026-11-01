@@ -32,6 +32,20 @@ CPU_S = 600
 STREAM_CAP = 48 * MiB  # > base64(MARKERS_TMPFS) + records
 
 
+def require_ptrace_restriction():
+    """The provider must not be allowed to read its harness parent's HMAC key from memory.
+
+    This is an admission check, not a change to the host's sysctl. Unavailable is unsafe.
+    """
+    try:
+        with open("/proc/sys/kernel/yama/ptrace_scope") as f:
+            scope = int(f.read().strip())
+    except (OSError, ValueError) as e:
+        raise RuntimeError("ptrace_restriction_unavailable") from e
+    if scope not in (1, 2, 3):
+        raise RuntimeError("ptrace_restriction_required")
+
+
 def preexec(fsize=FSIZE, nofile=NOFILE, cpu=CPU_S):
     """Return a preexec_fn applying the rlimits in the launcher child before exec(bwrap)."""
     def apply():

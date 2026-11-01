@@ -5,6 +5,7 @@ Usage: python3 -I run_preflight.py <A0_ROOT> <out_dir>
 """
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 
@@ -40,14 +41,14 @@ def main():
                             status_fd=fd,
                             command=["/usr/bin/python3", "-I", "/a0/harness/preflight_probe.py"])
     r = run_sandbox(build, key=b"", timeout=60)
-    open(os.path.join(OUT, "command.json"), "w").write(json.dumps(r["argv"], indent=1))
-    open(os.path.join(OUT, "sandbox.stdout.json"), "w").write(r["stdout"])
-    open(os.path.join(OUT, "sandbox.stderr.txt"), "w").write(r["stderr"])
+    Path(OUT, "command.json").write_text(json.dumps(r["argv"], indent=1))
+    Path(OUT, "sandbox.stdout.json").write_text(r["stdout"])
+    Path(OUT, "sandbox.stderr.txt").write_text(r["stderr"])
     henv = dict(os.environ)
     henv["A0_HOST_CONTROL"] = "1"
     c = subprocess.run([sys.executable, "-I", os.path.join(HERE, "preflight_probe.py")],
                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL, env=henv)
-    open(os.path.join(OUT, "host-control.stdout.json"), "w").write(c.stdout)
+    Path(OUT, "host-control.stdout.json").write_text(c.stdout)
     integrity.main(os.path.join(OUT, "integrity-after.json"))
     cmp = subprocess.run([sys.executable, "-I", os.path.join(HERE, "compare_integrity.py"),
                           os.path.join(OUT, "integrity-before.json"), os.path.join(OUT, "integrity-after.json")],
@@ -64,9 +65,12 @@ def main():
                                        "duration_s", "markers_peak")},
         "integrity": cmp.returncode == 0,
     }
-    json.dump(summary, open(os.path.join(OUT, "summary.json"), "w"), indent=1)
+    Path(OUT, "summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps(summary, indent=1))
-    return 0 if summary["sandbox_all_pass"] and summary["integrity"] and not r["leftovers"] else 1
+    launcher_ok = (r["exit"] == 0 and not r["timed_out"] and r["killed"] is None
+                   and r["pid_ns"] is not None and r["readers_complete"] and not r["leftovers"])
+    control_ok = c.returncode == 0 and bool(summary["host_control_failed"])
+    return 0 if summary["sandbox_all_pass"] and summary["integrity"] and launcher_ok and control_ok else 1
 
 
 if __name__ == "__main__":

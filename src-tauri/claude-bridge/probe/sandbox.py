@@ -56,4 +56,4 @@ def base_env(base_url, extra=None):
 
 
 def run(args, timeout, stdin=None):
-    return subprocess.run(args, capture_output=True, timeout=timeout, input=stdin, text=True)
+    return subprocess.run(args, capture_output=True, timeout=timeout, input=stdin, text=True, env={})

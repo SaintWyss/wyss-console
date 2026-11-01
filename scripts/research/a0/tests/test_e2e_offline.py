@@ -7,11 +7,13 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 ROOT = os.path.realpath(sys.argv[1])
 V2 = os.path.join(ROOT, "harness-v2")
 sys.path.insert(0, V2)
 import limits  # noqa: E402
+import oracle  # noqa: E402
 from run_case import run_case  # noqa: E402
 
 EVB = os.path.join(ROOT, "remediation", "e2e-evidence")
@@ -47,6 +49,12 @@ def summary(r):
 # 1 positive control: the harness can PASS a correct run
 r = run_case(ROOT, EVB, {"id": "e2e-ok", "sut_argv": FAKE("ok"), "expect": LIST_OK})
 case("e2e_ok_passes", r["verdict"] == "PASS" and r["evidence"]["complete"], summary(r))
+# Check the actual case_inside producer, not just a synthetic event fixture. run_case has
+# already authenticated this stream with its per-case key before returning complete=True.
+records = [json.loads(line.split(" ", 2)[2].rsplit(" ", 1)[0])
+           for line in Path(EVB, "e2e-ok", "stream.log").read_text().splitlines() if line.startswith("A0REC ")]
+case("e2e_real_producer_obeys_record_contract", r["evidence"]["complete"]
+     and oracle.record_contract_problems(records) == [], [rec["kind"] for rec in records])
 # 2 tampering of requests.jsonl by the system under test
 r = run_case(ROOT, EVB, {"id": "e2e-tamper", "sut_argv": FAKE("tamper_requests"), "expect": LIST_OK})
 case("e2e_disk_tamper_fails", r["verdict"] == "FAIL" and "evidence_tampered" in r["reasons"], summary(r))

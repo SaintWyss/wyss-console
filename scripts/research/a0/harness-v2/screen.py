@@ -116,19 +116,25 @@ class Screen:
 
     def _private(self, params, final):
         modes = self._nums(params)
-        if final in "hl" and any(m in (47, 1047, 1049) for m in modes):
-            if final == "h" and self.alt is None:
-                self.alt = (self.grid, self.x, self.y, self.saved)
-                for r in range(self.rows):
-                    self._remember(r)
-                self.grid = self._blank()
-                self.x = self.y = 0
-            elif final == "l" and self.alt is not None:
-                for r in range(self.rows):
-                    self._remember(r)
-                self.grid, self.x, self.y, self.saved = self.alt
-                self.alt = None
-        # other DEC private modes (cursor visibility, bracketed paste, mouse, sync output…): no cells
+        if final not in "hl" or not modes:
+            self.unknown += 1
+            return
+        for mode in modes:
+            if mode in (47, 1047, 1049):
+                if final == "h" and self.alt is None:
+                    self.alt = (self.grid, self.x, self.y, self.saved)
+                    for r in range(self.rows):
+                        self._remember(r)
+                    self.grid = self._blank()
+                    self.x = self.y = 0
+                elif final == "l" and self.alt is not None:
+                    for r in range(self.rows):
+                        self._remember(r)
+                    self.grid, self.x, self.y, self.saved = self.alt
+                    self.alt = None
+            elif mode not in (12, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 2004, 2026):
+                # A supported mode must never conceal an unsupported sibling parameter.
+                self.unknown += 1
 
     def _std(self, params, final):
         nums = self._nums(params)
@@ -212,7 +218,7 @@ class Screen:
             self.saved = (self.x, self.y)
         elif final == "u":
             self.x, self.y = self.saved
-        elif final in "mcnthlq":
+        elif final in "mcntq":
             pass  # SGR, DA, DSR, window ops, modes, cursor style: no cell effect
         else:
             self.unknown += 1
@@ -280,7 +286,7 @@ class Screen:
                         self._scroll_down()
                     else:
                         self.y = max(0, self.y - 1)
-                elif nxt in (0x3D, 0x3E, 0x63):  # keypad modes, RIS (treated as no-op)
+                elif nxt in (0x3D, 0x3E):  # keypad modes
                     pass
                 else:
                     self.unknown += 1

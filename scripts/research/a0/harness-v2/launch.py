@@ -42,6 +42,7 @@ class _Reader(threading.Thread):
 def run_sandbox(build_argv, *, key=b"", timeout=180, markers=None, markers_cap=limits.MARKERS_CAP,
                 stream_cap=limits.STREAM_CAP, rlimits=None, inject_failure=None):
     """build_argv(status_fd) -> argv. Returns a result dict; never leaves a live sandbox behind."""
+    limits.require_ptrace_restriction()
     r_status, w_status = os.pipe()
     res = {"timed_out": False, "killed": None, "status": [], "members_max": 0,
            "members_seen": [], "leftovers": [], "exit": None, "markers_peak": 0}
@@ -66,6 +67,9 @@ def run_sandbox(build_argv, *, key=b"", timeout=180, markers=None, markers_cap=l
             res["status"].append(status_line)
         ns = (status_line or {}).get("pid-namespace")
         init_pid = (status_line or {}).get("child-pid")
+        if (type(ns) is not int or ns <= 0 or type(init_pid) is not int or init_pid <= 0
+                or os.readlink("/proc/self/ns/pid") == f"pid:[{ns}]"):
+            raise RuntimeError("sandbox_identity_unavailable")
         res["pid_ns"], res["init_pid"] = ns, init_pid
         try:
             p.stdin.write(key + b"\n")
@@ -98,20 +102,27 @@ def run_sandbox(build_argv, *, key=b"", timeout=180, markers=None, markers_cap=l
                 p.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
-        for rd in (out_r, err_r):
-            if rd is not None:
-                rd.join(timeout=5)
-        rest = _drain_fd(r_status)
-        res["status"] += [json.loads(l) for l in rest.splitlines() if l.strip().startswith("{")]
-        os.close(r_status)
-        if w_status is not None:
-            os.close(w_status)
         ns = res.get("pid_ns")
         if ns:
             left = limits.ns_members(ns)
             if left:
                 res["leftovers"] = left
                 res["leftovers_after_kill"] = limits.kill_namespace(ns, res.get("init_pid"))
+        for rd in (out_r, err_r):
+            if rd is not None:
+                rd.join(timeout=5)
+        res["readers_complete"] = all(rd is not None and not rd.is_alive() for rd in (out_r, err_r))
+        if p is not None:
+            for pipe, rd in ((p.stdout, out_r), (p.stderr, err_r)):
+                if pipe is not None and (rd is None or not rd.is_alive()):
+                    pipe.close()
+            if p.stdin is not None and not p.stdin.closed:
+                p.stdin.close()
+        rest = _drain_fd(r_status)
+        res["status"] += [json.loads(l) for l in rest.splitlines() if l.strip().startswith("{")]
+        os.close(r_status)
+        if w_status is not None:
+            os.close(w_status)
         res["stdout"] = bytes(out_r.buf).decode("utf-8", "replace") if out_r else ""
         res["stderr"] = bytes(err_r.buf).decode("utf-8", "replace") if err_r else ""
         res["stdout_overflow"] = bool(out_r and out_r.overflow)

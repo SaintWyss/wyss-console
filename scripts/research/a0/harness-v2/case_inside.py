@@ -130,6 +130,9 @@ finally:
             safe_write(f"{M}/screen.raw", bytes(session.raw), "wb")
             result["stdout"] = session.screen.seen_text()[:CAP_TEXT]
             result["screen_visible"] = session.screen.visible_text()[:CAP_TEXT]
+            result["pty_eof"] = session.eof
+            result["screen_unknown"] = session.screen.unknown
+            result["screen_pending"] = len(session.screen.pending)
             result["stderr"] = ""
             result["driver_audit"] = session.audit[-200:]
     except Exception as e:

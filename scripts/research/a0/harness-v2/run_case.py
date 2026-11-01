@@ -130,6 +130,19 @@ def file_hashes(path):
     return dict(sorted(out.items()))
 
 
+def isolation_checks(r, integrity_ok, proxy, owned_changed):
+    """Unknown namespace/tree observations cannot stand for a successful isolation check."""
+    return {"integrity": integrity_ok,
+            "namespace_verified": type(r.get("pid_ns")) is int and r["pid_ns"] > 0
+            and type(r.get("init_pid")) is int and r["init_pid"] > 0,
+            "no_leftovers": not r["leftovers"],
+            "no_unexpected_proxy": not (set(proxy) - KNOWN_PROXY),
+            "owned_files_unchanged": owned_changed == [],
+            "not_killed_for_storage": r["killed"] not in ("markers_cap", "stream_cap"),
+            "launcher_complete": r.get("exit") == 0 and r.get("timed_out") is False
+            and r.get("killed") is None and r.get("readers_complete") is True}
+
+
 def run_case(root, ev_base, case, *, timeout=180, markers_cap=limits.MARKERS_CAP,
              root_cap=limits.ROOT_CAP, sizes=None, rlimits=None, inject_failure=None,
              allow_provider=False):
@@ -139,6 +152,9 @@ def run_case(root, ev_base, case, *, timeout=180, markers_cap=limits.MARKERS_CAP
         return {"id": case["id"], "refused": "provider_execution_not_authorized", "verdict": "REFUSED"}
     if case.get("sut_argv") and "/opt/a0/bin/claude" in case["sut_argv"] and not allow_provider:
         return {"id": case["id"], "refused": "provider_execution_not_authorized", "verdict": "REFUSED"}
+    spec_errors = oracle.lint(case)
+    if spec_errors:
+        return {"id": case["id"], "verdict": "INCONCLUSIVE", "reasons": ["spec:" + e for e in spec_errors]}
     ev = os.path.join(ev_base, case["id"])
     staging = os.path.join(root, "cases-v2", case["id"])
     markers = os.path.join(ev, "markers")
@@ -167,6 +183,9 @@ def run_case(root, ev_base, case, *, timeout=180, markers_cap=limits.MARKERS_CAP
         spec = {"id": case["id"], "mode": case.get("mode", "H"), "prompt": case.get("prompt", "ping"),
                 "script": case.get("script", [{"text": "ok from mock"}]), "args": case.get("args", []),
                 "sut_argv": case.get("sut_argv"), "sut_timeout": case.get("sut_timeout", 120)}
+        for field in ("startup_wait", "expect_screen"):
+            if field in case:
+                spec[field] = case[field]
         json.dump(spec, open(os.path.join(cdir, "spec.json"), "w"), indent=1)
         fixture_digest = file_hashes(fx)
         integrity.main(os.path.join(ev, "integrity-before.json"))
@@ -213,10 +232,7 @@ def run_case(root, ev_base, case, *, timeout=180, markers_cap=limits.MARKERS_CAP
                  if owned(fixture_rec["work"], "work").get(k) != owned(final["work"], "work").get(k)])
             work_ran = sorted(k for k in final["work"] if k.startswith("ran-"))
             victim = "a0-victim" in final["work"]
-        isolation = {"integrity": cmp.returncode == 0, "no_leftovers": not r["leftovers"],
-                     "no_unexpected_proxy": not (set(proxy) - KNOWN_PROXY),
-                     "owned_files_unchanged": owned_changed == [] if owned_changed is not None else True,
-                     "not_killed_for_storage": r["killed"] not in ("markers_cap", "stream_cap")}
+        isolation = isolation_checks(r, cmp.returncode == 0, proxy, owned_changed)
         stdout_txt = (inside or {}).get("stdout", "")
         res = {"analysis": analysis, "evidence": evidence, "inside": inside, "isolation": isolation,
                "validator": validator,
