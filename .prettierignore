@@ -6,7 +6,6 @@ package-lock.json
 src-tauri/target
 src-tauri/gen
 src-tauri/Cargo.lock
-wyss-agent-legacy
 docs/acceptance/evidence/m1-perf-2026-10-23
 # Reference-screen corpus: byte streams and tmux's own output, recorded by benchmarks/screen_corpus.py
 src-tauri/tests/fixtures/screen

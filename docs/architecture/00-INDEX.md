@@ -99,9 +99,10 @@ When two documents disagree, the higher one rules and the lower one is corrected
    [04](04-TARGET-ARCHITECTURE.md) as the overall picture.
 4. **README and the implementation**: what exists. The README describes reality; it does not
    redefine the product.
-5. **Historical research and archived specifications**: `wyss-agent-legacy/`, the base
-   specification v0.1, the research report of 2026-10-01 and the vision report of 2026-10-12.
-   Inputs, never authority.
+5. **Historical research and archived specifications**: the original Wyss assistant lives
+   in the separate `SaintWyss/Wyss` repository (its copied archive was removed from Console),
+   plus the base specification v0.1, the research report of 2026-10-01 and the vision report
+   of 2026-10-12. Inputs, never authority.
 
 One exception runs against the order: a product goal does not by itself override an established
 security control. Changing one takes an ADR and proof (decision D10, ADR 0028 §11).
