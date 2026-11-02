@@ -4,7 +4,7 @@
 //!
 //! An apply writes an `intent` before it touches the provider's file and an `outcome`
 //! after. If the intent cannot be written, nothing is done: a privileged operation fails
-//! closed when its auditable record cannot be made (ADR 0003).
+//! closed when its auditable record cannot be made (docs/contracts/event-envelope.md).
 use super::change::{Operation, Outcome, Prior, Risk};
 use super::fault::{Faults, Injected, Step};
 use super::fsutil::{StoreError, private_dir};

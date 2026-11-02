@@ -1257,7 +1257,7 @@ mod lifecycle {
     }
 }
 
-// ---- M4 measurements (run in release: see docs/acceptance/m4-engineering-2026-10-24.md) -------
+// ---- M4 measurements (run in release: see docs/contracts/acceptance.md) -------
 
 mod perf {
     use super::*;

@@ -6,7 +6,7 @@
 //! window command reaches it and nothing constructs it outside tests. It is not enabled, not
 //! reviewed by anyone but its author, and not a security boundary: **DN-05 (how a device reaches the
 //! host) is the owner's and is undecided, and the external security review the roadmap requires
-//! for F10a has not happened.** It is here so that the rules of `docs/architecture/16` §5.2–5.3 exist
+//! for F10a has not happened.** It is here so that the remote rules of `docs/REQUIREMENTS.md` §8 exist
 //! as tested code before any network code does, and so that a later transport has nothing to decide.
 //!
 //! Remaining boundaries it cannot be honest about without separate decisions:

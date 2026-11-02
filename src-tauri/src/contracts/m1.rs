@@ -1,4 +1,4 @@
-//! Pure M1 workspace-store contract (`docs/contracts/m1-workspace.md` §2, ADR 0052): the closed
+//! Pure M1 workspace-store contract (`docs/contracts/workspace.md` §2, ADR 0052): the closed
 //! `StoreV1` records, their strongly typed identities, a strict bounded codec and the
 //! cross-record validation that makes a decoded store safe to hold.
 //!

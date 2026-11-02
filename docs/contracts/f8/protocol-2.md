@@ -1,7 +1,8 @@
-# Managed protocol 2: candidate wire contract
+# Managed protocol 2 — wire contract
 
-Contract revision 1, based on main `2f50390`. **Not enabled, not owner-accepted.** This specifies
-request deltas against the exact public `contracts::{control,binding,execution,turn,approval}`
+Revision 1. Per-session architecture is accepted and implemented. P1 remains separate; admission, provider and capacity gates are described in [Managed runtime](../managed-runtime.md).
+
+This contract defines request deltas against the exact public `contracts::{control,binding,execution,turn,approval}`
 types in this baseline; unspecified keys are forbidden, not extension points. No generic argv,
 environment, model/effort selection, prompt forwarding or tools are introduced. Existing typed
 turn input and accepted local-tools workspace/profile fields keep their original restrictions.
@@ -112,9 +113,8 @@ an intent or writing to the provider. Protocol 1 and its approval payloads are u
 
 Durable leases remain session grants; launch-scoped admission is transient and separate.
 
-This file freezes candidate shapes; production serializers/GUI parsers and their shared fixtures
-must be implemented/reviewed together. The contract tests exercise request deltas and routing
-oracles only. They do not prove the live protocol, provider isolation or owner acceptance.
+Production serializers, GUI parsers and shared fixtures must keep these exact shapes together.
+Contract tests alone do not prove live provider isolation or whole-product acceptance.
 
 ## Durable event attribution (vocabulary 2)
 
@@ -147,16 +147,16 @@ attribution, and account for the unchanged 2 KiB event bound before advancing th
 A post-crash writer must not fabricate a historical exit observation. The old reader refuses V8,
 so vocabulary-2 events cannot be interpreted accidentally by the legacy executable.
 
-## Inactive implementation clarifications
+## Codec and correlation rules
 
 `src-tauri/src/f8/protocol.rs` implements strict request parsing/serialization and partial response
-codecs, not server activation. Binding-status adds required `runtime_identity` (nullable, present
+codecs; the server and admission policy have separate owners. Binding-status adds required `runtime_identity` (nullable, present
 exactly when bound-attached), checked against its existing session/instance. Model cursors keep the
 baseline `{runtime_instance_id,index}` shape, index <=50; they must match the enclosing live identity
 and explicit request generation/instance. No cursor can select a launch by itself. Runtime-control
 receipts have revision expected+1 and the requested desired state; stop retains generation, start
 retains it for the same launch or increments exactly one (first allocation is 1). Exact-intent replay
-uses its original request expectations. These clarify the candidate; no approved V1 contract changes.
+uses its original request expectations. These rules do not change the separate V1 contract.
 
 Audit results are decoded by `f8/audit.rs`: per-event vocabulary-1/2 validation, page correlation
 (stream, cursor, limit, exact contiguity, unique event IDs) and stateful `AuditReplay` (sole-writer
@@ -164,13 +164,12 @@ authority succession, disjoint session/instance/authority domains, launch attrib
 ready/exit, closed turn/approval transition tables, 128/4096 lifetime limits). All non-audit methods
 now have result-kind/record correlation. Binding-create success requires the independently accepted
 canonical workspace via `correlate_binding_create`; generic correlation refuses without that context.
-Closed-session no-op returns revision 2 unchanged, as in the baseline. Do not use partial codecs to enable a V8 client/server. See the
-[implementation evidence](../../acceptance/f8-code-2026-10-20.md) for the remaining boundaries.
+Closed-session no-op returns revision 2 unchanged, as in the baseline. Admission and
+remaining qualification belong to [Managed runtime](../managed-runtime.md).
 
-## Window integration clarifications, 2026-10-21
+## Window integration
 
-Found by driving the protocol through the desktop's own client; none changes a method, a key set or
-an error word.
+The desktop follows the same exact methods, key sets and error vocabulary.
 
 - **Runtime status is not empty.** `runtime/status` reports, for the live launch of the session, the
   safety profile it was asked for (`runtime_safety_profile`) and, for local tools, the one workspace it

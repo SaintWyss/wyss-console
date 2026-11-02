@@ -4,7 +4,7 @@
 What it models: N runtime processes that share ONE credential file holding a rotating refresh
 token. Each process, when its access token is stale, does load -> exchange the refresh token at the
 token service -> save, with no lock between processes (the shape of the Codex 0.159.0 source read
-in docs/research/f8-codex-shared-state-2026-10-20.md: in-process semaphores only, in-place save).
+in docs/contracts/concurrency.md: in-process semaphores only, in-place save).
 The token service rotates strictly: a refresh token works once; presenting a spent one is terminal
 (`refresh_token_reused`) for that lineage.
 

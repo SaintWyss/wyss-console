@@ -3,7 +3,7 @@
 pooled, and the reference budgets that follow from them. Nothing is dropped: a failed sample
 (`None`) is counted and shown, an outlier stays in the pooled figures.
 
-    python3 -I benchmarks/m1_gui_report.py docs/acceptance/evidence/m1-perf-2026-10-23
+    python3 -I benchmarks/m1_gui_report.py .artifacts/benchmarks/m1-perf-2026-10-23
 
 The budgets are a proposal for the owner to agree or change, not an approval. The rule is stated
 here so it can be argued with: a latency budget is one and a half times the worst p95 of any single

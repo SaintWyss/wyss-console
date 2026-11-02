@@ -1,21 +1,25 @@
 # Wyss Console
 
-Native personal development console for CachyOS/KDE: terminals, provider configuration
-and Native/Managed agent workflows. Private repository; Tauri2, Svelte5 and Rust.
+Personal native development workspace for CachyOS/KDE: persistent terminals,
+provider configuration, Arsenal, Native agents and supervised Managed workflows.
+Private repository; Tauri 2, Svelte 5, TypeScript and Rust.
 
-Start at the [documentation map](docs/product/README.md). It routes to six canonical
-pages by task; historical reports and detailed contracts are available on demand.
+| Question                                         | Read                                 |
+| ------------------------------------------------ | ------------------------------------ |
+| What is the project and its scope?               | [Product](docs/PRODUCT.md)           |
+| What exists and what is still unverified?        | [Current state](docs/STATUS.md)      |
+| What remains, and in what order?                 | [Remaining roadmap](docs/ROADMAP.md) |
+| Which decisions and restrictions apply?          | [Decisions](docs/DECISIONS.md)       |
+| How are components and state divided?            | [Architecture](docs/ARCHITECTURE.md) |
+| How do I develop, check, install and recover it? | [Development](docs/DEVELOPMENT.md)   |
 
-## Current capabilities
+Detailed target behavior and acceptance criteria live in [Requirements](docs/REQUIREMENTS.md).
+Specialized contracts are linked from the architecture and decisions pages.
 
-Implemented features, acceptance evidence and limitations have one owner:
-[implementation status](docs/product/implementation-status.md). Target behaviour is
-separate from delivered functionality.
+Start a development window with `npm ci` followed by `npm run desktop:dev` after
+installing the [prerequisites](docs/DEVELOPMENT.md#prerequisites-and-commands).
+For installation and session-preserving updates, use the
+[package procedure](docs/DEVELOPMENT.md#ordinary-package-installation-and-launch).
 
-For prerequisites, commands and maintenance policy, use
-[development and maintenance](docs/CHECKPOINT.md). No public release or installation
-change is implied by repository instructions.
-
-For a supported package install/run example and session-preserving update behaviour,
-see [package installation and launch](docs/CHECKPOINT.md#ordinary-package-installation-and-launch).
-F8 service activation is documented separately there.
+Source availability, recorded tests and acceptance on an installed system are
+separate. The [status page](docs/STATUS.md) states the current limits.

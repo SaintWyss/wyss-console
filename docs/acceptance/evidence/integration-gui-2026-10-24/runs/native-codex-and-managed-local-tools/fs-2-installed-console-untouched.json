@@ -1,9 +1,0 @@
-{
-  "compared": [
-    ".config/wyss-console",
-    ".local/opt/wyss-console",
-    ".local/share/wyss-console",
-    ".local/state/wyss-console"
-  ],
-  "changed": {}
-}

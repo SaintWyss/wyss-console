@@ -1,4 +1,0 @@
-"accept"
-"decline"
-"accept"
-"cancel"

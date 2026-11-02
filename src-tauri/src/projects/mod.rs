@@ -1,4 +1,4 @@
-//! M1: the project-centered workspace (`docs/contracts/m1-workspace.md`, ADR 0052).
+//! M1: the project-centered workspace (`docs/contracts/workspace.md`, ADR 0052).
 //!
 //! The Console's presentation metadata, kept in one private versioned store outside the Native
 //! registry and outside every Managed authority. This module lists what those owners already

@@ -2,8 +2,8 @@
 
 Nothing here is configurable by the authority's client: the authority picks a profile *name*
 and the bridge builds the options from this file, which the authority has hashed. The sets
-come from the exact-build experiments in `probe/matrix*.py` (results: the "Results of E1-E9"
-section of docs/research/claude-managed-feasibility-2026-10-23.md): each option exists because the
+come from the exact-build experiments in `probe/matrix*.py`; the current admission
+contract is docs/contracts/managed-runtime.md. Each option exists because the
 experiment showed a hidden effect path that the option closes, and `disallowed_tools` alone
 was shown NOT to close hooks, MCP launch, apiKeyHelper or memory loading.
 """

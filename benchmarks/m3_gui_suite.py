@@ -2,7 +2,7 @@
 """Runs every M3 desktop scenario on its own private display and writes one summary.
 
     python3 -I benchmarks/m3_gui_suite.py --binary <m3_fixture_gui> --sdk-root <verified venv> \
-        --unverifiable-root <venv the verifier must refuse> --out docs/acceptance/evidence/m3-gui-...
+        --unverifiable-root <venv the verifier must refuse> --out .artifacts/benchmarks/m3-gui-...
 
 Each scenario starts the application afresh (nothing carries over), so a run can be repeated and
 compared. A scenario passes when every expectation it makes about the disk and the mock provider's

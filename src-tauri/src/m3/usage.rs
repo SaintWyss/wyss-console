@@ -1,5 +1,5 @@
-//! Provider-reported usage and limits, with provenance. Rules UR1–UR7 of
-//! docs/architecture/12-MODEL-MANAGEMENT.md §6 hold here:
+//! Provider-reported usage and limits, with provenance. The contract in
+//! docs/contracts/managed-runtime.md applies here:
 //!
 //! - a figure the provider did not report is `None`, never zero;
 //! - a figure is labelled with its provider and its grain (turn or running total);

@@ -24,7 +24,7 @@ fn get_app_info() -> AppInfo {
 
 /// The main window, from its configuration. It is always opaque: what is behind the window
 /// (the wallpaper, other windows) never shows through text, and no compositor blur is asked
-/// for (docs/research/global-ux-2026-10-31/GLOBAL-UX-UI-SPEC.md).
+/// for (docs/contracts/interface.md).
 fn open_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config = app
         .config()

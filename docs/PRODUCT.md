@@ -1,33 +1,34 @@
-# Wyss Console: product vision and requirements
+# Product
 
-Wyss Console is Santiago's native personal development workspace: a useful terminal
-without agents or network, real provider configuration and supervised agent work.
-The goal is the **complete personal product**, not an MVP.
+Wyss Console is Santiago's personal native development workspace for CachyOS/KDE.
+It combines useful offline terminals, real provider configuration and supervised
+agent work. The goal is a complete personal product.
 
-## Approved owner decisions
+## Scope
 
-| ID    | Product requirement                                                                                                                                                                                               |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| WD-01 | Full hybrid: Claude Code and Codex are first-class in Native and Managed modes where technically feasible; preserve original capabilities and distinct security boundaries                                        |
-| WD-02 | Projects are the primary working context: device/host → project → workspace → sessions, with terminals, agents, profiles and work coordination; global configuration/administration remains separately accessible |
+- Projects organize workspaces, terminals, sessions and coordination. Global
+  configuration and administration remain separately accessible.
+- Claude Code and Codex are first-class Native and Managed targets where
+  technically feasible. Native preserves original provider workflows; Managed
+  has its own explicitly qualified controls and limitations.
+- Arsenal provides revisioned capabilities, presets, per-session selections and
+  trusted-folder synchronization. Native delegation and saved launch files
+  extend the original workflow.
+- Retained scope includes persistent terminal recovery, model/effort controls,
+  reviewed handoff, finite supervised coordination, remote PCs, native Android,
+  optional lingering and the supported OpenCode/Hermes/Wyss Agent extensions.
+- Public distribution, teams/multi-tenancy, an IDE, desktop screen sharing and
+  unattended OL4 are outside the personal scope.
 
-Retained scope includes finite supervised OL3, remote PCs, native Android, optional
-lingering, faithful terminal reattachment, model/effort controls and Wyss policy/effects
-with Hermes planning behind a boundary. Public distribution and unattended OL4 remain
-outside personal scope. An IDE, teams/multi-tenant accounts and desktop screen sharing are also out
-of scope. The [original owner record](architecture/32-OWNER-PRODUCT-DIRECTIONS-2026-10-13.md)
-provides decision provenance, not current implementation status.
+## Requirements and completion
 
-## Requirements
+The [functional specification](REQUIREMENTS.md) defines the
+applicable requirements, journeys and acceptance criteria. Scope changes update
+their definitions and consumers; a requirement is not discarded because its
+implementation or validation is still incomplete.
 
-The 31 `FP-*` requirements and matching acceptance criteria are defined once in the
-[functional specification](product/functional-specification.md); their
-[crosswalk](product/traceability.md) preserves all 208 legacy FR/NFR obligations.
-Changes to scope must update those definitions and mappings, not add a competing list.
-
-Use [implementation status](product/implementation-status.md) for delivered capability
-and evidence, [architecture](product/architecture.md) for technical/security constraints,
-and [roadmap](product/roadmap.md#3-outstanding-owner-decisions-and-technical-discovery)
-for dependencies and unresolved owner choices. Product approval does not accept an ADR
-or authorize weakening its boundary. Navigation and document ownership live in the
-[documentation map](product/README.md).
+[STATUS](STATUS.md) states what exists and its evidence. [ROADMAP](ROADMAP.md)
+contains only unfinished work. [DECISIONS](DECISIONS.md) states current choices
+and open questions, while [ARCHITECTURE](ARCHITECTURE.md) explains ownership and
+boundaries. An implemented feature is not automatically installed, verified on
+real devices or accepted for the complete product.

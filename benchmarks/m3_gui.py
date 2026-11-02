@@ -2,7 +2,7 @@
 """M3 on the real desktop, isolated: the fixture Claude Managed window on a display of its own.
 
     python3 -I benchmarks/m3_gui.py --binary src-tauri/target/debug/examples/m3_fixture_gui \
-        --sdk-root <venv> --scenario inference --out docs/acceptance/evidence/m3-gui-2026-10-23
+        --sdk-root <venv> --scenario inference --out .artifacts/benchmarks/m3-gui-2026-10-23
 
 What runs is the real application window (Tauri/WebKit) with the real Claude Agent SDK and Claude
 Code CLI behind it, against a mock provider API on loopback. Everything is made for the run: a

@@ -20,7 +20,7 @@ The report is **one observation**, not canonical P1 acceptance: M03/M04 need ver
 visibility and three sessions of repeated five-minute windows; M05 needs two minutes idle;
 M18 needs the full authority/runtime boundary. Independent-session medians, p95 and
 confidence intervals, startup-to-drawn-prompt, input/render latency, throughput, panes and
-reconnect measurements still need their own procedures (architecture 15).
+reconnect measurements still need their own procedures in [the measurement contract](../docs/contracts/acceptance.md).
 
 ## Backend measurements (in-process, release)
 
@@ -33,42 +33,24 @@ WYSS_BENCH_OUT=out.json cargo test --release --lib terminal::bench_tests -- \
 python3 -I benchmarks/aggregate.py out-run1.json out-run2.json out-run3.json
 ```
 
-They generate the corpora of architecture 15 §11.2 from a fixed seed in a private temporary file
+They generate rendering corpora from a fixed seed in a private temporary file
 that they remove by its exact path, and record the machine's state (load, memory, swap, power).
 Nothing is dropped from a sample list. `threads.py` reads one process's threads (processor time and
 wake-ups); `idle_ab.py` compares two builds of the GUI idle on an isolated display. `threads.py` starts and
 ends nothing. `idle_ab.py` ends only the process it launched, through `owned.py` (a direct child held
-by a pidfd; no process is ever found by name or path; see `docs/incidents/2026-10-20-benchmark-ended-live-session.md`).
+by a pidfd; no process is ever found by name or path; see `docs/contracts/acceptance.md`).
 `python3 -I benchmarks/test_owned.py` is the negative test of that rule and also fails a script that
 uses `pkill`, `pgrep`, `killall` or a `kill` on a variable.
 
-## M1 project workspace on the real desktop (M1-13)
+## Legacy desktop harnesses
 
-`m1_gui.py` runs the built application on a nested display it makes for the run (a virtual KWin
-compositor and Xwayland, each on a session bus of its own), with its own home, state and runtime
-directory, a disposable terminal host and synthetic projects built by the ignored test
-`projects::tests::perf_world` through the commands the window sends. It measures from outside: key
-or click to the first frame that shows the answer (`ffmpeg` x11grab at 60 frames a second, so a
-figure is quantised to about 17 ms and carries the capture's own latency), and the owned tree's
-memory (RSS, PSS), processor time, threads, descriptors and wake-ups while idle with the view
-shown and hidden. `m1_gui_runs.sh` makes three runs of each of three shapes (1 terminal and 2
-workspaces; 16 terminals and 32 workspaces; 16 terminals in one workspace); `m1_gui_report.py`
-reads the run files and prints the figures and the proposed budgets. Everything it starts is a
-direct child launched through `owned.py` and adopted by descriptor (`adopt_tree`), and the script
-reports, without touching them, any process that still carries the run's directory afterwards.
-
-```sh
-npx tauri build --no-bundle -- --locked              # the release binary, once
-cargo test --locked --bin wyss-console --no-run      # the test executable that builds the world
-benchmarks/m1_gui_runs.sh src-tauri/target/release/wyss-console \
-  src-tauri/target/debug/deps/wyss_console-<hash> OUT_DIR
-python3 -I benchmarks/m1_gui_report.py OUT_DIR
-```
-
-`m1_gui.py --shape none` starts the application with no projects and the release gate off (what an installed
-build looks like before adoption); `--seed DIR` copies `layout.json`, `native/` and `configuration/trusted-writers` of
-a backup into the run's own state, so the import can be rehearsed on a copy of real records (the originals are
-only read).
+`m1_gui.py`, `m1_gui_runs.sh`, `idle_ab.py` and the M3 GUI harnesses include historical
+private-display/home/bus recipes. They remain source fixtures, not current native
+acceptance procedures. Do not run them as a substitute for the owner's normal environment.
+`m1_gui_report.py` can summarize already produced run files without starting an app;
+its budget estimates require agreement before they become acceptance thresholds.
+For current preservation and environment rules, use
+[development](../docs/DEVELOPMENT.md) and [acceptance](../docs/contracts/acceptance.md).
 
 ## Historical A0 evidence
 

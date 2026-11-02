@@ -1,5 +1,5 @@
 /* Design tokens. Every surface is opaque: text never depends on what is behind the window.
-   Contract: docs/research/global-ux-2026-10-31/GLOBAL-UX-UI-SPEC.md. Contrast is computed in
+   Contract: docs/contracts/interface.md. Contrast is computed in
    tests/appearance.test.ts for every text token on every surface of its theme. */
 :root {
   color-scheme: dark;

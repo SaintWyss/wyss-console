@@ -1,4 +1,4 @@
-//! The optional local metrics history of docs/contracts/m3-model-usage-history.md.
+//! The optional local metrics history of docs/contracts/usage-history.md.
 //!
 //! A separate SQLite database in its own private directory, disabled until the owner opts in and
 //! until the contract is accepted (`gate::METRICS_POLICY_ACCEPTED`). It never shares a file, a
