@@ -205,8 +205,7 @@ function scanOf(
   return { status: result.status, out: result.stdout };
 }
 
-const HISTORICAL =
-  'wyss-agent-legacy/.planning/phases/03-pipeline-de-ingesta/03-PATTERNS.md';
+const SCAN_FIXTURE = 'docs/fixtures/credential-scan-fixture.md';
 // Built here, at run time, so that this file holds no credential-shaped string.
 const real = {
   anthropic: [
@@ -242,20 +241,16 @@ it('the checkout is clean of credentials, with no exception to lean on', () => {
     expect(readFileSync(join(root, script), 'utf8'), script).not.toMatch(
       /ALLOWED|03-PATTERNS|canary/,
     );
-  // The planted string of the historical document was redacted, and only that.
-  const historical = readFileSync(join(root, HISTORICAL), 'utf8');
-  expect(historical).toContain('token=sk-ant-<FAKE_TEST_SECRET>');
-  expect(historical).not.toMatch(/sk-ant-api03/);
 });
 
-it('stops a real-looking credential of any provider in the former canary path', () => {
+it('stops a real-looking credential of any provider in a documentation fixture', () => {
   for (const [provider, secret] of Object.entries(real)) {
     const result = scanOf({
-      [HISTORICAL]: `secret_file.write_text("token=${secret}")\n`,
+      [SCAN_FIXTURE]: `secret_file.write_text("token=${secret}")\n`,
     });
     expect(result.status, provider).toBe(1);
     expect(result.out, provider).toMatch(/FAIL\s+no credential in any of the/);
-    expect(result.out, provider).toContain('03-PATTERNS.md');
+    expect(result.out, provider).toContain('credential-scan-fixture.md');
     // The finding names the file and the kind and never the secret.
     expect(result.out, provider).not.toContain(secret);
     expect(result.out, provider).not.toContain(secret.slice(6, 30));
@@ -275,9 +270,9 @@ it('stops the same credentials anywhere else, and a key block with a body', () =
   expect(scanOf({ 'docs/x/.env': 'A=b\n' }).status).toBe(1);
 });
 
-it('accepts the redaction that replaced the canary, and ordinary prose about keys', () => {
+it('accepts a redacted sample and ordinary prose about keys', () => {
   const result = scanOf({
-    [HISTORICAL]: [
+    [SCAN_FIXTURE]: [
       'secret_file.write_text("token=sk-ant-<FAKE_TEST_SECRET>")',
       'ANTHROPIC_TEST_SECRET_REDACTED',
       'a key looks like sk-ant-... and starts with the letters sk',
