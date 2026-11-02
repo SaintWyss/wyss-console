@@ -15,9 +15,9 @@ Profiles support bounded inheritance (depth eight), pinned versions (20 retained
 clear precedence and explicit unavailable-version errors. They contain no secrets or free-form
 commands. Requested model/effort is distinct from observed provider state. Do not inject a
 selection into an already-running terminal; require a qualified provider mechanism or show
-unsupported/unknown. Observations are transient, attachment/generation fenced, not transcript
-or account entitlement. Reroute preserves only the accepted typed fields and the originating
-turn/generation fence, never arbitrary provider payload.
+unsupported/unknown. Provider reports are distinct from requested Native settings and account entitlement.
+Managed attachment/turn/generation observations belong to the separate
+[Managed contract](managed-runtime.md#schema-and-observation-compatibility).
 
 Arsenal selections are reevaluated at launch against the actual provider build and exclusion
 set; changes require reconfirmation. The build-specific [qualifications](provider-capabilities.md)
@@ -27,8 +27,10 @@ does not prove a skill was used or deny reading its files.
 ## Saved launch files
 
 The accepted launch design (formerly ADR0059) uses per-user TOML files, reread when selected.
-At most 64 files, 64 KiB each, validated filename grammar. A file selects either commands
-(at most 16, each at most 4096 bytes) or a Native agent and optional profile, never Managed.
+At most 64 sorted TOML candidates are processed, 64 KiB per file, with validated
+filename grammar. The current implementation collects all matching directory entries
+before that processing limit; this is not a hard directory-enumeration memory bound. A file selects either commands
+(at most 16, each at most 4096 Unicode scalar values; one line, no controls) or a Native agent and optional profile, never Managed.
 The backend parser in `src-tauri/src/launch.rs` owns exact keys and validation.
 
 Optional preparation has at most eight lines, run separately through `/bin/sh`, with a
@@ -51,8 +53,8 @@ Use the [host](terminal-host.md) and [screen](terminal-fidelity.md) contracts fo
 
 Handoff is an explicitly reviewed, bounded package for a chosen receiver. Bind revisions,
 digests and receiving-plan limits; do not infer shared history from switching providers.
-Durable prompt/output handoff requires an accepted privacy contract. Pipeline coordination
-is finite supervised OL3, metadata-only journaling and authority-mediated effects; a planner
+Durable prompt/output handoff requires an accepted privacy contract. The [coordinator](coordination.md) implements finite supervised OL3 with metadata-only
+journaling, but its production guarded effects remain blocked; a planner
 or Native transcript is untrusted data, never an approval or permission to replay dispatch.
 
 ## Qualification required for offered controls

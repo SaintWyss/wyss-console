@@ -9,8 +9,9 @@ Current layered contract: [terminal service](../../src-tauri/src/terminal/mod.rs
 
 ## Ownership and lifecycle
 
-The backend uses portable-pty; xterm's DOM renderer plus the fit addon owns the
-visible terminal. The separate screen helper maintains recovery state; it does
+The backend uses portable-pty; xterm plus FitAddon owns the visible terminal.
+The application does not explicitly select a renderer backend or load a GPU addon; do not
+infer a measured renderer/backend guarantee from the library name. The separate screen helper maintains recovery state; it does
 not own a PTY master or Managed authorization. These are distinct responsibilities.
 
 TerminalId, ConsoleSessionId and ManagedSessionId are different identity domains.
@@ -68,7 +69,10 @@ or as the direct terminal's 64 KiB ring. Slow consumers have bounded behavior;
 close/control stays available independently of full output buffers.
 
 Busy may be retried only when the host refused admission and no bytes were
-written. Partial/ambiguous writes are not resent. Input overload fails visibly,
+written. Partial/ambiguous writes must not be resent. The generic HostLink currently retries
+`host_unavailable` without distinguishing a lost reply; this is a known violation of the
+required policy, tracked by [ENG-02](../ROADMAP.md#eng-02). The stricter Projects Owner
+transport does not initialize/reconnect/retry that way. Input overload fails visibly,
 never grows an unbounded queue or silently redirects bytes to another terminal.
 EOF can precede reaping: drain bounded final output and obtain the exit state;
 explicit close may discard remaining output and truncation must be disclosed.

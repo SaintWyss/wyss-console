@@ -116,7 +116,7 @@ pub struct PreparedApplication<S: Spawner> {
     _writer: WriterGuard,
 }
 impl<S: Spawner> PreparedApplication<S> {
-    /// Validate the whole V8 image and recover predecessor work before accepting clients.
+    /// Validate the selected V8/V9/V10 image and recover predecessor work before accepting clients.
     /// Durable history seeds anti-reuse fencing; it never restores a live worker or lease.
     pub fn new(
         mut connection: Connection,

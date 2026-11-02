@@ -61,8 +61,8 @@ required-features = ["f8-fixture"]
 tauri-build = { version = "=2.7.1", features = [] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Same version Tauri already resolves for its GTK window. Used only to request
-# KWin's blur through GDK's property API (no shell, no FFI).
+# Same GTK version Tauri resolves; used by desktop-native dialogs and editors.
+# The current main window is opaque and does not request KWin blur.
 gtk = "=0.18.2"
 
 [dependencies]
@@ -73,14 +73,14 @@ tauri = { version = "=2.12.1", features = [] }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: a split ratio must decode to the exact f64 that was encoded (contracts::m1).
 serde_json = { version = "1", features = ["float_roundtrip"] }
-# ADR 0029: restoration records are sealed with authenticated encryption, and the key is
+# Accepted custody contract: restoration records are sealed with authenticated encryption; the key is
 # generated from the OS random source. RustCrypto, no unsafe of our own, no network.
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 getrandom = "0.3"
 pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
 zeroize = "1"
-# TOML is read, never written, in F1 (Codex's configuration). The version is the one
-# tauri already brings, so no crate is added to the build.
+# Parse provider TOML for inventory and semantic validation of byte-preserving edits.
+# Keep the pinned parser aligned with the dependency graph.
 toml = { version = "=1.1.6", default-features = false, features = ["std", "serde", "parse"] }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 uuid = { version = "=1.27.0", features = ["v4"] }

@@ -216,8 +216,9 @@ fn main() {
             "projects_compact_receipts",
             "projects_set_enabled",
             "projects_open_window",
-            // Protocol 2 (F8): granted by the `f8` capability, which the installed
-            // configuration does not enable; only the state read is in `main`.
+            // Protocol 2 (F8): the configuration lists the `f8` capability for the main
+            // window. Runtime calls remain inactive unless startup selected F8; only
+            // the state read belongs to the separate `main` capability file.
             "f8_state",
             "f8_reconnect",
             "f8_sessions",

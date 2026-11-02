@@ -1,13 +1,13 @@
-//! Inactive protocol-2 / schema-8 authority facade. It owns an `Engine` and routes strict
-//! protocol-2 requests to the durable writers, the engine and its fences. There is no socket, no
-//! server loop, no installed-store opener and no provider launcher here; `handle` is a pure
-//! bytes-in/bytes-out function for tests and for the future server.
+//! Protocol-2 authority facade over the Engine, durable writers and identity fences.
+//! `control::serve` owns the socket and prepared-application lifecycle; this facade routes
+//! requests and can dispatch effects through its spawner. V10 adds the separately parsed
+//! workspace-guard extension, whose production execution gate remains closed.
 //!
 //! Nothing is inferred: the target of every routed request is the explicit runtime fence in the
 //! request, checked against the registry (live work) or the immutable sidecar (history) before
 //! any state changes; leases, approvals and cancellation re-run their gates at the moment of the
 //! effect; a provider answer is sent only after its durable decision committed and the engine
-//! revalidated the ticket. All 29 protocol methods route here or through `operations.rs`. Native provider support is a
+//! revalidated the ticket. The 29 core methods route here or through `operations.rs`; guard methods use `guard_protocol`. Native provider support is a
 //! separate adapter boundary and may refuse unproved profiles without weakening authority checks.
 use super::{
     engine::{Attachment, Engine, LeaseClaim, LeaseView, Spawner, TurnTicket},

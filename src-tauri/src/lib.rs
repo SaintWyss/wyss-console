@@ -26,8 +26,8 @@ pub mod terminal;
 pub mod turns;
 
 /// Starts the desktop. `authority_digest` is the SHA-256 of the authority this build was
-/// packaged with, in hex, or `None` for a build that was not packaged: only a packaged
-/// build installs and starts an authority of its own.
+/// packaged with, in hex, or `None`. A supplied digest supports the legacy lifecycle
+/// bootstrap; the current product entry point passes `None` and activates services separately.
 pub fn run(authority_digest: Option<&'static str>) {
     desktop::run(
         authority_digest,
@@ -78,7 +78,7 @@ pub fn run_with(authority_digest: Option<&'static str>, extension: Extension) {
     );
 }
 
-/// F8 implementation behind an inactive local application selection; installed startup stays v1.
+/// Protocol-2 implementation; ordinary startup uses P1 unless F8 is explicitly selected.
 pub mod f8;
 /// Bounded M6 orchestration client and metadata journal. This is never an execution authority.
 #[cfg(target_os = "linux")]

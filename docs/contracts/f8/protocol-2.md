@@ -26,7 +26,10 @@ uses `stale_revision`, mismatched session/identity domains `invalid_request`, ca
 
 ## Exact request deltas
 
-All 29 current method words remain the closed allowlist, with no aliases. Begin with the exact
+The original 29 core method words retain their closed allowlist, with no aliases.
+The separately parsed [workspace-guard extension](../coordination.md) adds
+`authority/capabilities` and its explicit orchestration methods for the guarded V10 path;
+it does not change the core enum or P1. Begin with the exact
 baseline `Operation` variant parameters and validation; apply **only** the following deltas.
 
 | Methods                                                          | Added/changed mandatory parameters                                                                                                              |

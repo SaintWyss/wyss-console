@@ -1,6 +1,6 @@
 //! A real, process-backed `Worker`: bounded, non-blocking newline-framed pipes around an owned
-//! child. Inactive: nothing here launches a provider or touches credentials; the tests use plain
-//! shell fixtures.
+//! child. Production spawners and synthetic shell fixtures use this transport; provider
+//! admission and credential policy belong to the launcher and authority, not these pipes.
 //!
 //! Every path is bounded and non-blocking. Outbound frames queue in a fixed buffer and a full
 //! buffer is an immediate refusal (back pressure), never a wait; inbound reading stops at a frame

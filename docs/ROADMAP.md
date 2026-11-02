@@ -5,6 +5,102 @@ Only unfinished work belongs here. Current capabilities and evidence live in
 [DECISIONS](DECISIONS.md#open-decisions). Remove a task when its acceptance is
 complete. If implementation exists, retain only its missing validation or change.
 
+## Engineering corrections
+
+These are source-confirmed next slices from the architecture review. READY means specified
+for implementation, not implemented or verified. Complete these bounded corrections while
+independent qualification proceeds; do not wait for unrelated remote/Claude product work.
+Work states and handoff rules are in [EXECUTION](EXECUTION.md).
+
+| ID     | State     | Outcome                                                                            | Depends on                                                      | FP/AC                         |
+| ------ | --------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------- |
+| ENG-01 | READY     | Explicit main-only permission for the registered orchestration bridge.             | Existing closed DaemonRequest contract.                         | SEC-01, ORC-01/03             |
+| ENG-02 | READY     | Prevent resend of uncertain host mutations.                                        | No new provider, service or schema adoption.                    | TERM-01/02, SES-01/03, CTX-04 |
+| ENG-03 | READY     | Enforce the existing 4096-byte stdout scratch ceiling and truthful classification. | Existing F8 resource profile; do not change capacity.           | SES-04, NFR-01                |
+| ENG-04 | DISCOVERY | Close live DB/witness backup consistency with an explicit procedure.               | Exact witness validation and snapshot-loss semantics.           | NFR-03, SEC-03                |
+| ENG-05 | DISCOVERY | Design separate configuration and terminal WebView permission surfaces.            | ENG-01 command inventory; preserve product workflows and focus. | SEC-01/02, CTX-04, NFR-02     |
+
+<a id="eng-01"></a>
+
+### ENG-01 — Explicit orchestration command permission
+
+**Evidence:** `orchestration_commands.rs` registers `orchestration_call`; `build.rs` and
+capability JSON do not declare/grant it. Existing view mocks do not exercise ACL mediation.
+
+**Chosen change:** add the command to the application manifest and grant its generated
+permission to `main` only. Keep the closed `DaemonRequest` allowlist and authority checks.
+Do not grant a generic process/file/provider RPC, broaden `w-*`, or enable guarded execution.
+Relevant source: `build.rs`, `capabilities/main.json`, `orchestration_commands.rs` and
+`src/lib/desktop/orchestration-client.ts`.
+
+**Verification:** extend the existing capability coverage approach to this registered
+extension; compare handler/manifest/grant. Test permitted main invocation and actual denied
+extra-window invocation using a suitable Tauri harness, rather than relying only on a mocked
+`invoke`. Confirm production fixture exclusions and the unchanged closed daemon request shape.
+**Done when:** the command has an explicit least-privilege route and the positive/negative
+boundary checks pass. Existing F8/V10 release gates remain unchanged.
+
+<a id="eng-02"></a>
+
+### ENG-02 — Host transport uncertainty without resend
+
+**Evidence:** `host/client.rs::Remote::call` maps send and receive errors to the same
+`host_unavailable`; `HostLink::call` reconnects and resends any operation. Host protocol 1
+has no general intent receipt. `term_create` and `term_write` are effectful consumers.
+
+**Chosen change:** separate pre-dispatch availability from possible-send/no-reply. After
+a mutation might have been delivered, return an explicit uncertain result without retry,
+host replacement or local fallback for that request. Default unknown operations to mutation
+semantics; only explicitly proven pure reads may retry. Initial connection/bootstrap before
+the first send remains separate. Propagate truthful outcome to affected terminal/Native
+clients; do not retry under a new terminal/session identity. Preserve Projects Owner's
+stricter epoch-checked, attach-only path. Durable host-wide deduplication is outside this slice.
+
+**Verification:** owned synthetic host accepts a create/write, drops the reply and stays
+alive: one effect, one send, explicit uncertainty. Cover disconnect before send, lost reply,
+host epoch replacement, existing-host survival, unknown operation, allowed read retry,
+partial terminal input and Projects recovery. Never signal/restart an installed host to test it.
+**Done when:** the affected route cannot automatically resend a possibly executed mutation,
+and UI/error contracts distinguish known no-send from unknown-after-send.
+
+<a id="eng-03"></a>
+
+### ENG-03 — Provider scratch and classification
+
+**Evidence:** JSON `provider_scratch_bytes=4096`; stdout `ProcessWorker::CHUNK=16*1024`.
+The stderr buffer is separate. `budget::classify` currently marks scratch NotProven and
+other items vary independently; scheduler source bounds are not hard wall-clock guarantees.
+
+**Chosen change:** retain the existing 4096-byte limit, align the stdout chunk and tie its
+numeric definition to the resource contract with a meaningful consistency check. Preserve
+bounded partial-frame parsing, total read budget, EOF/malformed handling and control
+availability. Update only classifications whose enforcement is actually demonstrated;
+do not relabel all NotProven entries or change production cap one.
+
+**Verification:** existing worker/resource tests plus boundary and fragmented/oversized
+frame cases, noisy stdout/stderr and slow consumer/control availability. Show source-bound
+enforcement separately from real-provider timing/performance qualification.
+**Done when:** source, executable contract and classification agree for this ceiling,
+without weakening another byte/count bound or losing partial-frame data.
+
+### ENG-04 — DB and witness consistency
+
+Trace `control.anchor`/witness validation and `scripts/f8-activation.sh`: an online DB snapshot
+and later independent companion copies are not one atomic snapshot. Choose a supported
+point-in-time pairing or a reviewed quiescent authority window, with loss window and restore
+oracles; do not stop the Native host or delete a witness to make validation succeed. Deliver
+a tested procedure/design first, then a bounded implementation task if required. The current
+helper is not certified merely because SQLite's DB backup is consistent.
+
+### ENG-05 — Distinct UI privilege surfaces
+
+Design configuration/credential authoring versus terminal/provider display surfaces from
+actual combined main permissions. Specify allowed messages, navigation/focus, native dialog
+ownership, project-context binding and negative cross-window calls. Keep strong same-UID
+approval as a separate unsatisfied OS boundary. Deliver the selected window/WebView design
+and a migration plan before delegating its implementation; do not equate route separation
+with permission separation.
+
 ## Priority and dependencies
 
 | Priority | Remaining outcome                                                                      | Depends on                                                                                       |
@@ -30,7 +126,7 @@ provider/device evidence.
 - [ ] Agree measured project-switch/restore and screen/terminal budgets; close
       source/installed-host compatibility gaps before adoption.
 - [ ] Close the parser/helper review and remaining real full-screen, Unicode/IME,
-      rendering and lifecycle acceptance. Actual logout, suspend and power-loss
+      rendering, replay-fallback redraw/resize and lifecycle acceptance. Actual logout, suspend and power-loss
       outcomes need their own evidence; lingering is an explicit owner choice.
 
 **Done when:** reference-installation journeys preserve live work and meet agreed
@@ -43,6 +139,9 @@ Use [workspace](contracts/workspace.md) and
 - [ ] Complete real GUI/provider consumption evidence for supported profile,
       model/effort, project authoring and imported-template apply/Undo paths; cover
       external writers, scope changes and interrupted recovery.
+- [ ] Bound and qualify saved-launch directory enumeration: processing 64 files currently
+      follows collection of all TOML candidates. Preserve exact byte/character/count units
+      and define truthful overflow behavior before claiming bounded inventory cost.
 - [ ] Keep provider-version qualifications current. Reuse the recorded Codex
       0.159.0 and Claude 2.1.316 Arsenal exclusions instead of treating them as
       unimplemented; qualify unproven cases and new builds before claiming support.
@@ -100,6 +199,9 @@ delegation's separate limits do not satisfy this task. See
 
 ## 5. Handoff and finite coordination
 
+- [ ] Qualify V10 offline adoption/rollback, coordinator import, pinned root/claim ownership,
+      fresh-session proof and verification/settlement. Production guarded execution remains
+      false until its review, compatibility and evidence prerequisites pass.
 - [ ] Close real daemon disconnect/reconnect, crash-at-dispatch, cancellation,
       failure propagation and ambiguous-result recovery journeys without duplicate
       effects; complete the pending independent review.
@@ -109,7 +211,8 @@ delegation's separate limits do not satisfy this task. See
       automated Native full-account steps remain dependent on the stronger boundary.
 
 **Done when:** a finite implementation/test/review workflow completes and recovers
-truthfully on a real project, preserving ordinary authority confirmations.
+truthfully on a real project, preserving ordinary authority confirmations and the
+[coordination guard contract](contracts/coordination.md).
 
 ## 6. Remote PCs and physical Android
 
@@ -143,7 +246,8 @@ evidence; a Native CLI launch does not establish a safe effectful planner.
       and long-run pressure; retain failures and outliers.
 - [ ] Complete real WebKitGTK, keyboard/IME, TalkBack, themes, accessibility and
       end-to-end screen/error-state journeys on actual devices.
-- [ ] Qualify session-preserving mixed-version updates, consistent SQLite/WAL
+- [ ] Resolve ENG-04 companion-witness consistency, then qualify session-preserving
+      mixed-version updates, consistent SQLite/WAL
       backup, restore, rollback and interruption/power-loss recovery.
 - [ ] Close all applicable [functional acceptance criteria](REQUIREMENTS.md)
       and unresolved blocking findings with evidence at the required level.

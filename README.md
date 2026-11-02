@@ -15,6 +15,7 @@ Private repository; Tauri 2, Svelte 5, TypeScript and Rust.
 
 Detailed target behavior and acceptance criteria live in [Requirements](docs/REQUIREMENTS.md).
 Specialized contracts are linked from the architecture and decisions pages.
+For source review and implementation by models, follow [Engineering execution](docs/EXECUTION.md).
 
 Start a development window with `npm ci` followed by `npm run desktop:dev` after
 installing the [prerequisites](docs/DEVELOPMENT.md#prerequisites-and-commands).

@@ -105,6 +105,13 @@ The [delegation](contracts/delegation.md), [sync](contracts/arsenal-sync.md) and
 | Parser and B1 acceptance             | [Parser helper](contracts/terminal-fidelity.md) and [B1 candidate](contracts/security.md) retain their Proposed status and unresolved release conditions despite implementation.                                   |
 | Adoption and capacity                | Agree reference budgets and authorize actual adoption or any F8 capacity increase through their session-preserving operational procedures.                                                                         |
 
-Exact technical discovery belongs to the [roadmap](ROADMAP.md), not another
-product-choice questionnaire. A decision becomes accepted only through its
+Engineering directions selected under the delegated technical scope are design decisions
+for the next implementation slices; they do not accept the proposed security decisions
+or enable production gates. Technical choices are resolved through the
+[engineering workflow](EXECUTION.md), with a chosen rule, source evidence and verification.
+Missing provider/device evidence or independent review cannot be replaced by confidence.
+The [architecture direction](ARCHITECTURE.md#7-improvement-decisions-and-verification)
+selects explicit command permissions, no automatic retry of ambiguous host mutations,
+the existing 4096-byte provider scratch limit and retention of the current stack pending
+measured reasons to replace it. Their remaining code corrections stay in ROADMAP. A decision becomes accepted only through its
 recorded explicit acceptance; merging code or editing this summary is insufficient.

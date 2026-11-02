@@ -102,6 +102,9 @@ authorized operation; documentation maintenance does not execute it.
    SQLite backup of P1 `control.sqlite3`, checks schema 7/integrity/foreign keys and records
    row counts/digest in `MANIFEST.json`; it copies companion anchor/layout when present.
    Keep the printed backup path. Live counts may advance while the backup is taken.
+   Anchor/layout are copied separately after the DB snapshot; this is not an atomic
+   multi-file backup. Resolve the [DB/witness consistency procedure](ROADMAP.md#eng-04--db-and-witness-consistency)
+   before relying on that companion set for real recovery.
 3. With the exact selected authority binary, use
    `bash scripts/f8-activation.sh rehearse --backup BACKUP_DIR --authority AUTHORITY_BIN`.
    It migrates a copy to a temporary state root, checks V8 integrity and preserved rows,
@@ -129,6 +132,16 @@ are owned by [f8-activation.sh](../scripts/f8-activation.sh) and [install.sh](..
 Keep matching binaries and consistent SQLite backups/WAL with an explicit post-snapshot
 loss window; no SQL downgrade or arbitrary PID cleanup. Repository documentation checks
 require no installation, personal credentials or installed-service changes.
+
+## Engineering handoff
+
+Follow [EXECUTION](EXECUTION.md) for source-based review, work readiness and the division
+between design, implementation and verification. Follow the task's focused checks rather
+than treating every implementation slice as an invitation to run providers or touch live state.
+CI's disposable-runner suites and namespace setup are engineering fixtures; they do not
+qualify the owner's normal desktop, provider authentication or physical Android hardware.
+Current workflow definitions are in [.github/workflows](../.github/workflows/); this guide's
+native-environment rules still apply to local acceptance.
 
 ## Documentation maintenance
 

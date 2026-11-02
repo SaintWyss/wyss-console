@@ -3,7 +3,8 @@
 Ordinary P1 and explicitly selected F8/P2 remain separate authorities/stores. Current F8
 per-session architecture is accepted (formerly ADR0051); production capacity is **one**,
 with the pinned Codex 0.159.0 Local Tools spawner. This spawner refuses production inference
-without a workspace. Exact P2 fields remain in [protocol 2](f8/protocol-2.md), executable
+without a workspace. Core P2 fields remain in [protocol 2](f8/protocol-2.md); the schema-10 guard extension
+is separate in [coordination](coordination.md). Executable
 limits in [resources](f8/resources.json). Neither a GUI connection nor a capability label grants permission.
 
 ## Authority, state and audit
@@ -57,6 +58,20 @@ Model/usage code and bridge workers already exist. Optional historical metrics r
 separate proposed [usage-history](usage-history.md) policy; usage absent/unknown is not zero,
 an offer is not entitlement and subscription allowance is not API billing. Native/delegation
 Claude acceptance does not admit Claude Managed.
+
+## Schema and observation compatibility
+
+The production-source prepared application accepts validated schemas 8, 9 and 10;
+schema acceptance is not installed adoption or provider admission. V9 provider-aware
+preparation/replay and V10 offline guard preparation exist. V10 constructs a guarded
+authority, but production guarded execution remains disabled. Existing V8 execution
+does not acquire V10 ownership/freshness guarantees automatically. The CLI exposes V9-copy
+preparation; it does not expose a V10 preparation command or automatic migration.
+
+Existing read-only observed-model reporting is distinct from the blocked model/effort
+selection extension. Attachment/turn/generation-bound observations and accepted reroute
+metadata cannot change another turn, confer account entitlement or mutate a provider choice.
+Unknown reports stay unknown; supported display does not imply caller-controlled selection.
 
 ## Required qualification
 

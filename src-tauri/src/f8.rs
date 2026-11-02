@@ -1,5 +1,6 @@
-//! Non-deployed F8 implementation. No server, socket, provider or installed-store entry point.
-//! The production authority continues to use protocol 1, schema 7 and one shared runtime.
+//! Protocol-2 per-session authority, selected explicitly through `control::serve`.
+//! P1 remains separate; validated V8/V9/V10 support does not imply installed adoption,
+//! provider admission or production guarded coordination. See docs/ARCHITECTURE.md.
 #[cfg(target_os = "linux")]
 pub mod allocator;
 pub mod audit;

@@ -11,18 +11,20 @@ What the computers share is a folder that Syncthing replicates:
 ```
 
 A database file never travels. Each device writes only its own journal, and a blob's name is its
-content, so Syncthing has nothing to conflict over. Files are written in a private staging folder
-(`~/.local/state/wyss-console/arsenal-sync/staging`) and renamed into place: Syncthing never sees
-part of a file.
+content. Under the single-writer-per-device assumption this avoids ordinary concurrent
+file replacement; copied device identities or hostile folder writers are not excluded by
+content addressing. Files are written in a private staging folder
+(`~/.local/state/wyss-console/arsenal-sync/staging`) and renamed into place: the published path is a complete file after the rename. This publication rule does
+not prove remote durability or an external synchronizer's behavior.
 
 ## What is shared
 
-| Shared                                                               | Per computer                                                                  |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Imported capabilities, every revision, their files                   | The Arsenal database and its WAL                                              |
-| Presets and selections (by id; items by capability identity/content) | Terminal bindings and project selections (they name local sessions)           |
-| Deleted presets and selections (as deletion records)                 | `~/.local/state/wyss-console/arsenal-sync/state.json`: device id and cursors  |
-| Preferences (`~/.config/wyss-console/preferences.json`, as a file)   | Credentials, provider logins, F8 authority state, host sockets, installations |
+| Shared                                                                                 | Per computer                                                                                                              |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Imported capabilities, every revision, their files                                     | The Arsenal database and its WAL                                                                                          |
+| Presets and selections (by id; items by capability identity/content)                   | Terminal bindings and project selections (they name local sessions)                                                       |
+| Deleted presets and selections (as deletion records)                                   | `~/.local/state/wyss-console/arsenal-sync/state.json`: device id and cursors                                              |
+| Preferences are outside the Arsenal journal; any replication is separately configured. | Credentials, provider logins, F8 authority state, host sockets and installations are excluded from this journal protocol. |
 
 A preference for a model or a skill does not mean it is installed or qualified on the other
 computer: a terminal plan is computed on the computer that starts the terminal.
@@ -81,9 +83,10 @@ can become available without changing that head.
 
 A preset or selection that another computer deleted is deleted here only after its content is kept
 in `~/.local/state/wyss-console/arsenal-sync/trash/`, and Arsenal lists it under "Deleted on another
-computer" with where the copy is. Records are not signed: any device that can write the shared
-folder can already write the rest of the synchronized home, so a signature would not narrow who
-can change this computer.
+computer" with where the copy is. Records are not signed. This protocol trusts every writer of the shared folder and
+provides no independent device authentication. Sharing that folder alone does not imply
+access to the rest of HOME. Signing with separately protected keys would require a different
+trust/key-management design; the current protocol must not claim that guarantee.
 
 ## When it runs
 
@@ -114,14 +117,14 @@ an older version stays the owner's edit (a revert) and is published.
 The watcher (inotify) opens every folder it watches the way the run reads them, without following a
 link at any level, and watches through that opened folder.
 
-## Syncthing
+## Synchronizer deployment conditions
 
-The home folder is shared. These per-computer paths are ignored on both computers (`~/.stignore`):
+The protocol works on its configured trusted shared folder. It does not inspect or prove
+that either computer shares all of HOME, applies particular `.stignore` entries or protects
+external provider credentials. Verify the actual synchronizer deployment on each PC.
 
-- the installations (`~/.local/opt/wyss-console*`);
-- the F8 state (`~/.local/state/wyss-console-f8`);
-- installation backups;
-- the Wyss service units and their enablement;
-- `~/.local/bin/wyss-console`.
-
-`~/.local/share/wyss-console-sync` is not ignored.
+Keep installations, host sockets, service units, per-host authority databases/WAL/witnesses,
+backups and credentials outside replication. Replicate the Arsenal journal/blob directory,
+not its local SQLite database or private per-host bookkeeping. If preferences are synchronized
+separately, treat that as a separate file-level policy; it is not an Arsenal record kind.
+An ignore marker alone is not proof of exclusion from a synchronizer or snapshot system.

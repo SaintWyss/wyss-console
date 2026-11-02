@@ -89,7 +89,7 @@ impl Extension {
 }
 
 /// The protocol-2 service the desktop manages. Inactive unless a caller owning a connector
-/// says otherwise; the installed entry points never do.
+/// says otherwise; the product entry point selects it only with `--f8-authority`.
 #[cfg(target_os = "linux")]
 pub type F8 = crate::f8::gui::F8Gui;
 #[cfg(not(target_os = "linux"))]

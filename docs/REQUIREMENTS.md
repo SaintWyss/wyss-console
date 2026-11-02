@@ -420,6 +420,12 @@ commands retain accepted Local Tools residual credential-read and pre-existing h
 not absolute confinement of an arbitrary approved command. Rootful Docker/
 other admin delegation may defeat a proposed distinct-UID boundary; F8 does not solve it.
 
+The target separates terminal/provider display from configuration/credential authoring
+into differently permissioned windows/WebViews. Shared project context crosses a closed,
+validated interface; changing a Svelte route is insufficient. This limits frontend exposure
+and does not establish a protected principal against same-UID compromise. The current main
+window combines permissions, so this remains an implementation gap.
+
 Preserve leases, instance/generation fencing, current state/revision, workspace/profile
 attestation and exact action fingerprint checks immediately before effect. No view,
 profile, coordinator, plugin, handoff or remote device becomes a source of leases or
@@ -427,8 +433,11 @@ permission escalation. No broad argv/env/command field enters a Managed API. Add
 provider features need separately attested profiles rather than relaxation of Local Tools.
 
 **AC-FP-SEC-01:** wrong/stale/cross-session identity, substituted action, expired scope,
-storage/audit failure and unsupported profile produce zero effect. Adversarial same-UID/
-admin scenarios cannot be advertised as protected until the separate boundary is proven.
+storage/audit rejection and unsupported profile produce zero effect when rejected before
+dispatch. A failure after a possibly accepted dispatch preserves its receipt and explicit
+unknown/indeterminate outcome; it must not be mislabeled zero-effect or retried as new work. Cross-window tests deny configuration/credential commands from terminal-only surfaces.
+Adversarial same-UID/admin scenarios cannot be advertised as protected until the separate
+boundary is proven.
 
 <a id="fp-sec-02"></a>
 
@@ -753,3 +762,30 @@ guarantee. Notifications are opt-in per category, default off, with no sensitive
 content. Native model/effort selection uses only a verified provider mechanism; never inject
 commands into a running agent silently. Remote configuration proposals still require host
 native confirmation. A remote control grant is powerful account access, not a restricted worker.
+
+## 13. Verification precision and implementation handoff
+
+This document describes target behavior. Present source, qualification, deployment and
+acceptance remain separate facts in STATUS; a requirement is not evidence that its behavior
+is already implemented. In particular, generic host transport no-replay, separated terminal/
+configuration surfaces and production guarded coordination still have named source gaps.
+
+For each AC-FP group, enumerate independently observable cases in the relevant implementation
+task: normal path; boundary and invalid input; denied/stale identity or scope; interruption/
+recovery; and real provider/device interaction where applicable. Reuse existing tests and
+name uncovered cases. An optional case is not silently assumed applicable or passed.
+Use case IDs derived from the stable group, such as `AC-FP-CTX-04/switch-before-confirmation`,
+without renumbering FP/AC definitions or recreating the retired historical crosswalk.
+
+Assertions of zero effect apply only before an effect can have been accepted. Separate
+no-send, known refusal, completed and unknown-after-send. After an interrupted effect,
+preserve evidence and reconcile instead of promising rollback or absence of external effects.
+"Fail closed" denies further authority; it does not undo an already executed command.
+Atomic means a named store/file transaction, not an arbitrary multi-store journey.
+
+Performance criteria refer to a named metric, workload, boundary, environment and agreed
+budget. Missing measurements remain unresolved; do not invent thresholds to make a task
+READY. Configured/requested/reported/used and accepted/implemented/qualified are distinct
+labels. Every offered control needs its exact provider/version/scope and honest unsupported
+behavior. [EXECUTION](EXECUTION.md) defines readiness and model handoff; the roadmap must link
+each implementation slice to its relevant FP/AC and owning contract.

@@ -4,8 +4,10 @@ The host integration and packaged helper exist. The parser design formerly recor
 
 ## 1. What a window may ask the host
 
-All are protocol-1 additions announced in `hello.features` (`screen_snapshot`, `lingering_control`); a host
-without the name answers `unknown_op` and the window replays the ring as before.
+Screen recovery is a protocol-1 addition advertised by `screen_snapshot` in
+`hello.features`. The current feature list does **not** advertise `lingering_control`;
+persistence/lingering calls must handle unsupported operations explicitly. A host without
+screen support uses the labeled ring-replay path.
 
 | Operation             | Request                                | Answer                                                                                                                                                                                                                                         | Oracle                                                               |
 | --------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -43,6 +45,15 @@ it drew the screen does not read on and shows the terminal as failed. `host_pers
    strings ≤ 4 KiB, repaint ≤ 4 MiB (host answer ≤ 600 KiB), frame ≤ 256 KiB in / 5 MiB out, helper address space
    ≤ 384 MiB, descriptors ≤ 8, restarts ≤ 3 per 60 s.
 7. **No polling.** An idle terminal's link thread has no wake-ups (`a_host_with_an_idle_terminal_waits…`).
+
+### Replay fallback and redraw
+
+A successful snapshot restore draws and commits the screen without asking the program to
+redraw. The replay fallback may call `terminal_redraw`; the host briefly nudges the PTY by
+one column and restores its size, which can notify a running full-screen program. This is
+not replay of captured input or a restarted command, but it is a geometry effect and must
+not be described as a completely passive attach. `tests/terminal-attach.test.ts` distinguishes
+these paths. Qualify fallback resize/full-screen behavior under the terminal fidelity gate.
 
 ## 3. Failure words
 
@@ -83,7 +94,9 @@ Exchange deadline is three seconds. Typed frames and the limits above apply befo
 A missing/refused helper leaves explicit ring replay and degraded fidelity, not a fabricated
 screen. Hidden views do not fit, resize or take user input, but emulator replies needed by
 the terminal protocol continue through their controlled path. Lingering is an explicit
-native-confirmed owner operation, never enabled by restore. Actual logout/suspend/power-loss,
+explicit UI-confirmed owner operation, never enabled by restore. The current command
+checks the direction-specific confirmation word and calls `loginctl`; that word is
+not a separate native dialog or proof of human presence against a compromised frontend. Actual logout/suspend/power-loss,
 Unicode/IME and full-screen/device journeys remain acceptance work. Reflow and renderer
 Unicode-table compatibility are not established merely by snapshot support. Oversized paste
 currently fails visibly and sends nothing; improving that interaction needs its own change.
