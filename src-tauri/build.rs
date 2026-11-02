@@ -79,6 +79,7 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_app_info",
+            "orchestration_call",
             "authority_state",
             "authority_lifecycle",
             "authority_retry",

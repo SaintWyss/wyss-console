@@ -24,8 +24,9 @@ Work states and handoff rules are in [EXECUTION](EXECUTION.md).
 
 ### ENG-01 — Explicit orchestration command permission
 
-**Evidence:** `orchestration_commands.rs` registers `orchestration_call`; `build.rs` and
-capability JSON do not declare/grant it. Existing view mocks do not exercise ACL mediation.
+**Evidence:** `orchestration_commands.rs` registers `orchestration_call`; `build.rs` declares
+it and `main` grants its permission. Runtime ACL mediation and the focused checks remain
+unverified; existing view mocks do not exercise ACL mediation.
 
 **Chosen change:** add the command to the application manifest and grant its generated
 permission to `main` only. Keep the closed `DaemonRequest` allowlist and authority checks.

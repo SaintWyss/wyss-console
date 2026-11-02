@@ -75,12 +75,11 @@ scope validation and authority checks remain necessary; capabilities do not cont
 compromised Rust core or same-UID administrator. Production CSP permits the existing
 style rules, not inline JavaScript, remote scripts, frames or arbitrary frontend OS APIs.
 
-**Confirmed coverage gap:** `orchestration_call` is registered by the desktop extension
-but absent from `AppManifest::commands` and capability permission lists. Other examined
-annotated commands are declared, including fixture-only commands. The static gap is
-confirmed; its exact runtime denial/exposure has not been exercised here. Apply explicit
-main-only mediation and test another window's refusal before claiming complete command
-permission coverage. [ENG-01](ROADMAP.md#eng-01) specifies the correction.
+`orchestration_call` is registered by the desktop extension, declared in the application
+manifest and granted by the `main` capability. The configured `w-*` capability does not
+grant it. Actual runtime mediation remains unverified; test both main invocation and
+extra-window refusal before claiming complete command permission coverage.
+[ENG-01](ROADMAP.md#eng-01) tracks the remaining verification.
 
 Separate configuration and terminal WebViews remain a target requirement, not a current
 guarantee. Design their workflow/focus/data boundary before implementation; moving a
@@ -150,7 +149,7 @@ Use [EXECUTION](EXECUTION.md) for evidence vocabulary, decision authority and mo
 | Decision                                                                  | Reason and verification                                                                                                                                                                               |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Enforce typed boundaries within the current package first.                | Existing separate state owners and binary extensions provide useful seams. Check dependency direction, command coverage and built binaries before proposing extraction.                               |
-| Make every registered desktop command explicitly permissioned.            | Close the confirmed orchestration manifest gap; verify both allowed main use and denied extra-window use.                                                                                             |
+| Make every registered desktop command explicitly permissioned.            | Verify the orchestration grant at runtime for allowed main use and denied extra-window use.                                                                                                           |
 | Refuse ambiguous host mutations without automatic resend.                 | Generic host retry can repeat effects; preserve existing work and test lost replies rather than assume the host died.                                                                                 |
 | Retain the 4096-byte provider scratch contract and align stdout to it.    | `process_worker.rs` uses `CHUNK = 16 * 1024`; stderr's separate 4096-byte buffer does not satisfy the stdout ceiling. Reconcile source, contract and classification without silently raising a limit. |
 | Keep guarded coordination unavailable until its exact prerequisites pass. | V10 support exists, but readiness/production enablement, source identity, credential/provider and review evidence cannot be inferred from fixtures.                                                   |
