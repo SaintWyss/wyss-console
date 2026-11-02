@@ -101,6 +101,69 @@ approval as a separate unsatisfied OS boundary. Deliver the selected window/WebV
 and a migration plan before delegating its implementation; do not equate route separation
 with permission separation.
 
+## Requirement and journey corrections
+
+The case catalogue refines all 31 FP/AC groups. These source-confirmed missing integrations
+remain implementation work; refining their acceptance does not count as delivering them.
+They can be reviewed without building or invoking providers.
+
+| ID     | State     | Required outcome                                                            | Dependency / invariant                                                           |
+| ------ | --------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| REQ-01 | DISCOVERY | Define a backend-bound project/configuration context bridge across windows. | Preserve independent drafts and captured targets; no mutable global retargeting. |
+| REQ-02 | DISCOVERY | Specify Projects screen attach/commit on its checked Owner transport.       | Preserve epoch/association/reader fences; never substitute generic HostLink.     |
+| REQ-03 | DISCOVERY | Specify and implement bounded project input with truthful write outcomes.   | Reuse existing queue limits; define Owner/service/DTO propagation before coding. |
+
+<a id="req-01"></a>
+
+### REQ-01 — Project and configuration context
+
+**Source:** Projects `selectProject` and configuration's native project selector are separate.
+Changing Projects does not invoke configuration `select_project`. The configuration engine
+does serialize that operation with apply and clear its own plans.
+
+**Chosen direction:** each scoped editor/plan carries a backend-resolved project/binding/
+revision and independent window context. Opening project configuration must identify that
+target explicitly; navigation or another window cannot retarget existing drafts. Global
+administration remains separate. Resolve a bounded DTO/compatibility design and current
+native-editor cancellation semantics, then publish a READY implementation slice.
+**Closure:** AC-FP-CTX-04/before-confirmation, after-admission, late-result and two-windows
+each have an executable scenario; A operations cannot mutate B. Reuse configuration
+plan-invalidation tests and Projects context tests without claiming they cover the missing bridge.
+
+<a id="req-02"></a>
+
+### REQ-02 — Projects terminal fidelity
+
+**Source:** `SessionPane.svelte` reads the retained ring and does not use the snapshot
+attach/commit route exercised by ordinary terminal tests.
+
+**Chosen direction:** obtain snapshots through the epoch-checked Owner; bind a staged
+one-use cursor to association/terminal/epoch/reader, draw before commit and preserve output
+on failed draw. Define bounded DTOs and permissions by reusing the existing screen contract.
+Unsupported hosts get explicit replay/gap labels, not fabricated full-screen recovery.
+Do not use generic HostLink initialization/retry/fallback to attach a project session.
+**Closure:** the contract resolves stale token, renderer disposal, helper failure, host change
+and project-switch behavior; the resulting READY slice includes source test locations and
+real full-screen/IME acceptance still needed after implementation.
+
+<a id="req-03"></a>
+
+### REQ-03 — Projects input bound and outcome
+
+**Source:** project input chains 4096-byte calls with no aggregate queue-byte bound.
+Owner/service return generic failures, and the pane can say input was not sent after
+earlier chunks were accepted. Current first-chunk refusal tests do not establish that claim.
+
+**Chosen direction:** retain at most 64 KiB including in-flight input, one 4096-byte call
+in flight, reject non-fitting new batches before enqueue, and invalidate unsent old-generation
+work on blur/detach/claim loss. Already admitted bytes may have reached the PTY.
+Specify no-send/known-prefix/unknown propagation through Owner, service, typed DTO and UI;
+never reconstruct an accepted count from an error code or replay uncertain bytes.
+Known busy refusal before admission may retry within its existing bound.
+**Closure:** settle the outcome DTO and claim-generation interaction before implementation;
+then define saturation, mid-paste failure, lost reply, blur/reclaim and pane-disposal cases.
+No provider or installed-host experiment is needed to prepare that design.
+
 ## Priority and dependencies
 
 | Priority | Remaining outcome                                                                      | Depends on                                                                                       |
@@ -120,6 +183,8 @@ provider/device evidence.
 
 ## 1. Workspace adoption and terminal fidelity
 
+- [ ] Resolve and implement REQ-01, REQ-02 and REQ-03 context, project-screen and input gaps before
+      treating the ordinary-terminal/configuration evidence as Projects acceptance.
 - [ ] Accept the real project/registry/layout import and rollback procedure;
       preserve existing session identities and prevent duplicate launches across
       project switches, reconnects and multiple windows.

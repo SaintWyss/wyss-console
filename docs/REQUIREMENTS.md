@@ -6,6 +6,14 @@ Read [product scope](PRODUCT.md) for owner decisions,
 [implementation status](STATUS.md) for delivered evidence and
 [architecture](ARCHITECTURE.md) for ownership/security constraints.
 
+Acceptance case IDs are `AC-FP-<group>/<suffix>`; for example
+`AC-FP-CTX-04/before-confirmation`. Each parameterized stimulus is assessed independently,
+including applicable boundary, invalid, interrupted and recovery variants. These tables
+refine the existing 31 parent AC groups; they do not replace the detailed FP constraints.
+A case is not PASS because code or a similarly named test exists. The
+[current evidence map](contracts/acceptance.md#functional-case-evidence-map) identifies
+review locations and still-required qualification without claiming those tests were run.
+
 ## 1. Product and context
 
 <a id="fp-ctx-01"></a>
@@ -17,19 +25,27 @@ work; one PC can be both. The visible breadcrumb is `Host / Project / Workspace`
 connection age and local/remote indication. A project is a stable logical record with
 one or more explicitly linked host-local folders. A workspace is a named working
 arrangement within one project on one host: tabs, panes, session references, selected
-profiles and work coordination. Sessions own execution; workspaces own presentation
-and references. Provider thread IDs, terminal IDs and managed runtime IDs remain distinct.
+profiles and work coordination. Execution stays with the host/authority; sessions identify
+that work, while workspaces own presentation and references. Provider thread IDs, terminal
+IDs and managed runtime IDs remain distinct.
 
 There may be multiple workspaces and multiple sessions in one project, and several
-open projects. A session belongs to one host/project at creation; switching the UI
-does not move its working directory, provider conversation or authority. A workspace
-may reference the same surviving session in another view, but input ownership remains
-exclusive. Project names are display labels, never security identities or filesystem paths.
+open projects. A project-origin association belongs to one host/project; an unassigned
+Scratch shell may receive its project origin once through reviewed adoption. Switching
+the UI does not move its working directory, provider conversation or authority. Workspaces
+of that same project may reference the same surviving session; a different project cannot
+attach it by reusing its label or ID. Cooperative input ownership remains exclusive through
+claim-aware Console clients; older/other same-UID writers are not contained. Project names
+are display labels, never security identities or filesystem paths.
 
-**AC-FP-CTX-01:** two clients view the same host session and see the same identities;
-two PCs with the same directory name do not share sessions. Changing the active project
-changes zero processes, leases or provider prompts. Identity collisions and stale host
-generations are refused before input or execution.
+**AC-FP-CTX-01:** each case below is required at its applicable evidence level.
+
+| Case suffix   | Stimulus                                                   | Required observable outcome                                                     |
+| ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `same-owner`  | Two cooperating views attach to one existing host session. | Both retain the same owner/session identity; a view creates no duplicate owner. |
+| `same-name`   | Two hosts expose equal project/folder labels.              | Labels do not merge host bindings or execution identities.                      |
+| `navigation`  | Select A, B and Scratch while A runs.                      | Existing processes, authority grants and provider prompts remain unchanged.     |
+| `stale-owner` | Replace or make the observed host epoch unverifiable.      | Old references refuse new input/effects before sending to a replacement.        |
 
 <a id="fp-ctx-02"></a>
 
@@ -44,7 +60,9 @@ Importing a project/profile does not trust its code or grant provider access.
 Git is optional. Record a separate checkout/worktree root beneath the project when
 needed; do not assume Git remote URL or branch is a unique project identity. Duplicate
 canonical folders on one host offer the existing project instead of creating an alias.
-An explicitly linked second-PC folder is a new binding, not filesystem replication.
+An explicitly linked second-PC folder is a new host-local binding, not filesystem
+replication. The current workspace store/Owner route is local-host only; actual multi-host
+registration and operation remain part of the remote target.
 
 Missing or changed roots become `missing`/`identity_changed`; show metadata read-only,
 block new scoped operations, and offer native relink with a comparison. Existing
@@ -59,9 +77,18 @@ requires separate choices for retaining session history; never delete its files,
 worktrees, provider history or vault data. A project with active/ambiguous work cannot
 be purged; it may be archived with a visible active-work marker.
 
-**AC-FP-CTX-02:** chooser cancel creates no record/directory; duplicate/replaced/symlinked
-roots and conflicting relinks refuse visibly. Archive preserves live sessions; remove
-never deletes project files. New-folder failure leaves no half-registered project.
+**AC-FP-CTX-02:** each case below is required at its applicable evidence level.
+
+| Case suffix      | Stimulus                                                                         | Required observable outcome                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `register`       | Confirm one eligible existing root.                                              | Create one project/binding/default workspace, without Git initialization or agent launch.                      |
+| `duplicate`      | Register the same canonical root on the same host again.                         | Return the existing project; create no duplicate project or binding.                                           |
+| `cancel`         | Cancel the chooser before confirming a root.                                     | Create no directory or project record.                                                                         |
+| `ineligible`     | Supply a missing, linked, replaced or foreign-writable root.                     | Refuse registration with its reason, retaining existing records and files.                                     |
+| `relink`         | Relink a project whose old binding has live sessions.                            | New launches use the new binding; existing sessions retain their original binding and cwd.                     |
+| `partial-create` | Directory creation succeeds but metadata publication fails.                      | Report the created unregistered folder; preserve it and publish no partial project.                            |
+| `archive`        | Archive/unarchive a project with live work.                                      | Change discoverability only; retain an active-work indication and the running sessions.                        |
+| `remove`         | Remove proven-ended metadata, then attempt removal with live or unprovable work. | Metadata-only removal respects retention; unsafe purge refuses and never deletes project/provider/vault files. |
 
 <a id="fp-ctx-03"></a>
 
@@ -70,17 +97,30 @@ never deletes project files. New-folder failure leaves no half-registered projec
 `New workspace` creates an empty named arrangement; `Duplicate` copies layout and
 launch preferences, not live process references or approvals. The default workspace
 offers `Open terminal` and `Start agent`. A global **Scratch** context supports ordinary
-terminals with no project/provider/authority. Adopting a scratch terminal into a project
-adds a view association only and discloses its actual directory; it does not transform
-it into a managed or registered agent session.
+terminals with no project/provider/authority. Adopting a Scratch terminal assigns its
+previously null project origin once, after a
+fresh disclosure of its actual process/cwd. It preserves the terminal/process identity and
+mode, removes its Scratch placement and leaves it detached/discoverable for explicit
+attachment in the target project. Only an unassigned plain shell is eligible; this cannot
+move a Native/Managed session or execute cd, restart, mode change or permission grant.
 
 Rename/reorder/pin workspaces changes presentation. Closing a workspace detaches its
 views; `Stop selected sessions` is a separate reviewed operation listing exact sessions.
-Closing the last tab leaves an empty workspace. Deleting a workspace preserves sessions
-and offers their reattachment from the project Sessions view.
+Closing the last placement leaves an empty arrangement. Deleting the last/default
+project workspace retains or creates an empty default, without starting a shell. Scratch
+is a singleton and cannot be deleted or duplicated. Live sessions remain discoverable
+for reattachment; project metadata removal is not a process-stop action.
 
-**AC-FP-CTX-03:** duplicate/close/delete starts and stops no process. Scratch works
-offline with no authority and no agents installed. Detached sessions remain discoverable.
+**AC-FP-CTX-03:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                                                      | Required observable outcome                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `duplicate`        | Duplicate a workspace containing live sessions.                                               | Allocate new placement IDs and copy preferences, with no live associations, approvals or new processes.                           |
+| `detach`           | Close/detach a workspace view.                                                                | Release its view/input claim; leave the underlying execution discoverable.                                                        |
+| `last-workspace`   | Delete the default or last project workspace.                                                 | Keep or create an empty default arrangement, without launching a shell.                                                           |
+| `scratch`          | Open an explicit Scratch shell with no provider or authority available.                       | Plain terminal use works; Scratch is not an agent/profile/Managed context.                                                        |
+| `adopt`            | Review and adopt one unassigned Scratch shell using its current process/cwd disclosure.       | Assign project-origin metadata once, preserve process/cwd/mode, detach its Scratch placement and offer attachment in the project. |
+| `invalid-adoption` | Change the disclosed cwd/host/selection, or select a Native/Managed/already-assigned session. | Refuse adoption without changing ownership or execution.                                                                          |
 
 <a id="fp-ctx-04"></a>
 
@@ -94,12 +134,22 @@ never silently change the target of an already-open confirmation or composer.
 
 Every write/launch/approval shows host, project, provider, mode, scope and target. Each
 async request captures the context revision; a later selection cannot redirect it.
-Switching project discards unconfirmed configuration plans after warning about unsaved
-native-editor text; confirmed/in-flight operations settle against their original context.
-The resulting receipt is displayed there. No cross-project Undo or approval reuse.
+Changing a scoped editor's own target invalidates its unconfirmed plans after warning
+about unsaved native-editor text. Navigating another independent view does not retarget
+that editor. Confirmed/in-flight operations settle only against their captured original
+context and display their receipt there. No cross-project Undo or approval reuse.
+The current Projects/configuration selectors are independent; REQ-01 owns the missing
+contextual bridge, so this target is not inferred from Projects navigation alone.
 
-**AC-FP-CTX-04:** switch A→B during plan, native dialog and in-flight write; either refuse
-before mutation or finish only A and report A. B's files/sessions remain unchanged.
+**AC-FP-CTX-04:** each case below is required at its applicable evidence level.
+
+| Case suffix           | Stimulus                                                           | Required observable outcome                                                                                 |
+| --------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `before-confirmation` | Switch project while a chooser or unconfirmed scoped plan is open. | Invalidate the old selection/review; it cannot silently become an operation on B.                           |
+| `after-admission`     | Switch A to B after A's operation was accepted.                    | Reconcile only A's receipt/effect; B remains untouched.                                                     |
+| `late-result`         | Return an asynchronous A response after the view changed to B.     | Do not label it as B's state or redirect B's composer.                                                      |
+| `two-windows`         | Keep A's editor/confirmation open while another window selects B.  | Each operation retains its captured target; shared selection cannot retarget an existing draft or approval. |
+| `layout-save`         | Switch with a pending layout save for A.                           | Save/refuse A's metadata explicitly; do not move its placements to B or affect execution.                   |
 
 ## 2. Screens and interaction contract
 
@@ -143,15 +193,22 @@ PTYs and runtime resources independently across all projects, not once per works
 
 Support new/split/close/resize/equalize/zoom/reorder, plain bounded scrollback search,
 selection/copy and guarded paste. Plain search uses the existing implementation;
-no new search add-on is required . Documented leader/remappable shortcuts
+no new search add-on is required. Documented leader/remappable shortcuts
 include a way to send the leader to the program. Full-screen alternate buffer, mouse,
 UTF-8, dead keys and screen-reader operation require reference-terminal acceptance.
 OSC clipboard writes/reads, arbitrary URL launch and output-driven application actions
 remain disabled unless separately reviewed; terminal output is untrusted data.
 
-**AC-FP-TERM-01:** split/zoom/resize/close and search at bounds preserve focus and PTY
-geometry; terminal keys/IME and tmux/editor chords reach the program. Oversized paste
-sends nothing. Hostile title/escape/clipboard corpus produces no application action.
+**AC-FP-TERM-01:** each case below is required at its applicable evidence level.
+
+| Case suffix      | Stimulus                                                                         | Required observable outcome                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `geometry`       | Split/resize/zoom/close at the owning layout's count/depth/size boundaries.      | Preserve focus and normalized geometry; reject overflow without a hidden PTY allocation.                                 |
+| `keyboard`       | Use terminal chords, dead keys and IME composition in a focused pane.            | Deliver intended program input without intercepting composition or hidden-pane keys.                                     |
+| `search`         | Search plain scrollback at its configured limits.                                | Return bounded matches without interpreting a regular expression or changing the program.                                |
+| `input-overflow` | Enqueue input beyond the 64 KiB retained-input bound, including in-flight bytes. | Refuse that new input visibly before partial admission; preserve already admitted input order.                           |
+| `hostile-output` | Emit hostile titles, OSC clipboard/link and string sequences.                    | Treat output as terminal data without clipboard, URL or application actions.                                             |
+| `claim`          | Observe and request input from two cooperating project views.                    | Only the current claimant can submit input/resize through the claim-aware API; disclose the same-UID/older-client limit. |
 
 <a id="fp-term-02"></a>
 
@@ -170,10 +227,16 @@ not final acceptance. The parser is isolated from PTY ownership (§architecture)
 failure degrades fidelity without terminating sibling sessions. Output gaps and a
 resync are visible. Full power-off cannot preserve a process.
 
-**AC-FP-TERM-02:** close/reopen GUI, parser crash, host crash, logout with/without
-lingering, suspend and power-off have distinct outcomes. Reattachment matches reference
-screens; no restart occurs while old descendants may still act. Newer layout versions
-remain unmodified; corrupt layouts are preserved aside and recover to a usable empty view.
+**AC-FP-TERM-02:** each case below is required at its applicable evidence level.
+
+| Case suffix       | Stimulus                                                                                   | Required observable outcome                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `snapshot`        | Reattach a surviving terminal through a supported snapshot path.                           | Draw its bounded screen before committing the one-use output cursor; do not restart the program.             |
+| `fallback`        | Refuse/lose a helper or fail to draw a snapshot.                                           | Replay only retained output with an explicit gap/fidelity label; disclose any fallback resize/redraw effect. |
+| `parser-failure`  | Kill or stall only the parser in a controlled acceptance run.                              | Report lost fidelity without terminating the PTY, siblings or host.                                          |
+| `missing-owner`   | Lose the host while descendants or effects may remain.                                     | Show lost/unknown state; do not restart a command automatically.                                             |
+| `layout-recovery` | Read a corrupt or newer layout.                                                            | Preserve original bytes and recover/refuse according to its version, without destructive reset.              |
+| `lifecycle`       | Exercise GUI exit, lock, logout with/without lingering, suspend and power loss separately. | Report each actual outcome; never infer process survival from a saved layout.                                |
 
 <a id="fp-ses-01"></a>
 
@@ -182,7 +245,7 @@ remain unmodified; corrupt layouts are preserved aside and recover to a usable e
 Select project/workspace, Claude Code or Codex, Native, profile and placement. Preview
 resolved executable/version, actual directory, requested model/effort, controls inherited,
 excluded and unsupported. Launch the provider's own CLI through the bounded backend
-catalogue and tested shell recipe . No free frontend argv or shell injection.
+catalogue and tested shell recipe. No free frontend argv or shell injection.
 Provider login/trust/permission prompts remain in its terminal and require the user's
 normal interaction. Wyss never answers them automatically.
 
@@ -191,12 +254,20 @@ rewriting global files. Incompatible profile fields refuse launch as a whole; us
 edit the profile, not silently ignore fields. Version/exclusion changes invalidate a
 previously acknowledged preview. Authentication stays with the provider; no copying,
 export or new sign-in store is implied. Original slash commands, hooks, skills, MCP,
-plugins, subagents and provider-specific features remain available through its CLI.
+plugins, subagents and provider-specific features remain available through its CLI,
+subject to explicit disclosed provider/profile restrictions. Native delegation workers
+have their own narrower configuration and must not be presented as unrestricted Native.
 Wyss exposes a GUI control only with versioned capability evidence.
 
-**AC-FP-SES-01:** real Claude/Codex Native workflows retain provider behaviour and
-configuration; a fixture proves literal argv/environment derivation. Cancel, unsupported
-field, changed version or changed exclusions starts nothing. No global file is swapped.
+**AC-FP-SES-01:** each case below is required at its applicable evidence level.
+
+| Case suffix         | Stimulus                                                                    | Required observable outcome                                                            |
+| ------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `qualified-launch`  | Launch each qualified provider/profile from a reviewed project binding.     | Use the exact bounded argv/environment recipe and leave provider files unchanged.      |
+| `invalid-preview`   | Cancel or change the provider build, profile or exclusion set after review. | Refuse before spawn until a new applicable preview is reviewed.                        |
+| `unsupported-field` | Request an unsupported profile field.                                       | Refuse the launch as a whole rather than silently omit the field.                      |
+| `provider-prompt`   | Encounter a provider sign-in, trust or permission prompt.                   | Leave the decision to its normal user interaction; Wyss supplies no automatic answer.  |
+| `observed-settings` | Run two Native sessions with distinct requested settings.                   | Preserve their launch revisions and distinguish requested, reported and unknown facts. |
 
 <a id="fp-ses-02"></a>
 
@@ -204,8 +275,10 @@ field, changed version or changed exclusions starts nothing. No global file is s
 
 Choose Claude Code or Codex, Managed, then a supported **Inference** or **Local Tools**
 profile. The provider card states `available`, `unverified`, `blocked` or `not implemented`
-per profile. Today only Codex is implemented; Claude selection explains the missing
-adapter instead of launching Native or borrowing Codex's lease. Managed inference is
+per profile. Codex has an admitted production F8 Local Tools route; Claude adapter/bridge
+code exists but admission remains blocked by the exact gates/evidence in STATUS. Selection
+names those blockers instead of claiming the adapter is missing, launching Native or
+borrowing Codex's lease. The F8 production spawner refuses its unqualified inference route. Managed inference is
 text-only; local tools are explicitly mediated. Hooks/MCP/skills cannot be enabled
 by calling the mode hybrid. New capability profiles need safety contracts and evidence.
 
@@ -214,18 +287,29 @@ grants an expiring scoped lease, binds/resumes its provider conversation explici
 submits a turn. Grant alone executes nothing. Session create/resume, turn admission and
 tool execution use their own scopes. UI distinguishes desired/actual runtime state,
 attachment and lease state. Reconnection never grants/renews/starts/resumes a turn.
-Model/effort selection remains disabled until its separate authority extension lands.
+Projects Managed launch records a requested safety profile and prepares a session only;
+runtime start, lease, binding and turn remain separate explicit operations. Native profile
+selection is a distinct type and cannot stand in for a Managed safety profile.
+Model/effort selection remains disabled until its separate authority extension is accepted
+and qualified; existing implementation alone does not open it.
 
-**AC-FP-SES-02:** prepare/grant/read/reconnect creates no turn; expired/wrong-scope lease,
-wrong generation/profile or unknown provider capability refuses before effect. At current
-cap 1 a second runtime returns capacity refusal. Claude's eventual conformance must pass
-independently, not through Codex fixtures. No fallback weakens the selected mode.
+**AC-FP-SES-02:** each case below is required at its applicable evidence level.
+
+| Case suffix            | Stimulus                                                                                   | Required observable outcome                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `prepare-only`         | Choose Managed in Projects and submit its launch request.                                  | Prepare a session association/requested safety profile only; start no runtime, lease, binding or turn implicitly. |
+| `grant-only`           | Grant or read a valid lease without turn submission.                                       | Create no provider turn or tool execution.                                                                        |
+| `invalid-scope`        | Submit with wrong authority/store/session/generation, expired lease or unattested profile. | Refuse before effect; never reuse another provider's grant.                                                       |
+| `blocked-claude`       | Select an implemented but unadmitted Claude profile.                                       | Name its current gate/evidence blockers; do not claim the adapter is absent or fall back to Native.               |
+| `profile-availability` | Request a profile the selected production spawner cannot attest.                           | Refuse that exact profile; F8 Local Tools availability does not establish F8 inference support.                   |
+| `capacity`             | Start a second F8 runtime while its production admission domain is full.                   | Refuse before allocation, retaining the existing runtime and cap one.                                             |
 
 <a id="fp-ses-03"></a>
 
 ### FP-SES-03 — Lifecycle, stop and recovery
 
-Native state: `requested → running → exited/stopped/failed`; lost observation becomes
+Native display lifecycle: `requested → running → exited/stopped/failed`; the Native wire
+enum uses `failed_start` for a failed launch. Lost observation becomes
 `lost`, never guessed exited. Restart makes a new session linked to its predecessor.
 Managed runtime state follows the authority's generation/fence; turns move
 `starting → running → completed/interrupted/failed/indeterminate`. User-visible waiting
@@ -239,25 +323,35 @@ implicitly; a wanted-but-stopped F8 runtime offers Stop and then Close. No promp
 accepted action is replayed after a crash. Detached native descendants may outlive their
 terminal: show uncertainty and block duplicate automated effectful retries.
 
-**AC-FP-SES-03:** crash at start/binding/admission/Accept/dispatch/completion produces
-truthful states and exactly one durable intent receipt; retry uses the same intent.
-Stop/close after an authority restart works with the fence returned by status. A stale
-response cannot affect a successor or sibling session.
+**AC-FP-SES-03:** each case below is required at its applicable evidence level.
+
+| Case suffix      | Stimulus                                                                          | Required observable outcome                                                                     |
+| ---------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `same-intent`    | Retry an accepted Managed intent with its original identity/payload.              | Return/reconcile the original receipt without a second dispatch; conflicting payload refuses.   |
+| `crash-boundary` | Interrupt start, binding, approval, dispatch or completion at each boundary.      | Distinguish no-send from possibly-sent work and preserve an indeterminate result when required. |
+| `stale-reply`    | Deliver a predecessor generation's response after a successor is active.          | Leave successor and sibling state unchanged.                                                    |
+| `stop-target`    | Stop/close one owned session after authority restart using fresh status fences.   | Affect only that target and keep pending/unknown cleanup truthful.                              |
+| `resume-kind`    | Request UI reattach, provider conversation resume and process restart separately. | Require each operation's own preconditions; never substitute one for another.                   |
 
 <a id="fp-ses-04"></a>
 
 ### FP-SES-04 — Multiple agents and resource admission
 
-Independent Native sessions can coexist across projects. Managed execution has a
-per-session runtime identity and a global release limit, currently one. The final
+Independent Native sessions can coexist across projects. F8 Managed execution has a per-session runtime identity and one authoritative admission
+domain across its projects/windows, currently capped at one. P1 and P2 are separate owners;
+this is not an OS-wide limit on arbitrary processes or Native/delegated sessions. The final
 concurrency count is a qualified reference-PC result, not a UI preference. Reaching
 capacity shows the blocker and permits retry/cancel, never spawns a hidden queue.
 OL3 has a separate bounded scheduling queue; it cannot change authority capacity.
 
-**AC-FP-SES-04:** at/over every PTY/runtime/queue limit, refuse before allocation;
-retain capacity until owned children are reaped. A stalled provider cannot block a
-sibling's revocation/status/cancel. Multi-process credential refresh must be proven
-before increasing current Managed capacity.
+**AC-FP-SES-04:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                                | Required observable outcome                                                                                  |
+| ------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `admission`        | Reach and exceed a PTY, runtime or bounded scheduler-queue limit.       | Refuse before allocation at the relevant owner; project/window count cannot multiply that owner's allowance. |
+| `reap`             | Crash or cancel an owned worker while a descendant remains unreaped.    | Retain its capacity until owned cleanup finishes.                                                            |
+| `control-fairness` | Stall/flood one provider during another session's status/cancel/revoke. | Preserve control availability within qualified budgets, not a claimed hard OS deadline.                      |
+| `refresh`          | Propose raising F8 capacity above one.                                  | Keep production unchanged until the exact provider/build refresh and resource protocol is qualified.         |
 
 ## 4. Configuration and profiles
 
@@ -277,9 +371,14 @@ documented/inferred, observed and stale are visually distinct. External edits up
 inventory and invalidate plans; overflow uses bounded rescan and marks stale state.
 Do not launch a provider/model just to populate a screen without an authorized probe.
 
-**AC-FP-CFG-01:** inherited/system/project conflict and external atomic replacement
-show correct provenance; malformed/unreadable source affects no other source. A
-newly authored instruction remains consumption-unverified until provider evidence exists.
+**AC-FP-CFG-01:** each case below is required at its applicable evidence level.
+
+| Case suffix     | Stimulus                                                                  | Required observable outcome                                                                      |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `provenance`    | Inspect inherited/system/account/project sources with conflicting values. | Preserve each provider's source/precedence and persisted/resolved/session-observed distinctions. |
+| `bad-source`    | Make one inventory source malformed or unreadable.                        | Mark that source unavailable without inventing values or disabling unrelated valid sources.      |
+| `external-edit` | Replace a source externally after inventory.                              | Mark stale data and invalidate affected plans before mutation.                                   |
+| `consumption`   | Create an instruction file successfully without provider evidence.        | Show persisted content as consumption-unverified rather than effective.                          |
 
 <a id="fp-cfg-02"></a>
 
@@ -303,17 +402,25 @@ limits. Historical proposed atomic-exchange/settling protocol is not a built gua
 Do not claim that hash+rename detects every concurrent write, that a project lock
 stops external editors, or that private directories exclude sync/snapshots automatically.
 
-**AC-FP-CFG-02:** cancel at every authoring/confirmation step changes nothing; race,
-symlink/ACL/trust failure, disk full and journal/vault failure fail closed. Exact Undo
-restores bytes/absence/metadata only when its precondition holds. Provider consumption
-is a separate case, including confirmed imported-template application.
+**AC-FP-CFG-02:** each case below is required at its applicable evidence level.
+
+| Case suffix     | Stimulus                                                                            | Required observable outcome                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `cancel`        | Cancel native authoring or confirmation before admission.                           | Leave target files and mutation records unchanged except any explicitly recorded refusal metadata.           |
+| `stale-plan`    | Change context, identity, digest, trust or ACL before apply.                        | Refuse the stale plan without writing a different target.                                                    |
+| `write-failure` | Fail journal/seal before write, then fail outcome recording after a possible write. | Distinguish no-write from recovered/unverified outcome; never promise a multi-file rollback.                 |
+| `absent-file`   | Create a formerly absent file after preview while another writer creates that path. | No-replace publication refuses instead of overwriting it or treating absent as empty.                        |
+| `undo`          | Undo an unchanged postimage, then a conflicting/diverged postimage.                 | Restore exact bytes/absence only when valid; otherwise use the kind-specific reviewed restoration or refuse. |
+| `template`      | Import a template and later confirm its new scoped plan.                            | Import alone writes no provider file; applied/verified-file and provider-consumed are separate results.      |
 
 <a id="fp-cfg-03"></a>
 
 ### FP-CFG-03 — Profiles and precedence
 
 Global profile library, project defaults and session selection are separate features.
-A profile is versioned non-secret intent: provider applicability, parent, requested model,
+These versioned launch profiles are Native intent, not Managed safety profiles or
+execution grants. Any future Managed preset uses its accepted typed selection contract.
+A Native profile is versioned non-secret intent: provider applicability, parent, requested model,
 effort, supported permission mode, hook/skill choices and notes. Resolve parents first,
 child scalar wins and lists combine per documented field rules; cycles, missing parents,
 depth limits and incompatible fields refuse. Pin the resolved revision at launch.
@@ -324,9 +431,14 @@ own scopes and system constraints. Editing a profile/default affects later launc
 only. A named global-switch preset previews all real file writes and affected sessions;
 it never impersonates a session-local overlay. Imported profiles grant no permissions.
 
-**AC-FP-CFG-03:** two sessions with different profiles coexist without file swapping;
-changes/default updates leave existing sessions labelled with original revision. Missing
-parent/version/unsupported override gives a precise refusal; import cannot relax policy.
+**AC-FP-CFG-03:** each case below is required at its applicable evidence level.
+
+| Case suffix      | Stimulus                                                                        | Required observable outcome                                                                          |
+| ---------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `selection`      | Combine an explicit Native profile, project default and provider configuration. | Resolve profile selection separately from provider settings precedence and pin the applied revision. |
+| `invalid-parent` | Resolve a cycle, missing version/parent or depth overflow.                      | Refuse without a launch or partial profile.                                                          |
+| `coexistence`    | Start two qualified Native profiles and edit their library/default afterward.   | Existing sessions retain their own revision; no shared-file swapping occurs.                         |
+| `mode-boundary`  | Import a Native profile or choose a Managed safety profile.                     | Neither substitutes for the other or changes execution scopes/authority gates.                       |
 
 <a id="fp-cfg-04"></a>
 
@@ -348,9 +460,16 @@ domain or unavailable key changes nothing. Native unredacted reveal, where offer
 requires the dedicated reviewed surface and is never an event payload. Recovery
 incidents preserve evidence, disclose risk and require an explicit recovery act.
 
-**AC-FP-CFG-04:** wallet locked/lost/full, malicious import, wrong domain/passphrase,
-restore conflict and restart during mutation neither leak content nor destroy the only
-copy. Credential verification proves sealing only, never provider authentication.
+**AC-FP-CFG-04:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                            | Required observable outcome                                                                                     |
+| ------------------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `custody`          | Lock/remove the custody key and attempt a secret-bearing operation. | Refuse unavailable custody; preserve sealed data and report unrecoverable key loss without overwriting its key. |
+| `fallback`         | Attempt a classified secret-free operation without custody.         | Use only the accepted disclosed fallback; always-sealed kinds remain sealed or refused.                         |
+| `bad-import`       | Import with a wrong passphrase, domain or unsupported version.      | Publish no restored credential/template/provider mutation.                                                      |
+| `restore-conflict` | Restore across outside edits or a crash during mutation.            | Preserve the remaining recovery material and require digest/identity reconciliation.                            |
+| `retention`        | Reach the review-reminder age for a user-held restoration entry.    | Remind without deleting it; metric retention cannot purge custody or restoration records.                       |
+| `credential-check` | Verify a sealed key record.                                         | Prove custody/format only, not provider authentication or permission to deliver the key.                        |
 
 <a id="fp-cfg-05"></a>
 
@@ -363,9 +482,14 @@ adapters are separate. Unknown protocol/events fail closed for Managed; unknown
 configuration becomes read-only where mutation safety is unproven. Native CLI use
 may continue with an explicit version warning without claiming a managed guarantee.
 
-**AC-FP-CFG-05:** a provider upgrade invalidates affected capability evidence without
-changing files or silently substituting features. A downloaded/imported manifest cannot
-introduce a new command, path, schema or execution capability.
+**AC-FP-CFG-05:** each case below is required at its applicable evidence level.
+
+| Case suffix          | Stimulus                                                    | Required observable outcome                                                                       |
+| -------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `changed-build`      | Upgrade a provider beyond the qualified build/range.        | Invalidate affected evidence and show unverified/unsupported controls without changing its files. |
+| `unknown-format`     | Encounter an unrecognized configuration mutation surface.   | Keep inspection read-only until a safe writer is qualified.                                       |
+| `imported-manifest`  | Import a descriptor claiming a new command/path/permission. | Treat it as data; do not extend backend allowlists or execution authority.                        |
+| `surface-separation` | Qualify one configuration or Native surface.                | Do not infer Managed mediation or another provider/profile's qualification.                       |
 
 ## 5. Models, reasoning and usage
 
@@ -381,15 +505,20 @@ only provider-exposed summaries may be shown transiently.
 Native launch uses verified provider flags/overrides; running-session changes use only
 a proven supported provider interface. Otherwise guide the user to its own control,
 without typing slash commands automatically. Native profile model/effort requests and
-their configured/requested/provider-reported/observed fact labels close in M2. Managed
-model/effort is a planned typed
-authority extension: validate the current generation's catalogue and effort, bind the
+their configured/requested/provider-reported/observed facts remain distinct. Managed
+model/effort has typed implementation behind a closed authority extension: validate the current generation's catalogue and effort, bind the
 selection to admission, reject unsupported values and report reroutes only when observed.
 Never switch provider/model automatically outside an explicitly reviewed substitution rule.
 
-**AC-FP-MOD-01:** missing observations stay unknown, a late reroute cannot relabel another
-turn, unsupported efforts refuse before launch. New-host feature negotiation handles
-older hosts honestly. Until the Managed extension is accepted, controls remain disabled.
+**AC-FP-MOD-01:** each case below is required at its applicable evidence level.
+
+| Case suffix             | Stimulus                                                                         | Required observable outcome                                                             |
+| ----------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `four-facts`            | Offer/configure/request one model while the provider reports another or nothing. | Retain distinct source/grain labels and unknown values; a catalogue is not entitlement. |
+| `late-observation`      | Receive a reroute/model report from an old turn/generation.                      | Do not relabel the current or sibling turn.                                             |
+| `unsupported-selection` | Request a missing model/effort or stale catalogue.                               | Refuse without a silent substitute or provider dispatch.                                |
+| `closed-extension`      | Open Managed selection before its accepted versioned capability is available.    | Keep its controls disabled without hiding existing read-only observations.              |
+| `native-control`        | Change a running Native session's setting without a qualified interface.         | Offer the provider's own control; inject no slash command automatically.                |
 
 <a id="fp-mod-02"></a>
 
@@ -403,8 +532,16 @@ from opt-in bounded on-device metric history. Default history off; proposed rete
 reset. This new metadata policy requires its own reviewed store contract before use.
 It can never purge vault/recovery entries. Duplicate origin events are not counted twice.
 
-**AC-FP-MOD-02:** duplicates, late events, provider omission, mixed units and full disk
-yield labelled partial/unknown values, never fabricated prices or lost protected records.
+**AC-FP-MOD-02:** each case below is required at its applicable evidence level.
+
+| Case suffix       | Stimulus                                                                       | Required observable outcome                                                               |
+| ----------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `omission`        | Receive no usage field or only a provisional observation.                      | Show unknown/partial with provenance, not zero.                                           |
+| `duplicate`       | Deliver the same origin usage event twice.                                     | Do not increment the same counter twice.                                                  |
+| `mixed-units`     | Compare subscription allowance, API units and provider estimates.              | Preserve units/grain and avoid fabricated totals or money caps.                           |
+| `history-off`     | Open the product with history disabled or policy unaccepted.                   | Persist no history and initiate no background provider query to populate it.              |
+| `history-failure` | Under an accepted opt-in policy, fill/lock/corrupt the optional history store. | Report partial/unavailable history without blocking control or touching protected stores. |
+| `pruning`         | Under that policy, cross a retention/count bound or export/reset history.      | Affect only the allowlisted bounded metrics store; preserve vault/audit/provider history. |
 
 ## 6. Permissions, observability and safety
 
@@ -432,12 +569,14 @@ profile, coordinator, plugin, handoff or remote device becomes a source of lease
 permission escalation. No broad argv/env/command field enters a Managed API. Additional
 provider features need separately attested profiles rather than relaxation of Local Tools.
 
-**AC-FP-SEC-01:** wrong/stale/cross-session identity, substituted action, expired scope,
-storage/audit rejection and unsupported profile produce zero effect when rejected before
-dispatch. A failure after a possibly accepted dispatch preserves its receipt and explicit
-unknown/indeterminate outcome; it must not be mislabeled zero-effect or retried as new work. Cross-window tests deny configuration/credential commands from terminal-only surfaces.
-Adversarial same-UID/admin scenarios cannot be advertised as protected until the separate
-boundary is proven.
+**AC-FP-SEC-01:** each case below is required at its applicable evidence level.
+
+| Case suffix       | Stimulus                                                                                    | Required observable outcome                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `pre-dispatch`    | Reject a stale identity, substituted action, invalid scope/profile or required audit write. | Produce no effect when refusal precedes dispatch.                                           |
+| `post-dispatch`   | Lose confirmation of an effect that might have been accepted.                               | Preserve its intent and unknown outcome; dispatch no fresh retry.                           |
+| `window-boundary` | Invoke credential/configuration actions from a terminal-only surface.                       | Deny those commands through its actual permission boundary.                                 |
+| `principal-limit` | Evaluate same-UID/admin access or a planner-produced capability claim.                      | Do not advertise protected approval or admit authority absent the separate proven boundary. |
 
 <a id="fp-sec-02"></a>
 
@@ -453,8 +592,15 @@ Use revision-checked idempotent intents. A disconnected client decides nothing. 
 unconfirmed accepted effect becomes indeterminate and cannot be replayed. Stale UI
 re-fetches metadata and asks for new review; never auto-accept a successor operation.
 
-**AC-FP-SEC-02:** substitution, duplicate/reordered answers, disconnect after dispatch,
-incomplete diff and lease expiry all preserve one-answer and no-replay guarantees.
+**AC-FP-SEC-02:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                          | Required observable outcome                                                                           |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `exact-action`     | Change command/directory/diff/fingerprint after review.           | Refuse the stale answer and require review of the exact current action.                               |
+| `incomplete`       | Omit/truncate required approval details.                          | Disable Accept while retaining the applicable decline/cancel path.                                    |
+| `duplicate-answer` | Submit repeated or conflicting approval decisions.                | Reconcile one original intent; never dispatch the action twice.                                       |
+| `expiry`           | Expire execution permission before a decline/cancel decision.     | Require no new execution grant for refusal, while retaining authenticated channel/grant requirements. |
+| `disconnect`       | Disconnect/reconnect after a decision may have reached authority. | Show current/unknown receipt state without automatically accepting a successor.                       |
 
 <a id="fp-sec-03"></a>
 
@@ -471,8 +617,15 @@ conversation history. Diagnostics are explicit and redacted before export; inclu
 versions, capability/refusal words and counts. No automatic telemetry/public uploads.
 Desktop notifications default off per category and carry no sensitive payload.
 
-**AC-FP-SEC-03:** crash/reconnect/cursor gap and unavailable subsystem are truthful;
-secret-marker corpus is absent from every durable/general diagnostic/notification channel.
+**AC-FP-SEC-03:** each case below is required at its applicable evidence level.
+
+| Case suffix      | Stimulus                                                                | Required observable outcome                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stream-gap`     | Reconnect with a stale cursor or unavailable subsystem.                 | Retain owner/stream provenance and explicitly show gaps/staleness.                                                                                   |
+| `content`        | Seed sensitive prompt/output/command/key text in a controlled case.     | Keep it out of general durable metadata, diagnostic and notification channels; sealed custody/provider-owned history retain their separate policies. |
+| `diagnostics`    | Export diagnostics intentionally.                                       | Redact before export and disclose bounded versions/counts/refusal facts without automatic upload.                                                    |
+| `notification`   | Leave category notifications disabled, then enable an allowed category. | Default to off and expose no sensitive lock-screen payload.                                                                                          |
+| `resource-label` | Display Native RSS/CPU or soft budget observations.                     | Label measurements as observations, not hard containment guarantees.                                                                                 |
 
 ## 7. Handoff and work coordination
 
@@ -493,9 +646,15 @@ Draft content is volatile by default. Optional saved handoff content needs opt-i
 storage and its own privacy contract, never the workflow metadata journal. Failure
 after possible delivery is Unknown and blocks automatic resending to an effectful target.
 
-**AC-FP-HAND-01:** changed payload/source/target invalidates review. Escape/path/forged
-tool instructions confer no capability. Native↔Managed creates a new session with fresh
-permissions; unavailable recipient does not consume source or silently persist payload.
+**AC-FP-HAND-01:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                           | Required observable outcome                                                                   |
+| ------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `stale-review`     | Change selected payload, source generation or target after review. | Invalidate the reviewed digest and do not deliver.                                            |
+| `receiver`         | Prepare a supported receiver for reviewed untrusted context.       | Preserve source work and require the receiver's own fresh permissions/identity.               |
+| `unknown-delivery` | Lose the acknowledgment after possible first-input delivery.       | Show Unknown and block automatic resend to an effectful receiver.                             |
+| `unavailable`      | Refuse an unavailable or unqualified recipient before delivery.    | Preserve source/context and persist no payload silently.                                      |
+| `saved-content`    | Request durable handoff content.                                   | Require an accepted opt-in sealed policy; never put content in the workflow metadata journal. |
 
 <a id="fp-orc-01"></a>
 
@@ -522,10 +681,15 @@ known no-effect failure is bounded by the reviewed plan and gets a new attempt I
 denied permission is not a retryable provider error. Reconnect/restoring journal gives
 no new authority. Execution remains serialized where cap 1 applies.
 
-**AC-FP-ORC-01:** cyclic/unbounded/edited plans start nothing; failed required steps
-block dependents. Crash before/after dispatch, lost ACK, pause, cancel, expiry and
-revocation create no duplicate attempt/effect. Unknown quota uses an enforceable proxy
-and cannot be called a monetary cap.
+**AC-FP-ORC-01:** each case below is required at its applicable evidence level.
+
+| Case suffix          | Stimulus                                                             | Required observable outcome                                                                       |
+| -------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `invalid-plan`       | Submit a cyclic, oversized, expired or changed plan.                 | Start no step until the exact finite revision satisfies review and admission.                     |
+| `dependency`         | Fail a required predecessor or skip an optional output.              | Block dependents unless the reviewed DAG explicitly permits that missing output.                  |
+| `dispatch-ambiguity` | Crash or lose a reply at attempt admission/dispatch.                 | Retain the original attempt/intent and dispatch no duplicate effect.                              |
+| `pause-stop`         | Pause/cancel/expire/revoke a run with a step already active.         | Stop new admission and distinguish scheduling state from termination/settlement of existing work. |
+| `quota`              | Set a budget for which the provider supplies no enforceable counter. | Apply local bounded proxies and label any cost estimate as soft.                                  |
 
 <a id="fp-orc-02"></a>
 
@@ -542,28 +706,41 @@ Fair admission reserves cancellation/revocation capacity. Declared model budget 
 provider counters is a soft estimate; enforce local step/time/resource bounds instead.
 Stop reports scheduling stopped separately from observed process termination.
 
-**AC-FP-ORC-02:** concurrent writer conflict, dirty merge, external editor, resource
-pressure and provider stall cannot overwrite unreviewed work or starve cancellation.
-No PID discovered by enumeration becomes a cleanup signal target.
+**AC-FP-ORC-02:** each case below is required at its applicable evidence level.
+
+| Case suffix    | Stimulus                                                            | Required observable outcome                                                                        |
+| -------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `writers`      | Schedule overlapping writers to one checkout.                       | Serialize/reject conflicts before dispatch; parallel work requires reviewed independent worktrees. |
+| `outside-edit` | Change the root identity or workspace digest externally.            | Block promotion/settlement and preserve unreviewed work.                                           |
+| `verification` | Finish a provider step without its required workspace verification. | Retain the claim and prevent dependent promotion until valid settlement.                           |
+| `pressure`     | Flood output or stall a provider at resource bounds.                | Keep cancellation/revocation available within the declared enforcement level.                      |
+| `cleanup`      | Clean up a completed or interrupted worker.                         | Signal owned handles only; use no PID discovered by name/enumeration.                              |
 
 <a id="fp-orc-03"></a>
 
 ### FP-ORC-03 — Native and planner trust gates
 
-Managed steps use ordinary authority APIs. Automated full-account Native dispatch and
+Managed steps use the authority's accepted, capability-negotiated guard APIs; an
+unguarded ordinary turn is not an alternate route around a missing workspace guard. Automated full-account Native dispatch and
 model-output-to-Native handoff remain `BLOCKED_TRUST_BOUNDARY` until an accepted,
 independently proven OS/approval boundary preserves required provider functionality.
 Whole-DAG consent is not per-launch current-content consent. B1 staged/quarantined
 work is a distinct proposed restricted-worker lane, not unrestricted Native and not
-production Managed; its typed pure contracts do not constitute a working worker.
+production Managed; its launcher/staging/export machinery exists under the fixture feature, but that is
+not admitted production execution, useful real-provider qualification or protected approval.
 
 Hermes as Wyss Agent planner may propose data only; every effect belongs to Wyss policy/
 execution. OS denial of direct effectful escape is required before that integration.
 Do not make a sandbox pass by disabling the useful workflow and claiming full parity.
 
-**AC-FP-ORC-03:** compromised planner/native/transport cannot forge accepted permissions;
-positive useful workflow and negative escape tests both pass per lane/provider/version.
-Until then blocked steps remain visible final-product gaps, not removed requirements.
+**AC-FP-ORC-03:** each case below is required at its applicable evidence level.
+
+| Case suffix       | Stimulus                                                                   | Required observable outcome                                                                                                          |
+| ----------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `native-gate`     | Submit a full-account Native automated step without the accepted boundary. | Keep it blocked despite whole-plan consent.                                                                                          |
+| `b1-gate`         | Offer the implemented restricted-worker fixture as a production lane.      | Refuse production admission; fixture code is not qualification or protected approval.                                                |
+| `planner`         | Parse hostile Hermes/planner output.                                       | Retain data-only proposals; grant no direct effect or forged approval.                                                               |
+| `useful-boundary` | Qualify a proposed effect lane.                                            | Require useful positive workflow and negative escape evidence for its exact provider/build, plus independent review where specified. |
 
 ## 8. Remote PCs and native Android
 
@@ -581,13 +758,20 @@ action after transport/authentication review.
 
 Target connectivity is LAN/direct where feasible, encrypted authenticated remote P2P
 with relay fallback and no manual per-connection VPN operation. Transport/vendor/relay
-hosting remains DN-05, with evidence comparison in the roadmap. Relay must not see
+hosting remains DN-05, with evidence comparison in the roadmap. No vendor or working transport is established
+by the current local core or offline Android UI. Relay must not see
 plaintext application content. Host key change stops reconnection pending local review.
 No exposed authority socket, private signing scheme or fabricated hardware attestation.
 
-**AC-FP-REM-01:** expired/replayed pairing, wrong host, revoked/suspect device, missing
-scope, audit failure and direct/relay migration cannot widen grants or reach authority
-as raw protocol. Lost device revocation blocks future gateway use, not undo past effects.
+**AC-FP-REM-01:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                      | Required observable outcome                                                             |
+| ------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `pairing`          | Expire/replay a pairing offer or change pinned host identity. | Refuse enrollment/reconnection until the required fresh local proof.                    |
+| `watch`            | Enroll a watch-only device.                                   | Grant neither terminal input, configuration writes nor raw authority access.            |
+| `revoke`           | Revoke or mark a device suspect.                              | Deny subsequent dependent gateway requests without pretending past effects are undone.  |
+| `transport-change` | Move between direct and relay paths.                          | Preserve authenticated host/device identity and scope; relay membership grants nothing. |
+| `default`          | Start without an accepted/configured remote deployment.       | Open no production listener or enrollment automatically.                                |
 
 <a id="fp-rem-02"></a>
 
@@ -613,9 +797,15 @@ existing host work alive; it cannot authenticate a remote human or unlock the wa
 Remote config requests are proposals awaiting fresh host confirmation; full shell access
 can bypass that API using account rights, and must be disclosed as such.
 
-**AC-FP-REM-02:** roaming/lost ACK/gateway crash does not duplicate input; observers
-cannot claim write or resize. Lock/logout/wallet lock returns explicit denial without
-stopping already authorized work. Revocation is not advertised as account cleanup.
+**AC-FP-REM-02:** each case below is required at its applicable evidence level.
+
+| Case suffix     | Stimulus                                                                  | Required observable outcome                                                                                                          |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `observer`      | View a terminal without a valid input claim.                              | Permit only the granted observation; deny input and authoritative resize.                                                            |
+| `known-partial` | Receive a known accepted prefix for an input batch.                       | Report that prefix and require a new explicit action for a known remainder.                                                          |
+| `lost-ack`      | Lose an input acknowledgment or restart the gateway after possible write. | Show unknown outcome and replay no buffered keystrokes.                                                                              |
+| `claim-loss`    | Expire/revoke the writer claim.                                           | Deny newly admitted input; continue watching only if its independent grant remains valid.                                            |
+| `presence`      | Lock/log out the host or lose required wallet/key/presence availability.  | Deny privileges with missing prerequisites without stopping already authorized work; absent-host full-account input remains blocked. |
 
 <a id="fp-rem-03"></a>
 
@@ -638,9 +828,15 @@ If unavailable, deny the dependent privilege and explain why. Notifications cont
 prompt/path/output; locked screen shows only non-sensitive counts. No durable terminal
 transcripts or clipboard sync by default.
 
-**AC-FP-REM-03:** real phone keyboard/accessibility/rotation/background/reinstall/key
-invalidation/lost-phone flows preserve identity and no-replay. At narrow viewport every
-input/deny/stop control remains usable; software-only/emulator evidence is not hardware proof.
+**AC-FP-REM-03:** each case below is required at its applicable evidence level.
+
+| Case suffix           | Stimulus                                                       | Required observable outcome                                                       |
+| --------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `hardware`            | Enroll/use a device on supported physical Android hardware.    | Verify actual keystore/presence properties or deny the dependent privilege.       |
+| `input-ui`            | Use IME, extra keys, guarded paste and narrow/rotated layouts. | Keep input/deny/stop controls usable without stealing composition.                |
+| `background`          | Background/kill the Android app and reconnect.                 | Preserve host work under its existing authorization and resend no input/approval. |
+| `reinstall-revoke`    | Reinstall, invalidate a key or revoke a lost device.           | Treat identity changes explicitly and reject stale credentials/claims.            |
+| `locked-notification` | Receive attention while the phone is locked.                   | Show only non-sensitive permitted metadata, never prompt/path/output.             |
 
 ## 9. Performance, accessibility and reliability
 
@@ -664,9 +860,15 @@ Report app and provider costs separately, p50/p95, repetitions, software/display
 and preserved live-work conditions. Budgets are frozen from those results before
 release; missing results mean NOT_PROVEN, not a passing performance score.
 
-**AC-FP-NFR-01:** bound/storm/slow-consumer tests have no unbounded growth; qualified
-reference runs meet the approved M budgets with raw provenance. No cache drop, desktop
-restart or closure of the owner's sessions occurs merely to obtain a number.
+**AC-FP-NFR-01:** each case below is required at its applicable evidence level.
+
+| Case suffix        | Stimulus                                                                     | Required observable outcome                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `bounded-work`     | Exercise each named queue/buffer at and beyond its count/byte ceiling.       | Refuse/degrade as specified without retained unbounded growth or silently lost admitted data.                       |
+| `reference-budget` | Measure a named M01–M33 metric on an exact reference setup.                  | Compare actual samples against an agreed budget; missing measurements do not pass.                                  |
+| `cost-boundary`    | Measure Console/WebKit, host, authority and provider trees.                  | Report their separate costs and ownership uncertainty without calling soft RSS a hard limit.                        |
+| `background`       | Hide views or fail configuration/authority while using an existing terminal. | Preserve required output/control work while avoiding unnecessary view work.                                         |
+| `preservation`     | Prepare a measurement on the owner's environment.                            | Preserve existing apps/sessions; perform no cache drop, desktop restart or provider call merely to obtain a number. |
 
 <a id="fp-nfr-02"></a>
 
@@ -678,9 +880,14 @@ Respect reduced motion and system text scale. Default shortcuts do not steal pro
 IME/desktop keys; remapping detects conflicts. Screen-reader terminal support requires
 actual WebKitGTK and Android testing. Progressive detail does not hide host/mode/risk.
 
-**AC-FP-NFR-02:** keyboard and assistive-technology journeys work in all themes; ordinary
-text contrast >=4.5:1, large text/control boundaries >=3:1. Native dialogs and narrow
-viewports retain focus and cancellation. No success relies on colour or pointer alone.
+**AC-FP-NFR-02:** each case below is required at its applicable evidence level.
+
+| Case suffix | Stimulus                                                               | Required observable outcome                                                                             |
+| ----------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `contrast`  | Check each theme's semantic text, controls and focus.                  | Meet ordinary-text 4.5:1 and large-text/control-boundary 3:1 requirements with non-colour state labels. |
+| `keyboard`  | Complete each supported journey without a pointer.                     | Preserve focus, cancellation and provider/desktop/IME chords.                                           |
+| `assistive` | Exercise actual WebKitGTK screen-reader and Android TalkBack journeys. | Verify the offered controls on real environments; source/DOM presence is insufficient evidence.         |
+| `display`   | Change text scale, reduced motion and viewport size.                   | Preserve readable actions and access to denial/stop controls without clipping essential scope/risk.     |
 
 <a id="fp-nfr-03"></a>
 
@@ -691,7 +898,8 @@ updates preserving host/authority sessions and explicit update-pending status. A
 incompatible host/authority cannot silently receive new fields. Installed migrations,
 service restarts and rollback remain reviewed operational actions accounting for live
 work. Keep a consistent store backup and matching binaries; no SQL downgrade or copying
-only a live SQLite DB while ignoring WAL. P1/V7 and P2/V8 histories remain independent;
+only a live SQLite DB while ignoring WAL. P1/V7 and the separately versioned P2 history remain independent; P2 has validated
+V8/V9/V10 source support, not an automatic installed-store upgrade;
 retiring protocol 1 is separate, not part of redesign migration.
 
 Corrupt/newer stores fail safely without overwriting them; unavailable authority does
@@ -700,9 +908,15 @@ Host crash/power loss yields truthful unknown/indeterminate state and no replay.
 Uninstall defaults to application removal retaining user data; deleting data is separate
 and names what would be lost. No public publishing/auto-update/telemetry is implied.
 
-**AC-FP-NFR-03:** mixed-version, interrupted-upgrade, full-disk, corrupt-store, recovery
-and rollback rehearsals preserve prior data and live sessions within the chosen operation's
-scope. Rollback of an operation that must stop a host cannot be advertised as transparent.
+**AC-FP-NFR-03:** each case below is required at its applicable evidence level.
+
+| Case suffix     | Stimulus                                                            | Required observable outcome                                                                  |
+| --------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `mixed-version` | Update only the GUI while compatible host/authority work is active. | Preserve owner/process identities and disable unsupported new controls explicitly.           |
+| `backup`        | Back up and restore control state plus required witnesses.          | Demonstrate a consistent set and declared loss window, not merely a copied live SQLite file. |
+| `corruption`    | Open a corrupt/newer/oversized store.                               | Preserve original bytes and refuse unsafe mutation rather than reset/downgrade.              |
+| `interruption`  | Interrupt install/migration/rollback within its declared scope.     | Keep a recoverable old/new state and disclose any required authority/host stop.              |
+| `uninstall`     | Remove the application without choosing data purge.                 | Retain user/provider/recovery data; explicit purge separately names the affected data.       |
 
 ## 10. End-to-end journeys and outcomes
 
@@ -721,6 +935,45 @@ scope. Rollback of an operation that must stop a host cannot be advertised as tr
 | JF-11 Second PC/Android                      | Pair watch → choose host/project → view → explicit input/approval grant               | Roaming/lock/revoke invalidates claims; unknown input not replayed            | REM-01..03              |
 | JF-12 Recovery/update                        | Inspect component versions → preserve live work → approved compatible update/recovery | Locked vault/corrupt store/incompatible host remains explicit and recoverable | CFG-04, NFR-03          |
 
+### JF-13 — Switch away from live work and return
+
+1. Register A and B, explicitly start one qualified Native agent in A, and record its
+   terminal/session identity, host epoch, launch profile revision and current output offset.
+2. Select B and open only its metadata. A's process, prompt, cwd, grants and profile stay
+   unchanged; any pending save remains A's metadata operation. No B agent/shell starts.
+3. Return to A and locate the existing association. Do not infer a new process from a
+   missing renderer or a changed visible title.
+4. Attach through the checked owner; require the matching epoch and supported screen path.
+   Draw before cursor commit. Where only ring recovery is currently implemented, show its
+   replay/gap/fidelity limitation rather than claim this final screen criterion passes.
+5. Acquire input explicitly. A second cooperating view remains read-only; account/older-client
+   interference remains outside the cooperative claim guarantee.
+6. Replace or lose the host at each boundary in a controlled test. Refuse stale sends and
+   preserve unknown work; do not automatically restart or resend input.
+
+Coverage: AC-FP-CTX-01/navigation, AC-FP-CTX-04/layout-save, AC-FP-TERM-02/snapshot,
+AC-FP-TERM-02/fallback, AC-FP-TERM-02/missing-owner and AC-FP-SES-01/observed-settings. Current missing implementation: REQ-02 project screen recovery;
+real provider/full-screen/IME acceptance still follows separately.
+
+### JF-14 — Keep a configuration draft scoped while navigating
+
+1. Open an explicitly identified configuration draft/plan for A. Record its project/binding/
+   revision and the target file identity, digest and plan lifetime.
+2. Select B in another project view. B's navigation cannot relabel or retarget A's editor,
+   plan or native confirmation. Global configuration administration keeps its own scope.
+3. Before confirmation, choose either to continue editing A or discard/review a new B plan;
+   do not transfer executable draft content or reuse A's approval implicitly.
+4. After A's effect was admitted, reconcile its A receipt even while B is visible. A failed
+   response is not proof that no A write occurred; B stays unchanged.
+5. Exercise outside edit, plan expiry, B selection and window closure separately. Preserve
+   user drafts/recovery data according to the owning editor contract without overwriting a
+   changed provider file.
+
+Coverage: AC-FP-CTX-04/before-confirmation, AC-FP-CTX-04/after-admission,
+AC-FP-CTX-04/late-result, AC-FP-CTX-04/two-windows, AC-FP-CFG-02/stale-plan,
+AC-FP-CFG-02/write-failure and AC-FP-CFG-02/undo. Current selectors are independent; the missing scoped
+bridge is REQ-01. Its bounded DTO/window design must be specified before implementation.
+
 ## 11. Extensions retained in final scope
 
 <a id="fp-ext-01"></a>
@@ -735,9 +988,14 @@ boundary. Neither extension delays Claude/Codex parity milestones or uses a priv
 permission path. Original Wyss source/docs remain historical input, not a running
 Console subsystem. Public distribution requirements remain conditional.
 
-**AC-FP-EXT-01:** each added provider passes its capability/positive/negative fixtures,
-Native integration and any separately required Managed safety review. No optional
-planner bypasses Wyss effects; unavailable integrations remain explicit backlog items.
+**AC-FP-EXT-01:** each case below is required at its applicable evidence level.
+
+| Case suffix         | Stimulus                                                                          | Required observable outcome                                                                       |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `provider`          | Add or qualify a supported OpenCode/Hermes Native surface.                        | Record exact build/scope and useful positive/negative evidence; CLI syntax alone is insufficient. |
+| `unknown-extension` | Offer an unavailable or unqualified integration.                                  | Show the reason without a silent provider/mode fallback.                                          |
+| `planner-effects`   | Connect a Wyss/Hermes data-only planner proposal.                                 | Keep all effects mediated by accepted Wyss policy and boundary gates.                             |
+| `scope`             | Evaluate an optional extension against the retained complete-product requirement. | Keep unmet scope visible instead of dropping it because implementation is difficult.              |
 
 ## 12. Source invariants and retained clarifications
 
@@ -774,7 +1032,7 @@ For each AC-FP group, enumerate independently observable cases in the relevant i
 task: normal path; boundary and invalid input; denied/stale identity or scope; interruption/
 recovery; and real provider/device interaction where applicable. Reuse existing tests and
 name uncovered cases. An optional case is not silently assumed applicable or passed.
-Use case IDs derived from the stable group, such as `AC-FP-CTX-04/switch-before-confirmation`,
+Use case IDs derived from the stable group, such as `AC-FP-CTX-04/before-confirmation`,
 without renumbering FP/AC definitions or recreating the retired historical crosswalk.
 
 Assertions of zero effect apply only before an effect can have been accepted. Separate

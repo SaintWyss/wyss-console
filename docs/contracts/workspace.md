@@ -151,9 +151,11 @@ capability reasons. `previewMigration` reads only and returns counts/conflicts/s
 digests; `commitMigration` requires that exact preview ID/digests and expected absent store.
 Global navigation/settings do not require a project. Contextual sections use the project
 breadcrumb; selecting A→B changes presentation only, does not call launch/stop/cd/resume.
-Unsaved native editor text requires the existing warning; no silent write. Unconfirmed
-plans/dialog selections expire on switch. Confirmed work completes only in its captured
-context; global attention opens the exact target without retargeting a composer.
+Target contextual editing warns about unsaved native-editor text before changing that
+editor's own target; no silent write or cross-window retargeting. Current Projects navigation
+invalidates M1 chooser/adoption selections, not the separate configuration engine's plans.
+Confirmed work completes only in its captured context; global attention opens the exact
+target without retargeting a composer. Section 7 describes the missing contextual bridge.
 
 One app-coordinated input claim per host epoch/terminal, held by backend interprocess
 lock and released on blur/detach/crash; mirror views are read-only. Taking input is explicit.
@@ -426,3 +428,84 @@ requirement):
 - A removed project whose folder is still in the older registry is offered again by an update preview,
   and an accepted alias is asked again each time (explicit offers, never silent).
 - A launch of unknown outcome cannot be settled while the store is at its session ceiling.
+
+## 7. Journey semantics and implementation gaps
+
+These rules reconcile FP-CTX-01..04, FP-TERM-01/02 and FP-SES-01..04 with the current
+project implementation. They describe the actual seam and required next changes, not
+new execution or reference-desktop acceptance.
+
+### Register, duplicate and adopt
+
+Duplicate canonical root registration returns the existing project; it is not an invalid-root
+error. Unsafe/replaced roots refuse. Folder creation and project-store publication are
+not one filesystem transaction: publication failure can leave a deliberately preserved
+unregistered directory, with an explicit error. Do not delete a folder that may now contain
+outside work. Project removal never deletes its root/provider/vault data.
+
+Workspace duplication copies arrangement/preferences with fresh leaf IDs and null associations.
+Deleting the last/default project workspace leaves an empty default. Scratch cannot be
+deleted/duplicated. Scratch adoption applies only to an unassigned ShellTarget after the
+current process/cwd disclosure is revalidated; it assigns the null origin once, clears its
+Scratch placement and leaves the association detached. It neither moves an agent session
+across projects nor changes a shell's real directory. Cooperating input claims do not block
+older clients or arbitrary same-user processes.
+
+Source oracles were inspected in `projects/tests/project_tests.rs`,
+`adoption_tests.rs` and `launch_tests.rs`. They are not newly executed test results.
+
+### Projects and configuration have distinct current selectors
+
+`projects/controller.ts::selectProject` changes project metadata selection and invalidates
+its chooser tokens. The configuration controller separately invokes its native project chooser;
+`configuration_select_project` calls the configuration engine's `select_project`. That engine
+serializes with apply and clears its plans, but navigation in Projects is not currently that
+operation. Do not claim project navigation automatically retargets configuration or invalidates
+all configuration drafts.
+
+Chosen direction: configuration writes capture a backend-validated project/binding/revision
+and scoped editor context, not a mutable global selector shared by unrelated windows.
+Opening project configuration must make its exact scope explicit; existing drafts/confirmations
+cannot silently switch with another window. Global administration remains separate.
+Define the bounded bridge/DTO and multi-window behavior before implementation (REQ-01).
+
+### Project terminal recovery is presently ring-only
+
+`SessionPane.svelte` creates its own renderer, reads from offset zero and handles the
+bounded host-ring tail/gap. It does not call the ordinary terminal snapshot attach/commit
+path. A packaged helper and successful ordinary-terminal attach tests therefore do not
+qualify full-screen recovery inside Projects. The project terminal path must use its checked
+Owner transport, not the generic HostLink that can spawn/retry/fall back.
+
+Chosen direction: resolve an association to the current host epoch in the backend; obtain a
+bounded screen snapshot through that checked owner; draw before committing a one-use reader
+cursor. Bind staged state to association, terminal, epoch and reader. A stale token/host or
+failed draw cannot skip bytes. Hosts without the feature retain explicit labeled ring replay.
+Qualify project switch, detach/reattach, helper failure and host replacement (REQ-02).
+
+### Project terminal input needs a retained-queue bound and truthful outcomes
+
+The current project pane serializes 4096-byte writes with a Promise chain. Its chunk limit is
+not a total queue-byte limit. Its generic error text says input was not sent even when earlier
+chunks were accepted; the Owner/service also erase detailed partial/unknown write outcomes.
+Existing project-view tests cover ordering/chunking and refusal of the first chunk, not all
+saturation, partial-prefix or lost-reply cases.
+
+Chosen direction: reuse the 64 KiB retained-input budget, including the in-flight chunk, and
+at most one 4096-byte write in flight. Reject a new batch before any of it is enqueued when
+it cannot fit. On blur/detach/claim loss discard unsent work of the old input generation;
+already admitted input can have reached the PTY and is never retracted or replayed. Carry
+known accepted bytes versus no-send/unknown outcomes through Owner, service, DTO and UI.
+Keep known pre-admission busy retry distinct from transport uncertainty. A new claim must not
+revive old queued input (REQ-03).
+
+### Managed preparation and local-host scope
+
+Projects Managed launch records exactly one requested safety profile and one authority
+protocol/stream, then prepares a session only. It grants no lease, starts no runtime and
+sends no turn. Requested is not effective. Retry of unknown Managed preparation is explicit,
+uses the same intent and recorded authority, and refuses an authority switch.
+
+The current Owner/socket and HostId store are local-host implementation. Host/device/project
+identities in the target do not constitute a production multi-host transport or remote project
+registry. Preserve that scope until the remote capability is actually delivered.

@@ -20,8 +20,11 @@ does not authorize arbitrary provider files or prove actual runtime consumption.
 Native/project launch eligibility is distinct from configuration-write eligibility.
 Configuration roots are inside HOME, never HOME itself, provider/credential roots, or
 an ancestor reached through a link; ownership and private directory checks apply.
-Project selection changes invalidate plans, serialize with apply and never retarget live
-sessions. Undo for another project requires selecting that project first.
+The configuration engine's own project selection serializes with apply and invalidates
+its plans without retargeting live sessions. The Projects navigator currently has an
+independent selector; it does not call that configuration operation. A future contextual
+bridge must bind the backend-validated project/binding/revision and avoid a shared mutable
+selector retargeting another window's draft (REQ-01). Undo for another project requires selecting that project first.
 
 ## Plan and apply
 

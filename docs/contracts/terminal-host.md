@@ -98,6 +98,15 @@ See [screen fidelity](terminal-fidelity.md),
 [host persistence](terminal-fidelity.md#4-what-survives-what),
 [workspace identity](workspace.md) and [current acceptance](../STATUS.md).
 
+## Project-pane coverage limit
+
+The direct terminal controller's input queue bound and the ordinary snapshot attach path
+must not be attributed automatically to the separate Projects SessionPane. Its current
+path replays a bounded ring and chains 4096-byte writes without an aggregate input-queue
+ceiling. It also needs partial/unknown outcome propagation rather than a universal
+"not sent" error. See the [project journey contract](workspace.md#7-journey-semantics-and-implementation-gaps)
+and REQ-02/REQ-03 in the roadmap. Source/test inspection is not an executed acceptance result.
+
 ## Terminal layout invariants
 
 These TI/PS rules apply to the terminal split tree; the project metadata tree has its

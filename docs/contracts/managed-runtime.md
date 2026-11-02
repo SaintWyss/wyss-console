@@ -73,6 +73,19 @@ selection extension. Attachment/turn/generation-bound observations and accepted 
 metadata cannot change another turn, confer account entitlement or mutate a provider choice.
 Unknown reports stay unknown; supported display does not imply caller-controlled selection.
 
+## Project entry and profile availability
+
+The Projects Managed entry prepares only a session and stores its requested safety profile
+plus authority protocol/stream. Runtime start, lease, binding/resume and turn submission are
+separate explicit actions. Preparing two sessions is not starting two runtimes. Profiles can
+be requested only where the selected authority advertises applicable support; a requested
+profile is never proof of an effective attached profile. The production F8 spawner qualifies
+its pinned Codex Local Tools route and refuses the unqualified inference route.
+
+Claude adapter/bridge/model/usage code exists. Explain its actual admission/evidence blockers
+instead of describing it as an absent adapter. Observation, Native/delegation support and
+provider-aware schema support do not satisfy those blockers.
+
 ## Required qualification
 
 Each provider/profile needs source, fixture and real-provider evidence for closed fields,

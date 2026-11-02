@@ -103,3 +103,23 @@ not 4096 bytes, while each TOML file is bounded in bytes. The launcher processes
 TOML candidates after collecting matching directory entries; its listing is not a proven
 bounded-memory enumeration of an arbitrarily large directory. Bound/measure that Native
 inventory path before claiming complete FP-NFR-01 acceptance.
+
+## Requirement and journey reconciliation
+
+Semantic review covers all 31 FP/AC groups; code/test tracing in this pass concentrates
+on Projects/workspaces/session entry and selected cross-domain contracts. No application,
+provider or device tests were executed. Atomic case definitions and the evidence-location
+map are a specification, not a new PASS register.
+
+| Source-confirmed seam     | Current behavior                                                                                                                                                                                       | Required target / remaining work                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Registration and adoption | Duplicate canonical root returns the existing project. Scratch adoption assigns a previously null origin once after process/cwd disclosure; a publication failure can leave an unregistered directory. | Requirements now distinguish these valid outcomes from invalid roots or transactional rollback.                                                                    |
+| Configuration context     | Projects navigation and the configuration engine's native chooser are independent selectors. The latter clears its plans and serializes apply.                                                         | A backend-bound multi-window contextual bridge remains to be designed; do not assume navigation invalidates configuration plans (REQ-01).                          |
+| Project screen recovery   | SessionPane creates a renderer and reads the retained byte ring; it does not use the ordinary snapshot attach/commit path.                                                                             | Checked-owner snapshot/cursor integration and full-screen project-switch recovery remain missing implementation (REQ-02), followed by real fidelity qualification. |
+| Project input             | Promise-serialized 4096-byte chunks have no aggregate retained-byte ceiling; generic errors can hide an accepted prefix or uncertain write.                                                            | Bounded generation-aware queue and typed no-send/partial/unknown outcomes are needed (REQ-03).                                                                     |
+| Managed project entry     | Launch prepares a session and records requested safety profile plus authority identity.                                                                                                                | Runtime/lease/binding/turn remain separate; Claude code exists but admission is blocked.                                                                           |
+| Multi-host target         | The project store/Owner path currently operates on the local host.                                                                                                                                     | A logical host/device vocabulary does not establish a remote registry or transport.                                                                                |
+
+Existing source oracles include project registration/duplicate/adoption/launch tests,
+project-view chunk-order tests and ordinary terminal attach/queue tests. Their presence
+does not prove the missing cross-component wiring or real environment behavior.
