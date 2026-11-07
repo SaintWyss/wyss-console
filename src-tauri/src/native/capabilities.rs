@@ -69,6 +69,29 @@ const CLAUDE_316: Evidence = Evidence {
     limitation: "Syntax only: effective values, overlay behavior on this build and account entitlement are not observed",
 };
 
+/// The build Claude Code updated itself to by 2026-11-07. Qualified the way 2.1.316 was: every flag
+/// a profile passes, and every value it passes to them, is in this exact build's `--help`.
+const CLAUDE_319: Evidence = Evidence {
+    status: Status::SyntaxVerified,
+    qualified_version: Some("2.1.319 (Claude Code)"),
+    checked_on: Some("2026-11-07"),
+    operations: &[
+        "model via --model",
+        "reasoning effort via --effort (low, medium, high, xhigh, max)",
+        "permission mode via --permission-mode",
+        "full access via --dangerously-skip-permissions (--help, 2026-11-07)",
+        "session JSON overlay via --settings",
+    ],
+    interface: Some(
+        "--model, --effort, --permission-mode, --dangerously-skip-permissions and --settings",
+    ),
+    format: Some("argv flags plus a JSON settings overlay"),
+    scope: Some("one Native child process; Wyss does not write global or project settings"),
+    reload_semantics: Some("No Native overlay hot-reload acceptance; effective use is unverified"),
+    source: Some("2.1.319 --version/--help on Santiago-PC"),
+    limitation: "Syntax only: effective values, the full-access effect and account entitlement are not observed",
+};
+
 const CODEX: Evidence = Evidence {
     status: Status::SyntaxVerified,
     qualified_version: Some("codex-cli 0.159.0"),
@@ -139,6 +162,7 @@ pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
     match (agent, version) {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE.qualified_version.unwrap() => CLAUDE,
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE_316.qualified_version.unwrap() => CLAUDE_316,
+        (AgentId::ClaudeCode, Some(v)) if v == CLAUDE_319.qualified_version.unwrap() => CLAUDE_319,
         (AgentId::Codex, Some(v)) if v == CODEX.qualified_version.unwrap() => CODEX,
         (AgentId::Opencode, Some(v)) if v == OPENCODE.qualified_version.unwrap() => OPENCODE,
         (AgentId::Hermes, _) => HERMES_PROFILE_UNVERIFIED,
@@ -188,6 +212,13 @@ const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[
         checked_on: "2026-10-31",
         operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
         source: "docs/research/arsenal-am1a/ARSENAL-Q316-QUALIFICATION-2026-10-31.md (harness-v2, the same 9 pre-registered cases)",
+        limitation: "plugin and built-in skills are not switched off; provider use of each skill is not observed",
+    },
+    ArsenalEvidence {
+        qualified_version: "2.1.319 (Claude Code)",
+        checked_on: "2026-11-07",
+        operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
+        source: "docs/research/arsenal-am1a/ARSENAL-Q319-QUALIFICATION-2026-11-07.md (harness-v2, the same 9 pre-registered cases)",
         limitation: "plugin and built-in skills are not switched off; provider use of each skill is not observed",
     },
 ];
@@ -279,6 +310,21 @@ mod tests {
             Some("2.1.315 (Claude Code)")
         ));
         assert!(permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.319 (Claude Code)")
+        ));
+        for neighbour in [
+            "2.1.317 (Claude Code)",
+            "2.1.318 (Claude Code)",
+            "2.1.320 (Claude Code)",
+            "2.1.319",
+        ] {
+            assert!(
+                !permits_arsenal_exclusion(AgentId::ClaudeCode, Some(neighbour)),
+                "{neighbour}"
+            );
+        }
+        assert!(permits_arsenal_exclusion(
             AgentId::Codex,
             Some("codex-cli 0.159.0")
         ));
@@ -324,7 +370,25 @@ mod tests {
             AgentId::ClaudeCode,
             Some("2.1.316 (Claude Code)")
         ));
-        for neighbour in ["2.1.315 (Claude Code)", "2.1.317 (Claude Code)", "2.1.316"] {
+        let updated = evidence(AgentId::ClaudeCode, Some("2.1.319 (Claude Code)"));
+        assert_eq!(updated.status, Status::SyntaxVerified);
+        assert!(
+            updated
+                .operations
+                .contains(&"full access via --dangerously-skip-permissions (--help, 2026-11-07)")
+        );
+        assert!(permits_profile_overrides(
+            AgentId::ClaudeCode,
+            Some("2.1.319 (Claude Code)")
+        ));
+        for neighbour in [
+            "2.1.315 (Claude Code)",
+            "2.1.317 (Claude Code)",
+            "2.1.318 (Claude Code)",
+            "2.1.320 (Claude Code)",
+            "2.1.316",
+            "2.1.319",
+        ] {
             assert_eq!(
                 evidence(AgentId::ClaudeCode, Some(neighbour)).status,
                 Status::Unverified,

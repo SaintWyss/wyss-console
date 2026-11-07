@@ -208,7 +208,7 @@ Use [workspace](contracts/workspace.md) and
       follows collection of all TOML candidates. Preserve exact byte/character/count units
       and define truthful overflow behavior before claiming bounded inventory cost.
 - [ ] Keep provider-version qualifications current. Reuse the recorded Codex
-      0.159.0 and Claude 2.1.316 Arsenal exclusions instead of treating them as
+      0.159.0 and Claude 2.1.316/2.1.319 Arsenal exclusions instead of treating them as
       unimplemented; qualify unproven cases and new builds before claiming support.
 - [ ] Close any uncovered real two-computer sync/conflict/recovery journeys and
       Native delegation provider-pair/cancellation/concurrency journeys using their
