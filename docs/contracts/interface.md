@@ -49,14 +49,16 @@ Ningún texto bajo 12 px. Pesos: 400 cuerpo, 500 etiquetas, 600 títulos y nombr
 
 ## Color
 
+Oscuro y claro siguen los temas Warp Dark y Warp Light (fondo, texto, acento y ANSI del oscuro); las superficies son grises neutros. El acento claro es más oscuro que el `#00c2ff` de Warp para cumplir 4,5:1 sobre blanco.
+
 Los tests de `tests/appearance.test.ts` comprueban que todo
 token de texto ≥ 4,5:1 sobre **todas** las superficies opacas de su tema; `--line-strong` y
 `--focus` ≥ 3:1 sobre todas. Los tonos `-soft` llevan su texto ≥ 4,5:1.
 
 | Tema           | chrome    | bg        | surface   | texto     | acento    |
 | -------------- | --------- | --------- | --------- | --------- | --------- |
-| Oscuro         | `#0b0f14` | `#10151c` | `#171e28` | `#e8edf4` | `#5fd4f5` |
-| Claro          | `#e8ecf1` | `#f2f4f7` | `#ffffff` | `#121a25` | `#005a80` |
+| Oscuro         | `#000000` | `#000000` | `#0d0d0d` | `#ffffff` | `#00c2ff` |
+| Claro          | `#ebebeb` | `#f5f5f5` | `#ffffff` | `#111111` | `#00678a` |
 | Alto contraste | `#000000` | `#000000` | `#000000` | `#ffffff` | `#00ffff` |
 
 ## Copywriting
