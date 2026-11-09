@@ -31,7 +31,7 @@
     waiting?: number;
     /** What the sidebar offers. Runtimes is in it only while protocol 2 is active. */
     items?: readonly NavItem[];
-    /** Collapsed to icons; it opens over the view while the pointer or focus is on it. */
+    /** Collapsed to icons; it widens only when the owner clicks the button at its foot. */
     rail?: boolean;
     /** Groups the owner folded. A folded group opens while hovered and when it holds the view. */
     closed?: readonly NavGroup[];
@@ -117,14 +117,14 @@
         type="button"
         class="nav-item"
         aria-pressed={rail}
-        title={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
+        title={rail ? 'Expand the sidebar' : 'Collapse the sidebar'}
         onclick={() => ontogglerail?.()}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"
           ><path d="M4 5h16v14H4zM9 5v14" /></svg
         >
         <span class="nav-label"
-          >{rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}</span
+          >{rail ? 'Expand the sidebar' : 'Collapse the sidebar'}</span
         >
       </button>
     </div>

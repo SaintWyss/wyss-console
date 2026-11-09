@@ -13,12 +13,14 @@
     visible = true,
     started = () => undefined,
     onconsole = () => undefined,
+    onupdate = () => undefined,
   }: {
     client: NativeClient;
     which?: 'workspace' | 'profiles';
     visible?: boolean;
     started?: (reply: StartReply) => void;
     onconsole?: () => void;
+    onupdate?: (title: string, cwd: string, input: string) => void;
   } = $props();
   // svelte-ignore state_referenced_locally
   let active = $state(which);
@@ -49,6 +51,7 @@
   {controller}
   visible={visible && active === 'workspace'}
   {onconsole}
+  {onupdate}
 />
 <ProfilesView
   {native}

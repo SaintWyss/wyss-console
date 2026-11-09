@@ -87,8 +87,7 @@ it('never removes a status from the sidebar, collapsed or not', () => {
     .filter((selector) => statuses.includes(selector));
   expect(removed).toEqual([]);
   // What is clipped is clipped for the eye only: it keeps a box, so it is still read out.
-  const rail =
-    ".sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible))";
+  const rail = ".sidebar[data-rail='true']";
   const narrow = [
     `${rail} .pill-value`,
     `${rail} .pill-key`,
@@ -105,6 +104,19 @@ it('never removes a status from the sidebar, collapsed or not', () => {
   expect(clipped.flatMap((rule) => rule.selectors).sort()).toEqual(
     [...narrow].sort(),
   );
+});
+
+it('keeps the collapsed sidebar at its width under the pointer and focus', () => {
+  // It widens only when the owner clicks the button at its foot.
+  const widening = rules.filter(
+    (rule) =>
+      rule.selectors.some(
+        (selector) =>
+          selector.includes("[data-rail='true']") &&
+          /:hover|:has\(:focus-visible\)/.test(selector),
+      ) && /width:\s*232px/.test(rule.body),
+  );
+  expect(widening).toEqual([]);
 });
 
 it('puts the Settings sections in two columns only in a wide window', () => {

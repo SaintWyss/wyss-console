@@ -112,6 +112,26 @@ async function shown(
 }
 
 describe('the launcher', () => {
+  it('updates the chosen agent from a button, in a terminal, and says nothing about unverified profiles', async () => {
+    const onupdate = vi.fn();
+    await shown(fakeClient(), { onupdate });
+    expect(document.querySelector('.native-capability')).toBeNull();
+    button('Update Claude Code').click();
+    expect(onupdate).toHaveBeenCalledTimes(1);
+    expect(onupdate.mock.calls[0]![0]).toBe('Update Claude Code');
+    expect(onupdate.mock.calls[0]![2]).toBe('claude update');
+  });
+
+  it('keeps the skills folded until the owner opens them', async () => {
+    await shown(fakeClient());
+    const skills =
+      document.querySelector<HTMLDetailsElement>('.launch-skills')!;
+    expect(skills.open).toBe(false);
+    expect(text(skills.querySelector('summary'))).toContain(
+      'None — all installed skills',
+    );
+  });
+
   it('offers the agents of the catalogue, says which are installed and what the shell does', async () => {
     await shown(fakeClient());
     const agents = Array.from(document.querySelectorAll('.native-agent'));
@@ -162,10 +182,7 @@ describe('the launcher', () => {
         ),
       }),
     );
-    const evidence = text(document.querySelector('.native-capability'));
-    expect(evidence).toContain('syntax is verified');
-    expect(evidence).toContain('2.1.309 (Claude Code)');
-    expect(evidence).toContain('effective values are not reported');
+    expect(document.querySelector('.native-capability')).toBeNull();
     const details = text(document.querySelector('.native-capability-details'));
     expect(details).toContain('reasoning effort via --effort');
     expect(details).toContain('Reload: Not tested.');
@@ -201,9 +218,7 @@ describe('the launcher', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    expect(text(document.querySelector('.native-capability'))).toContain(
-      'unverified for 2.1.310 (Claude Code)',
-    );
+    expect(document.querySelector('.native-capability')).toBeNull();
     expect(text(document.querySelector('.native-preview'))).toContain(
       'not verified for 2.1.310 (Claude Code)',
     );

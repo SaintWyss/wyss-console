@@ -327,7 +327,7 @@ code,
 .shell[data-rail='true'] {
   --sidebar-w: 52px;
 }
-/* The grid cell keeps its width; the sidebar inside it may open over the view. */
+/* The sidebar changes width only when the owner clicks the button at its foot. */
 .sidebar-slot {
   position: relative;
   z-index: 5;
@@ -352,11 +352,6 @@ code,
 }
 .sidebar[data-rail='true'] {
   width: 52px;
-}
-.sidebar[data-rail='true']:hover,
-.sidebar[data-rail='true']:has(:focus-visible) {
-  width: 232px;
-  box-shadow: var(--shadow-pop);
 }
 /* The list scrolls without drawing a scrollbar. */
 .nav-scroll {
@@ -585,14 +580,14 @@ code,
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .pill {
+.sidebar[data-rail='true'] .pill {
   justify-content: center;
   padding: 0;
 }
 /* Collapsed: the dot stays; the words are clipped for the eye and still read out. */
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .pill-key,
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .pill-value,
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .pill-note {
+.sidebar[data-rail='true'] .pill-key,
+.sidebar[data-rail='true'] .pill-value,
+.sidebar[data-rail='true'] .pill-note {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -749,9 +744,7 @@ code,
   stroke-linejoin: round;
   transition: transform 180ms ease;
 }
-.nav-group[data-open='false']:not(:hover):not(:has(:focus-visible))
-  .nav-section
-  svg,
+.nav-group[data-open='false'] .nav-section svg,
 .nav-group[data-open='false'][data-folded='true'] .nav-section svg {
   transform: rotate(-90deg);
 }
@@ -771,10 +764,10 @@ code,
   grid-template-rows: 1fr;
 }
 /* Collapsed to icons: every group shows its icons and the titles give way to a hairline. */
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .nav-items {
+.sidebar[data-rail='true'] .nav-items {
   grid-template-rows: 1fr;
 }
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .nav-section {
+.sidebar[data-rail='true'] .nav-section {
   height: 0;
   min-height: 0;
   overflow: hidden;
@@ -3224,6 +3217,47 @@ li.native-row .native-note {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* The launcher reads top to bottom as steps: each says what it chooses and why. */
+.launch-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+}
+.launch-step > header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.launch-step h4,
+.launch-step-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.launch-agent-tools {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.launch-skills > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  cursor: pointer;
+}
+.launch-skills[open] > summary {
+  margin-bottom: 6px;
+}
+.launch-start {
+  flex-direction: column;
+  align-items: flex-start;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 /* Wide: the launcher on the left; what runs (sessions, then the agents they delegated to)

@@ -93,6 +93,14 @@
       document.querySelector<HTMLElement>('.launch-trigger')?.focus();
     }
   }
+  /** A new tab in `cwd` titled `title` that types `input` once its shell runs. False before the workspace is ready. */
+  export function runCommand(
+    title: string,
+    cwd: string,
+    input: string,
+  ): boolean {
+    return !!manager?.launch(title, cwd, input);
+  }
   /** Used by the sidebar's tools. */
   export function split(dir: 'row' | 'col') {
     if (activeId) manager?.split(activeId, dir);

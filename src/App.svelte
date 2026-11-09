@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { ManagedSessionId } from './lib/contracts/identities';
   import type { SessionSummary } from './lib/contracts/sessions';
   import { getAppInfo } from './lib/desktop/client';
@@ -385,6 +385,15 @@
   }
 
   let terminal = $state<TerminalView>();
+  /** Shows the Console and opens a terminal that types `input`; waits for the workspace to mount. */
+  async function runInConsole(title: string, cwd: string, input: string) {
+    go('console');
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await tick();
+      if (terminal?.runCommand(title, cwd, input)) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
   let canSplit = $state(false);
   let legend = $state(false);
   let launchOpen = $state(false);
@@ -442,6 +451,7 @@
       {native}
       controller={nativeController}
       onconsole={() => go('console')}
+      onupdate={runInConsole}
       configItems={configuration.reply?.inventory.items ?? null}
     />
     <SessionsView
