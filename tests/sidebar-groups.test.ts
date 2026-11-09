@@ -25,7 +25,6 @@ function open(closed: NavGroup[], ontogglegroup = vi.fn()) {
       authority: pendingAuthority,
       lifecycle: pendingLifecycle,
       f8: null,
-      version: '0.2.0',
     },
   });
   flushSync();

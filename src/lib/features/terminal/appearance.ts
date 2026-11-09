@@ -46,7 +46,7 @@ export interface TerminalPalette {
 
 const TERMINAL_PALETTES: Record<AppearanceTheme, TerminalPalette> = {
   dark: {
-    background: '#000000',
+    background: '#121212',
     foreground: '#ffffff',
     cursor: '#ffffff',
     black: '#8e8e8e',

@@ -23,11 +23,7 @@
     authority,
     lifecycle,
     f8,
-    version,
-    canSplit = false,
-    onsplit,
-    legend = false,
-    ontogglelegend,
+    ontogglerail,
   }: {
     active: ViewId;
     onselect: (id: ViewId) => void;
@@ -44,13 +40,7 @@
     authority: AuthorityObservation;
     lifecycle: LifecycleObservation;
     f8: { label: string; tone: RuntimeTone; note: string | null } | null;
-    version: string;
-    /** A terminal is open, so it can be split. */
-    canSplit?: boolean;
-    onsplit?: (dir: 'row' | 'col') => void;
-    /** The shortcuts list is shown. */
-    legend?: boolean;
-    ontogglelegend?: () => void;
+    ontogglerail?: () => void;
   } = $props();
   /** A group folded by a click stays folded under the pointer until the pointer leaves it. */
   let folded = $state<NavGroup | null>(null);
@@ -68,7 +58,21 @@
 
 <div class="sidebar-slot">
   <nav class="sidebar" aria-label="Primary" data-rail={rail}>
-    <StatusList {runtime} {authority} {lifecycle} {f8} {version} />
+    <div class="sidebar-head">
+      <button
+        type="button"
+        class="sidebar-toggle"
+        aria-label={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
+        aria-pressed={rail}
+        title={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
+        onclick={() => ontogglerail?.()}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M4 5h16v14H4zM9 5v14" /></svg
+        >
+      </button>
+    </div>
+    <StatusList {runtime} {authority} {lifecycle} {f8} />
     <div class="nav-scroll">
       {#each sections as section (section.group)}
         <div
@@ -121,47 +125,6 @@
           </div>
         </div>
       {/each}
-    </div>
-    <div class="sidebar-tools" role="group" aria-label="Terminal tools">
-      <button
-        type="button"
-        class="nav-item"
-        disabled={!canSplit}
-        title="Split side by side (Ctrl+Shift+D)"
-        aria-label="Split side by side"
-        onclick={() => onsplit?.('row')}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M4 5h16v14H4zM12 5v14" /></svg
-        >
-        <span class="nav-label">Split side by side</span>
-      </button>
-      <button
-        type="button"
-        class="nav-item"
-        disabled={!canSplit}
-        title="Split, one above the other (Ctrl+Shift+E)"
-        aria-label="Split one above the other"
-        onclick={() => onsplit?.('col')}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M4 5h16v14H4zM4 12h16" /></svg
-        >
-        <span class="nav-label">Split above and below</span>
-      </button>
-      <button
-        type="button"
-        class="nav-item"
-        aria-expanded={legend}
-        aria-label="Keyboard shortcuts"
-        title="Keyboard shortcuts"
-        onclick={() => ontogglelegend?.()}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M7 14h10" /></svg
-        >
-        <span class="nav-label">Keyboard shortcuts</span>
-      </button>
     </div>
   </nav>
 </div>

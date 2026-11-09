@@ -63,7 +63,6 @@ it('renders each group as a labelled group and marks only the open view', () => 
       authority: pendingAuthority,
       lifecycle: pendingLifecycle,
       f8: null,
-      version: '0.2.0',
     },
   });
   flushSync();

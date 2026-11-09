@@ -387,6 +387,7 @@
   let terminal = $state<TerminalView>();
   let canSplit = $state(false);
   let legend = $state(false);
+  let launchOpen = $state(false);
   function observeWorkspace(state: WorkspaceState) {
     runtime = summarizeRuntime(state);
     canSplit = !!state.active;
@@ -398,8 +399,14 @@
   <TopBar
     title={current?.label ?? ''}
     subtitle={current?.subtitle ?? ''}
-    rail={sidebar.rail}
-    ontogglerail={toggleRail}
+    {version}
+    tools={activeView === 'console'}
+    {canSplit}
+    onsplit={(dir) => terminal?.split(dir)}
+    {legend}
+    ontogglelegend={() => (legend = !legend)}
+    {launchOpen}
+    onlaunch={() => void terminal?.toggleLaunches()}
   />
   <Sidebar
     active={activeView}
@@ -413,11 +420,7 @@
     {authority}
     {lifecycle}
     f8={f8.gate === 'active' && f8.link ? linkText(f8.link) : null}
-    {version}
-    canSplit={activeView === 'console' && canSplit}
-    onsplit={(dir) => terminal?.split(dir)}
-    legend={legend && activeView === 'console'}
-    ontogglelegend={() => (legend = !legend)}
+    ontogglerail={toggleRail}
   />
   <main id="main-content" class="content" tabindex="-1">
     {#if notice}
@@ -428,6 +431,7 @@
       <TerminalView
         bind:this={terminal}
         bind:legend
+        bind:launchesOpen={launchOpen}
         visible={activeView === 'console'}
         onworkspace={observeWorkspace}
         onagents={() => go('workspace')}

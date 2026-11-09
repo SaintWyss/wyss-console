@@ -32,6 +32,7 @@
     onagents,
     visible = true,
     legend = $bindable(false),
+    launchesOpen = $bindable(false),
   }: {
     onworkspace?: (state: WorkspaceState) => void;
     /** Opens the place where an agent is started. */
@@ -40,6 +41,8 @@
     visible?: boolean;
     /** The shortcuts list. The button that shows it lives in the sidebar. */
     legend?: boolean;
+    /** The Launch menu is open. The button that opens it lives in the top bar. */
+    launchesOpen?: boolean;
   } = $props();
   let workspace = $state<WorkspaceState>({
     sessions: [],
@@ -51,7 +54,6 @@
   let area = $state<HTMLDivElement>();
   let searchFor = $state<ConsoleSessionId>();
   /** The launch panel (ADR 0059): the owner's launch files, read when it opens. */
-  let launchesOpen = $state(false);
   let launches = $state<LaunchList | null>(null);
   let launchProfiles = $state<Profile[]>([]);
   let launchBusy = $state<string | null>(null);
@@ -59,7 +61,6 @@
   let launchError = $state<string | null>(null);
   let launchOrder = $state<string[]>(loadOrder());
   let reordering = $state(false);
-  let menu = $state<HTMLDivElement>();
   const ordered = $derived(
     Array.isArray(launches?.launches)
       ? applyOrder(launches.launches, launchOrder)
@@ -78,13 +79,18 @@
     reordering = false;
   }
   function onWindowClick(event: MouseEvent) {
-    if (launchesOpen && menu && !menu.contains(event.target as Node))
+    if (
+      launchesOpen &&
+      !(event.target as Element | null)?.closest(
+        '.launch-panel, .launch-trigger',
+      )
+    )
       closeMenu();
   }
   function onWindowKey(event: KeyboardEvent) {
     if (launchesOpen && event.key === 'Escape') {
       closeMenu();
-      menu?.querySelector<HTMLElement>('.launch-trigger')?.focus();
+      document.querySelector<HTMLElement>('.launch-trigger')?.focus();
     }
   }
   /** Used by the sidebar's tools. */
@@ -103,7 +109,8 @@
       ? error.message
       : 'The launch could not be opened.';
   }
-  async function toggleLaunches() {
+  /** Opens or closes the Launch menu; the top bar's button calls it. */
+  export async function toggleLaunches() {
     launchesOpen = !launchesOpen;
     if (!launchesOpen) return;
     launchError = null;
@@ -332,126 +339,114 @@
         </div>
       {/each}
     </div>
-    <div class="launch-menu" bind:this={menu}>
-      <button
-        class="new-terminal launch-trigger"
-        aria-expanded={launchesOpen}
-        aria-haspopup="true"
-        aria-controls="launch-panel"
-        title="Launches from your files in ~/.config/wyss-console/launch"
-        onclick={() => void toggleLaunches()}>Launch ▾</button
-      >
-      {#if launchesOpen}
-        <div id="launch-panel" class="launch-panel" aria-label="Launches">
-          <ul class="launch-list">
-            <li>
-              <button
-                class="launch-item"
-                disabled={workspace.creating}
-                onclick={() => {
-                  closeMenu();
-                  void manager?.create();
-                }}
-              >
-                <span class="launch-name">New terminal</span>
-              </button>
-            </li>
-            {#if onagents}
-              <li>
+  </div>
+  {#if launchesOpen}
+    <div id="launch-panel" class="launch-panel" aria-label="Launches">
+      <ul class="launch-list">
+        <li>
+          <button
+            class="launch-item"
+            disabled={workspace.creating}
+            onclick={() => {
+              closeMenu();
+              void manager?.create();
+            }}
+          >
+            <span class="launch-name">New terminal</span>
+          </button>
+        </li>
+        {#if onagents}
+          <li>
+            <button
+              class="launch-item"
+              onclick={() => {
+                closeMenu();
+                onagents?.();
+              }}
+            >
+              <span class="launch-name">Start agent…</span>
+            </button>
+          </li>
+        {/if}
+      </ul>
+      {#if launches === null && !launchError}
+        <p class="launch-empty">Reading launches…</p>
+      {:else if launches}
+        {#if ordered.length === 0}
+          <p class="launch-empty">
+            No launches. Add a file in <code>{launches.folder}</code>.
+          </p>
+        {:else}
+          <ul class="launch-list launch-files">
+            {#each ordered as launch, index (launch.id)}
+              {@const full = isFullAccess(launch, launchProfiles)}
+              <li class="launch-row">
                 <button
                   class="launch-item"
-                  onclick={() => {
-                    closeMenu();
-                    onagents?.();
-                  }}
+                  disabled={launchBusy !== null || reordering}
+                  aria-busy={launchBusy === launch.id}
+                  title={launch.kind === 'commands'
+                    ? launch.commands.join(' ; ')
+                    : `${launch.agent === 'claude_code' ? 'Claude Code' : 'Codex'}${launch.profile ? ` · ${launch.profile}` : ''} in ${launch.directory}`}
+                  onclick={() => void open(launch.id)}
                 >
-                  <span class="launch-name">Start agent…</span>
-                </button>
-              </li>
-            {/if}
-          </ul>
-          {#if launches === null && !launchError}
-            <p class="launch-empty">Reading launches…</p>
-          {:else if launches}
-            {#if ordered.length === 0}
-              <p class="launch-empty">
-                No launches. Add a file in <code>{launches.folder}</code>.
-              </p>
-            {:else}
-              <ul class="launch-list launch-files">
-                {#each ordered as launch, index (launch.id)}
-                  {@const full = isFullAccess(launch, launchProfiles)}
-                  <li class="launch-row">
-                    <button
-                      class="launch-item"
-                      disabled={launchBusy !== null || reordering}
-                      aria-busy={launchBusy === launch.id}
-                      title={launch.kind === 'commands'
-                        ? launch.commands.join(' ; ')
-                        : `${launch.agent === 'claude_code' ? 'Claude Code' : 'Codex'}${launch.profile ? ` · ${launch.profile}` : ''} in ${launch.directory}`}
-                      onclick={() => void open(launch.id)}
+                  <span class="launch-name"
+                    >{launchBusy === launch.id
+                      ? `${launch.name}…`
+                      : launch.name}</span
+                  >
+                  <span class="launch-kind"
+                    >{launch.kind === 'commands'
+                      ? 'Terminal'
+                      : launch.agent === 'claude_code'
+                        ? 'Claude Code'
+                        : 'Codex'}</span
+                  >
+                  {#if full}
+                    <span class="badge" data-tone="warn" title={BYPASS_WARNING}
+                      >Full access</span
                     >
-                      <span class="launch-name"
-                        >{launchBusy === launch.id
-                          ? `${launch.name}…`
-                          : launch.name}</span
-                      >
-                      <span class="launch-kind"
-                        >{launch.kind === 'commands'
-                          ? 'Terminal'
-                          : launch.agent === 'claude_code'
-                            ? 'Claude Code'
-                            : 'Codex'}</span
-                      >
-                      {#if full}
-                        <span
-                          class="badge"
-                          data-tone="warn"
-                          title={BYPASS_WARNING}>Full access</span
-                        >
-                      {/if}
-                    </button>
-                    {#if reordering}
-                      <button
-                        class="launch-move"
-                        aria-label={`Move ${launch.name} up`}
-                        disabled={index === 0}
-                        onclick={() => shift(launch.id, -1)}>▲</button
-                      >
-                      <button
-                        class="launch-move"
-                        aria-label={`Move ${launch.name} down`}
-                        disabled={index === ordered.length - 1}
-                        onclick={() => shift(launch.id, 1)}>▼</button
-                      >
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            {#each launches.refused as bad (bad.id)}
-              <p class="launch-refused">
-                <code>{bad.id}.toml</code>: {bad.error}
-              </p>
+                  {/if}
+                </button>
+                {#if reordering}
+                  <button
+                    class="launch-move"
+                    aria-label={`Move ${launch.name} up`}
+                    disabled={index === 0}
+                    onclick={() => shift(launch.id, -1)}>▲</button
+                  >
+                  <button
+                    class="launch-move"
+                    aria-label={`Move ${launch.name} down`}
+                    disabled={index === ordered.length - 1}
+                    onclick={() => shift(launch.id, 1)}>▼</button
+                  >
+                {/if}
+              </li>
             {/each}
-            <div class="launch-foot">
-              <span class="launch-folder"
-                >Files in <code>{launches.folder}</code></span
-              >
-              {#if ordered.length > 1}
-                <button
-                  class="launch-order"
-                  aria-pressed={reordering}
-                  onclick={() => (reordering = !reordering)}
-                  >{reordering ? 'Done' : 'Order'}</button
-                >
-              {/if}
-            </div>
+          </ul>
+        {/if}
+        {#each launches.refused as bad (bad.id)}
+          <p class="launch-refused">
+            <code>{bad.id}.toml</code>: {bad.error}
+          </p>
+        {/each}
+        <div class="launch-foot">
+          <span class="launch-folder"
+            >Files in <code>{launches.folder}</code></span
+          >
+          {#if ordered.length > 1}
+            <button
+              class="launch-order"
+              aria-pressed={reordering}
+              onclick={() => (reordering = !reordering)}
+              >{reordering ? 'Done' : 'Order'}</button
+            >
           {/if}
         </div>
       {/if}
     </div>
-  </div>
+  {/if}
   {#if legend}
     <dl class="terminal-legend" aria-label="Keyboard shortcuts">
       {#each KEY_LEGEND as [chord_, what] (chord_)}

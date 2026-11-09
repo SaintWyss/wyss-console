@@ -4,24 +4,24 @@
 :root {
   color-scheme: dark;
   /* Surfaces, darkest to lightest: window chrome, view canvas, panels, controls. */
-  --chrome: #000000;
-  --bg: #000000;
-  --surface: #0d0d0d;
-  --surface-subtle: #0d0d0d;
-  --surface-control: #141414;
-  --surface-raised: #141414;
-  --surface-hover: #1c1c1c;
-  --surface-strong: #262626;
-  --surface-overlay: #0d0d0d;
-  --surface-inverse: #000000;
-  --line: #2a2a2a;
-  --line-strong: #7a7a7a;
+  --chrome: #1c1c1c;
+  --bg: #121212;
+  --surface: #1c1c1c;
+  --surface-subtle: #1c1c1c;
+  --surface-control: #242424;
+  --surface-raised: #242424;
+  --surface-hover: #2c2c2c;
+  --surface-strong: #353535;
+  --surface-overlay: #242424;
+  --surface-inverse: #1c1c1c;
+  --line: #383838;
+  --line-strong: #8a8a8a;
   --text: #ffffff;
   --muted: #c4c4c4;
   --faint: #a3a3a3;
   --accent: #00c2ff;
   --accent-strong: #66dcff;
-  --accent-soft: #062a35;
+  --accent-soft: #2e2e2e;
   --accent-line: #00a3d6;
   --focus: #00c2ff;
   --ok: #5ee39a;
@@ -35,7 +35,7 @@
   --error-text: #ffd2d2;
   --error-soft: #341719;
   --error-line: #b9525a;
-  --terminal-bg: #000000;
+  --terminal-bg: #121212;
   --terminal-fg: #ffffff;
   --text-on-accent: #000000;
   --shadow-pop: 0 10px 28px rgb(0 0 0 / 0.5), 0 0 0 1px var(--line);
@@ -314,13 +314,13 @@ code,
 }
 
 .top-bar {
-  grid-column: 1 / -1;
+  grid-column: 2;
   grid-row: 1;
   display: flex;
   align-items: center;
   gap: 16px;
   min-width: 0;
-  padding-right: 14px;
+  padding: 0 14px 0 6px;
   background: var(--chrome);
   border-bottom: 1px solid var(--line);
 }
@@ -332,7 +332,7 @@ code,
   position: relative;
   z-index: 5;
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1 / -1;
   min-height: 0;
 }
 .sidebar {
@@ -358,20 +358,24 @@ code,
   width: 232px;
   box-shadow: var(--shadow-pop);
 }
+.sidebar-head {
+  flex: 0 0 var(--topbar-h);
+  display: flex;
+  align-items: center;
+  margin: -8px -8px 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+/* The list scrolls without drawing a scrollbar. */
 .nav-scroll {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
-.sidebar-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
+.nav-scroll::-webkit-scrollbar {
+  display: none;
 }
 .sidebar-toggle {
   width: 36px;
@@ -522,11 +526,45 @@ code,
 }
 
 /* Top bar */
-.brand {
-  flex: 0 0 var(--sidebar-w);
-  display: grid;
-  place-items: center;
-  min-width: 0;
+.top-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.top-action {
+  min-height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+.top-action.icon {
+  width: 28px;
+  padding: 0;
+}
+.top-action svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.top-action:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+.top-action[aria-expanded='true'] {
+  background: var(--surface-strong);
+  border-color: var(--line-strong);
 }
 .context {
   flex: 1;
@@ -534,7 +572,6 @@ code,
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding-left: 6px;
 }
 .context-title {
   font-size: var(--text-md);
@@ -572,9 +609,6 @@ code,
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sidebar .version {
-  padding: 2px 9px 0;
-}
 .sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .pill {
   justify-content: center;
   padding: 0;
@@ -589,9 +623,6 @@ code,
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-.sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible)) .version {
-  display: none;
 }
 .pill {
   display: inline-flex;
@@ -701,11 +732,6 @@ code,
 }
 .stripe[data-tone='error'] {
   --stripe: var(--error);
-}
-.version {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--muted);
 }
 
 /* Sidebar: the views in four groups, in the order they always had. */
@@ -864,6 +890,7 @@ code,
 
 /* Console: tabs, actions and terminal surface */
 .terminal-feature {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1175,16 +1202,11 @@ code,
 }
 /* Launches (ADR 0059): a menu under the Launch button. New terminal and Start agent come first,
    then the owner's launch files in the order the owner gave them. */
-.launch-menu {
-  position: relative;
-  flex-shrink: 0;
-  margin-left: auto;
-}
 .launch-panel {
   position: absolute;
   z-index: 20;
-  top: calc(100% + 6px);
-  right: 0;
+  top: 6px;
+  right: 8px;
   width: 320px;
   max-height: min(70vh, 520px);
   overflow-y: auto;

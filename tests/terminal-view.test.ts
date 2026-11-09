@@ -145,7 +145,7 @@ it('keeps AppInfo IPC in the minimal application header', async () => {
   component = mount(App, { target: document.body });
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
-  expect(document.querySelector('.sidebar')?.textContent).toContain('1B-test');
+  expect(document.querySelector('header')?.textContent).toContain('1B-test');
   expect(commands.filter((c) => c === 'get_app_info')).toHaveLength(1);
 });
 
@@ -423,9 +423,10 @@ const newTerminal = () => {
       b.textContent?.includes('New terminal'),
     ) as HTMLButtonElement | undefined;
   if (!find()) {
-    flushSync(() =>
-      document.querySelector<HTMLButtonElement>('.launch-trigger')!.click(),
-    );
+    const exported = component as unknown as {
+      toggleLaunches(): Promise<void>;
+    };
+    flushSync(() => void exported.toggleLaunches());
   }
   return find()!;
 };

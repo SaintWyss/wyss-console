@@ -17,7 +17,6 @@ const base = {
   runtime: { label: 'Running', tone: 'ok' as const },
   authority: pendingAuthority,
   lifecycle: pendingLifecycle,
-  version: '0.2.0',
 };
 
 const authorityPill = () => document.querySelector('.pill.authority');

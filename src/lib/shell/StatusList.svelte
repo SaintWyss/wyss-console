@@ -8,7 +8,6 @@
     authority,
     lifecycle,
     f8,
-    version,
   }: {
     /** The local human terminal. It never depends on the authority. */
     runtime: RuntimeSummary;
@@ -17,7 +16,6 @@
     lifecycle: LifecycleObservation;
     /** The protocol-2 link, when this desktop is started against it. It replaces the pill. */
     f8: { label: string; tone: RuntimeTone; note: string | null } | null;
-    version: string;
   } = $props();
   const agent = $derived(summarizeAgent(authority));
   const link = $derived(summarizeLink(authority, lifecycle));
@@ -66,5 +64,4 @@
       {#if link.note}<span class="pill-note">{link.note}</span>{/if}
     </span>
   {/if}
-  {#if version}<span class="version">v{version}</span>{/if}
 </div>
