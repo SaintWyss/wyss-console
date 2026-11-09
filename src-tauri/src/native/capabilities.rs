@@ -1,5 +1,5 @@
-//! Versioned evidence for Native profile override syntax. This is deliberately an exact-build
-//! registry: syntax evidence for one build does not qualify a newer or older build, and never
+//! Versioned evidence for Native profile override syntax. Builds with a record keep it; any other
+//! observed build of an agent that has override syntax uses that agent's newest record. It never
 //! claims account entitlement, provider resolution, session reload, or effective use.
 use super::catalogue::AgentId;
 use serde::Serialize;
@@ -156,8 +156,12 @@ const UNKNOWN: Evidence = Evidence {
     limitation: "this exact CLI build has no M2 profile-override evidence",
 };
 
-/// Returns evidence only for an exact, reviewed CLI version line. In particular, a provider
-/// update does not inherit a previous build's result.
+/// Returns the recorded evidence for the exact CLI version line when there is one. Any other
+/// observed build of Claude Code, Codex or OpenCode uses the newest record of its agent: the
+/// owner asked that a provider update never block a profile. A launch is still bound to the
+/// version observed immediately before it (see `NativeService::start`), so a CLI that changes
+/// between the preview and the start is refused whatever its evidence. Without an observed
+/// version nothing can be bound, so there is no evidence.
 pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
     match (agent, version) {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE.qualified_version.unwrap() => CLAUDE,
@@ -165,6 +169,9 @@ pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE_319.qualified_version.unwrap() => CLAUDE_319,
         (AgentId::Codex, Some(v)) if v == CODEX.qualified_version.unwrap() => CODEX,
         (AgentId::Opencode, Some(v)) if v == OPENCODE.qualified_version.unwrap() => OPENCODE,
+        (AgentId::ClaudeCode, Some(_)) => CLAUDE_319,
+        (AgentId::Codex, Some(_)) => CODEX,
+        (AgentId::Opencode, Some(_)) => OPENCODE,
         (AgentId::Hermes, _) => HERMES_PROFILE_UNVERIFIED,
         _ => UNKNOWN,
     }
@@ -288,8 +295,8 @@ mod tests {
             AgentId::ClaudeCode,
             Some("2.1.314 (Claude Code)")
         ));
-        // The record does not lend profile syntax evidence to the same build.
-        assert!(!permits_profile_overrides(
+        // Profile syntax no longer depends on the build; Arsenal exclusion still does (above).
+        assert!(permits_profile_overrides(
             AgentId::ClaudeCode,
             Some("2.1.314 (Claude Code)")
         ));
@@ -391,7 +398,7 @@ mod tests {
         ] {
             assert_eq!(
                 evidence(AgentId::ClaudeCode, Some(neighbour)).status,
-                Status::Unverified,
+                Status::SyntaxVerified,
                 "{neighbour}"
             );
         }
@@ -405,7 +412,7 @@ mod tests {
         assert!(opencode.operations.contains(&"model via --model"));
         assert_eq!(
             evidence(AgentId::Opencode, Some("1.19.5")).status,
-            Status::Unverified
+            Status::SyntaxVerified
         );
 
         let hermes = evidence(AgentId::Hermes, None);
@@ -415,30 +422,41 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_changed_versions_do_not_inherit_evidence() {
+    fn a_missing_version_has_no_evidence_and_a_changed_one_uses_its_agents_record() {
+        assert_eq!(
+            evidence(AgentId::ClaudeCode, None).status,
+            Status::Unverified
+        );
+        assert!(!permits_profile_overrides(AgentId::ClaudeCode, None));
         for (agent, version) in [
-            (AgentId::ClaudeCode, None),
-            (AgentId::ClaudeCode, Some("2.1.310 (Claude Code)")),
-            (AgentId::Codex, Some("codex-cli 0.160.0")),
-            (AgentId::Codex, Some("codex-cli 0.159.0-dev")),
+            (AgentId::ClaudeCode, "2.1.321 (Claude Code)"),
+            (AgentId::Codex, "codex-cli 0.160.0"),
+            (AgentId::Codex, "codex-cli 0.159.0-dev"),
+            (AgentId::Opencode, "9.99.0"),
         ] {
-            assert_eq!(evidence(agent, version).status, Status::Unverified);
-            assert!(!permits_profile_overrides(agent, version));
+            assert_eq!(
+                evidence(agent, Some(version)).status,
+                Status::SyntaxVerified
+            );
+            assert!(permits_profile_overrides(agent, Some(version)));
         }
+        // Hermes has no override syntax whatever its version.
+        assert!(!permits_profile_overrides(AgentId::Hermes, Some("1.0.0")));
     }
 
     #[test]
-    fn unverified_builds_keep_as_configured_launch_and_refuse_profile_overrides() {
+    fn a_build_without_a_record_launches_with_or_without_profile_overrides() {
         assert!(allows_start_with_profile(
             AgentId::ClaudeCode,
             Some("2.1.310 (Claude Code)"),
             false
         ));
-        assert!(!allows_start_with_profile(
+        assert!(allows_start_with_profile(
             AgentId::ClaudeCode,
             Some("2.1.310 (Claude Code)"),
             true
         ));
+        assert!(!allows_start_with_profile(AgentId::ClaudeCode, None, true));
         assert!(allows_start_with_profile(
             AgentId::ClaudeCode,
             Some("2.1.309 (Claude Code)"),
