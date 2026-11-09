@@ -6,7 +6,6 @@
   import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
   import type { Binding } from '../../contracts/arsenal';
-  import { hostIsRemote } from '../../desktop/terminal-client';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
   import type { NativeController, NativeState } from './controller';
@@ -61,6 +60,7 @@
   let arsenalNote = $state<string | null>(null);
   // Skills stay folded; they open by themselves only when the choice blocks Start.
   let skillsOpen = $state(false);
+  let evidenceOpen = $state(false);
   const skillsSummary = $derived(
     arsenalChoice === null
       ? 'None — all installed skills'
@@ -214,12 +214,9 @@
     const timer = setInterval(() => (now = Date.now()), 5000);
     return () => clearInterval(timer);
   });
-  // Whether a host process holds the sessions (and so keeps them when the window closes).
-  let held = $state(false);
   onMount(() => {
     controller.start0();
     void readBindings();
-    void hostIsRemote().then((remote) => (held = remote));
   });
 
   async function chooseFolder() {
@@ -284,15 +281,6 @@
   hidden={!visible}
   inert={!visible}
 >
-  <p class="native-note">
-    Start Claude Code, Codex, OpenCode or Hermes in a terminal of this window.
-    They run as <strong>Native</strong> sessions: the provider's own tools,
-    configuration and privileges remain active; the Console does not mediate,
-    contain or approve their effects.
-    {#if held}They keep running when this window closes: a host process holds
-      them, and they end when it stops or you log out.{:else}Here they end when
-      the window closes: no host process could be started.{/if}
-  </p>
   {#if chosen?.agent_id === 'hermes'}
     <p class="sessions-status failed" role="note">
       Hermes Native is a full-account provider session. Its approval prompts and
@@ -365,14 +353,15 @@
         {/key}
       {/if}
       <section class="native-card native-launch" aria-label="Start an agent">
-        <h3>Start an agent</h3>
+        <h3 class="visually-hidden">Start an agent</h3>
 
-        <section class="launch-step" aria-labelledby="step-agent">
-          <header>
-            <h4 id="step-agent">1 · Agent</h4>
-            <p class="event-meta">The program that runs in the new terminal.</p>
-          </header>
-          <div class="native-agents" role="radiogroup" aria-label="Agent">
+        <div class="launch-block">
+          <h4 id="step-agent">Agent</h4>
+          <div
+            class="native-agents"
+            role="radiogroup"
+            aria-labelledby="step-agent"
+          >
             {#each entries as entry (entry.agent_id)}
               <label
                 class="native-agent"
@@ -395,157 +384,124 @@
               </label>
             {/each}
           </div>
-          {#if chosen?.installed}
-            <div class="native-row launch-agent-tools">
-              {#if chosen.agent_id === 'claude_code' || chosen.agent_id === 'codex'}
-                <button
-                  type="button"
-                  class="action"
-                  title={`Runs “${updateCommand(chosen.agent_id)}” in a new terminal`}
-                  onclick={() => updateAgent(chosen.agent_id)}
-                  >Update {AGENT_LABEL[chosen.agent_id]}</button
+        </div>
+
+        <div class="launch-grid">
+          <div class="launch-block">
+            <h4 id="step-folder">Folder</h4>
+            <div class="native-field">
+              <label class="visually-hidden" for="native-project"
+                >Project folder</label
+              >
+              <div class="native-row">
+                <select id="native-project" bind:value={project}>
+                  {#each projects as p (p.path)}
+                    <option value={p.path}
+                      >{p.home ? `Home · ${p.path}` : p.path}</option
+                    >
+                  {/each}
+                </select>
+                <button type="button" class="action" onclick={chooseFolder}
+                  >Choose…</button
                 >
-              {/if}
-              <details class="native-capability-details">
-                <summary>Capability evidence and limits</summary>
-                {#if chosen.profile_capability.status === 'syntax_verified'}
-                  <p>Checked {chosen.profile_capability.checked_on}.</p>
-                  <ul>
-                    {#each chosen.profile_capability.operations as operation (operation)}
-                      <li>{operation}</li>
-                    {/each}
-                  </ul>
-                  <p>
-                    Interface: {chosen.profile_capability.interface}. Format:
-                    {chosen.profile_capability.format}. Scope:
-                    {chosen.profile_capability.scope}.
-                  </p>
-                  <p>Reload: {chosen.profile_capability.reload_semantics}.</p>
-                  <p>Source: {chosen.profile_capability.source}.</p>
-                  <p>Limit: {chosen.profile_capability.limitation}.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="launch-block">
+            <h4 id="step-permissions">Permissions</h4>
+            {#if profile && !previewCurrent}
+              <p class="native-warning" role="status">
+                {#if previewFailedFor === previewContext}
+                  Could not verify this profile preview. Start stays disabled
+                  until a fresh preview succeeds.
+                {:else if previewPendingFor === previewContext}
+                  Refreshing the profile preview…
                 {:else}
-                  <p>{chosen.profile_capability.limitation}</p>
+                  The selected profile changed. Checking a fresh preview before
+                  Start.
                 {/if}
-              </details>
-            </div>
-          {/if}
-        </section>
-
-        <section class="launch-step" aria-labelledby="step-folder">
-          <header>
-            <h4 id="step-folder">2 · Folder</h4>
-            <p class="event-meta">
-              Where the agent starts and which files it can work on.
-            </p>
-          </header>
-          <div class="native-field">
-            <label class="visually-hidden" for="native-project"
-              >Project folder</label
-            >
-            <div class="native-row">
-              <select id="native-project" bind:value={project}>
-                {#each projects as p (p.path)}
-                  <option value={p.path}
-                    >{p.home ? `Home · ${p.path}` : p.path}</option
-                  >
-                {/each}
-              </select>
-              <button type="button" class="action" onclick={chooseFolder}
-                >Choose folder…</button
-              >
-            </div>
-          </div>
-        </section>
-
-        <section class="launch-step" aria-labelledby="step-permissions">
-          <header>
-            <h4 id="step-permissions">3 · Permissions</h4>
-            <p class="event-meta">
-              A saved set of permissions and hooks. “No profile” uses your own
-              configuration unchanged.
-            </p>
-          </header>
-          {#if profile && !previewCurrent}
-            <p class="native-warning" role="status">
+              </p>
               {#if previewFailedFor === previewContext}
-                Could not verify this profile preview. Start stays disabled
-                until a fresh preview succeeds.
-              {:else if previewPendingFor === previewContext}
-                Refreshing the profile preview…
-              {:else}
-                The selected profile changed. Checking a fresh preview before
-                Start.
-              {/if}
-            </p>
-            {#if previewFailedFor === previewContext}
-              <button
-                type="button"
-                class="action"
-                disabled={native.starting}
-                onclick={retryPreview}>Retry preview</button
-              >
-            {/if}
-          {/if}
-          <div class="native-field">
-            <label class="visually-hidden" for="native-profile">Profile</label>
-            <div class="native-row">
-              <select id="native-profile" bind:value={profile}>
-                <option value={null}>No profile — as configured</option>
-                {#each profiles as p (p.id)}
-                  <option value={p.id}
-                    >{p.body.name}{p.template ? ' (template)' : ''}</option
-                  >
-                {/each}
-              </select>
-              {#if project && known && (known.default_profile ?? null) !== profile}
                 <button
                   type="button"
                   class="action"
-                  onclick={() =>
-                    project && controller.setProjectDefault(project, profile)}
-                  >Use for this project</button
+                  disabled={native.starting}
+                  onclick={retryPreview}>Retry preview</button
                 >
               {/if}
-            </div>
-            {#if preview && previewFor === previewContext}
-              <ul class="native-preview" aria-label="What the profile does">
-                {#each preview.applied as line (line)}<li>{line}</li>{/each}
-                {#each preview.with_cost as line (line)}<li class="cost">
-                    {line}
-                  </li>{/each}
-                {#each preview.not_applicable as line (line)}<li
-                    class="refused"
-                  >
-                    {line}
-                  </li>{/each}
-                {#each preview.warnings as line (line)}<li class="evidence">
-                    {line}
-                  </li>{/each}
-              </ul>
-              {#if !preview.can_start}
-                <p class="native-warning">
-                  This profile cannot be applied to {agent
-                    ? AGENT_LABEL[agent]
-                    : 'this agent'}, so it will not start.
-                </p>
-              {/if}
             {/if}
+            <div class="native-field">
+              <label class="visually-hidden" for="native-profile">Profile</label
+              >
+              <div class="native-row">
+                <select id="native-profile" bind:value={profile}>
+                  <option value={null}>No profile — as configured</option>
+                  {#each profiles as p (p.id)}
+                    <option value={p.id}
+                      >{p.body.name}{p.template ? ' (template)' : ''}</option
+                    >
+                  {/each}
+                </select>
+                {#if project && known && (known.default_profile ?? null) !== profile}
+                  <button
+                    type="button"
+                    class="action"
+                    onclick={() =>
+                      project && controller.setProjectDefault(project, profile)}
+                    >Use for this project</button
+                  >
+                {/if}
+              </div>
+              {#if preview && previewFor === previewContext}
+                <ul class="native-preview" aria-label="What the profile does">
+                  {#each preview.applied as line (line)}<li>{line}</li>{/each}
+                  {#each preview.with_cost as line (line)}<li class="cost">
+                      {line}
+                    </li>{/each}
+                  {#each preview.not_applicable as line (line)}<li
+                      class="refused"
+                    >
+                      {line}
+                    </li>{/each}
+                  {#each preview.warnings as line (line)}<li class="evidence">
+                      {line}
+                    </li>{/each}
+                </ul>
+                {#if !preview.can_start}
+                  <p class="native-warning">
+                    This profile cannot be applied to {agent
+                      ? AGENT_LABEL[agent]
+                      : 'this agent'}, so it will not start.
+                  </p>
+                {/if}
+              {/if}
+            </div>
           </div>
-        </section>
 
-        <details
-          class="launch-step launch-skills"
-          bind:open={skillsOpen}
-          aria-labelledby="step-skills"
-        >
+          {#if agent === 'claude_code' || agent === 'codex'}
+            <div class="launch-block">
+              <h4 id="step-delegation">Delegation</h4>
+              <label class="native-check">
+                <input type="checkbox" bind:checked={delegate} />
+                Let it hand tasks to Claude Code and Codex through Wyss (2 agents
+                at a time, 20 minutes each, writes only in the workspace).
+              </label>
+            </div>
+          {/if}
+        </div>
+
+        <details class="launch-skills" bind:open={skillsOpen}>
           <summary>
-            <span id="step-skills" class="launch-step-title">4 · Skills</span>
-            <span class="event-meta">{skillsSummary}</span>
+            <h4 id="step-skills">Skills</h4>
+            <span class="launch-skills-state">{skillsSummary}</span>
+            <span class="launch-change"
+              >{skillsOpen ? 'Close' : 'Change'}
+              <svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M6 9l6 6 6-6" /></svg
+              ></span
+            >
           </summary>
-          <p class="event-meta">
-            Which of your installed skills the terminal loads. “None” loads all
-            of them.
-          </p>
           <ArsenalTerminalPanel
             {agent}
             {project}
@@ -563,48 +519,73 @@
           <p class="event-meta" role="status">{arsenalNote}</p>
         {/if}
 
-        {#if agent === 'claude_code' || agent === 'codex'}
-          <section class="launch-step" aria-labelledby="step-delegation">
-            <header>
-              <h4 id="step-delegation">5 · Delegation</h4>
-            </header>
-            <label class="native-check">
-              <input type="checkbox" bind:checked={delegate} />
-              Let it hand tasks to Claude Code and Codex through Wyss (default limits:
-              2 agents at a time, 20 minutes each, writes only in the workspace).
-            </label>
-          </section>
+        {#if evidenceOpen && chosen?.installed}
+          <div class="native-capability-details">
+            {#if chosen.profile_capability.status === 'syntax_verified'}
+              <p>Checked {chosen.profile_capability.checked_on}.</p>
+              <ul>
+                {#each chosen.profile_capability.operations as operation (operation)}
+                  <li>{operation}</li>
+                {/each}
+              </ul>
+              <p>
+                Interface: {chosen.profile_capability.interface}. Format:
+                {chosen.profile_capability.format}. Scope:
+                {chosen.profile_capability.scope}.
+              </p>
+              <p>Reload: {chosen.profile_capability.reload_semantics}.</p>
+              <p>Source: {chosen.profile_capability.source}.</p>
+              <p>Limit: {chosen.profile_capability.limitation}.</p>
+            {:else}
+              <p>{chosen.profile_capability.limitation}</p>
+            {/if}
+          </div>
         {/if}
 
-        <div class="native-plan-actions launch-start">
+        <div class="launch-footer">
+          <div class="launch-footer-tools">
+            {#if chosen?.installed}
+              {#if chosen.agent_id === 'claude_code' || chosen.agent_id === 'codex'}
+                <button
+                  type="button"
+                  class="action"
+                  title={`Runs “${updateCommand(chosen.agent_id)}” in a new terminal`}
+                  onclick={() => updateAgent(chosen.agent_id)}
+                  >Update {AGENT_LABEL[chosen.agent_id]}</button
+                >
+              {/if}
+              <button
+                type="button"
+                class="action"
+                aria-expanded={evidenceOpen}
+                onclick={() => (evidenceOpen = !evidenceOpen)}
+                >Capability evidence and limits</button
+              >
+            {/if}
+          </div>
           <button
             type="button"
             class="action primary"
             disabled={!canStart}
+            title={launcher.shell?.through_shell
+              ? `Starts through your shell (${launcher.shell.family}): same environment as typing the command yourself.`
+              : 'Starts directly with the Console’s own environment.'}
             onclick={launch}
           >
             {native.starting
               ? 'Starting…'
               : `Start ${agent ? AGENT_LABEL[agent] : 'agent'}`}
           </button>
-          {#if launcher.shell}
-            <p class="event-meta">
-              {#if launcher.shell.through_shell}
-                Starts through your shell ({launcher.shell.family}): same
-                environment as typing the command yourself.
-              {:else}
-                Your shell has no start recipe here, so the agent starts
-                directly with the Console’s own environment.
-              {/if}
-            </p>
-          {/if}
         </div>
       </section>
 
       <div class="native-side">
         <section class="native-sessions" aria-label="Native sessions">
           <h3 class="native-heading">
-            Sessions <span class="pill compact" data-tone="idle"
+            Sessions <span
+              class="pill compact"
+              data-tone="idle"
+              title="Native sessions: the provider's own tools, configuration and privileges stay active. The Console does not mediate, contain or approve their effects."
               ><span class="dot" aria-hidden="true"></span>Native plane</span
             >
             {#if toRestore.length > 0}

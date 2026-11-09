@@ -130,6 +130,7 @@ describe('the launcher', () => {
     expect(text(skills.querySelector('summary'))).toContain(
       'None — all installed skills',
     );
+    expect(text(skills.querySelector('summary'))).toContain('Change');
   });
 
   it('offers the agents of the catalogue, says which are installed and what the shell does', async () => {
@@ -140,11 +141,14 @@ describe('the launcher', () => {
       'Codex Not installed',
     ]);
     expect(agents[1]!.querySelector('input')!.disabled).toBe(true);
-    expect(text(document.querySelector('.native-launch'))).toContain(
+    expect(button('Start Claude Code').title).toContain(
       'Starts through your shell (fish)',
     );
-    expect(text(document.querySelector('.native-note'))).toContain(
-      'does not mediate',
+    expect(
+      document.querySelector('.native-sessions .pill')!.getAttribute('title'),
+    ).toContain('does not mediate');
+    expect(text(document.querySelector('.native-feature'))).not.toContain(
+      'Start Claude Code, Codex, OpenCode or Hermes',
     );
   });
 
@@ -183,6 +187,8 @@ describe('the launcher', () => {
       }),
     );
     expect(document.querySelector('.native-capability')).toBeNull();
+    button('Capability evidence and limits').click();
+    await settle();
     const details = text(document.querySelector('.native-capability-details'));
     expect(details).toContain('reasoning effort via --effort');
     expect(details).toContain('Reload: Not tested.');
