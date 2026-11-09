@@ -32,8 +32,8 @@
     <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
       <defs>
         <linearGradient id="wyss-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#5fd4f5" />
-          <stop offset="1" stop-color="#a78bfa" />
+          <stop offset="0" style="stop-color: var(--text)" />
+          <stop offset="1" style="stop-color: var(--faint)" />
         </linearGradient>
       </defs>
       <path

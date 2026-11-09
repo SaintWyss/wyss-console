@@ -61,6 +61,13 @@ token de texto ≥ 4,5:1 sobre **todas** las superficies opacas de su tema; `--l
 | Claro          | `#ebebeb` | `#f5f5f5` | `#ffffff` | `#111111` | `#00678a` |
 | Alto contraste | `#000000` | `#000000` | `#000000` | `#ffffff` | `#00ffff` |
 
+## Barra lateral y controles
+
+- La barra lateral se colapsa a una columna de iconos (52 px) con el botón de su cabecera; mientras el puntero o el foco están encima se abre sobre la vista (232 px) con una transición de 180 ms, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`) y la app arranca abierta si no se puede leer.
+- Cada grupo (Terminals, Agents & activity, Capabilities, System) se pliega a su título con un clic; plegado se abre al pasar el puntero, y queda abierto si contiene la vista activa o si se vuelve a hacer clic.
+- Botones de la barra de pestañas: 28 px, borde `--line`, sin acento. `.action.primary` usa superficie neutra, no el acento.
+- Pestañas de terminal: texto con subrayado de 2 px en la activa, sobre una línea de base; no son botones con borde.
+
 ## Copywriting
 
 Inglés, como el resto de la app; sentence case; verbos que dicen lo que pasa. Los textos describen el estado real, la compatibilidad y la acción disponible.

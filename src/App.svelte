@@ -56,6 +56,8 @@
     type LifecycleObservation,
   } from './lib/shell/lifecycle';
   import Sidebar from './lib/shell/Sidebar.svelte';
+  import { loadSidebar, saveSidebar } from './lib/shell/sidebar-prefs';
+  import type { NavGroup } from './lib/shell/nav';
   import TopBar from './lib/shell/TopBar.svelte';
   import {
     followAuthority,
@@ -71,6 +73,20 @@
 
   let version = $state('');
   let activeView = $state<ViewId>('console');
+  let sidebar = $state(loadSidebar());
+  function toggleRail() {
+    sidebar = { ...sidebar, rail: !sidebar.rail };
+    saveSidebar(sidebar);
+  }
+  function toggleGroup(group: NavGroup) {
+    sidebar = {
+      ...sidebar,
+      closed: sidebar.closed.includes(group)
+        ? sidebar.closed.filter((entry) => entry !== group)
+        : [...sidebar.closed, group],
+    };
+    saveSidebar(sidebar);
+  }
   // The terminal workspace is mounted on the first visit to the Console, and stays mounted after
   // it. The provisional 'console' above does not count: the preference decides where the window opens.
   let consoleOpened = $state(false);
@@ -373,7 +389,7 @@
   }
 </script>
 
-<div class="shell">
+<div class="shell" data-rail={sidebar.rail}>
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <TopBar
     title={current?.label ?? ''}
@@ -389,6 +405,10 @@
     onselect={go}
     waiting={approvals.pending?.length ?? 0}
     {items}
+    rail={sidebar.rail}
+    closed={sidebar.closed}
+    ontogglerail={toggleRail}
+    ontogglegroup={toggleGroup}
   />
   <main id="main-content" class="content" tabindex="-1">
     {#if notice}
