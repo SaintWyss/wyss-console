@@ -63,10 +63,14 @@ token de texto ≥ 4,5:1 sobre **todas** las superficies opacas de su tema; `--l
 
 ## Barra lateral y controles
 
-- La barra lateral se colapsa a una columna de iconos (52 px) con el botón de su cabecera; mientras el puntero o el foco están encima se abre sobre la vista (232 px) con una transición de 180 ms, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`) y la app arranca abierta si no se puede leer.
-- Cada grupo (Terminals, Agents & activity, Capabilities, System) se pliega a su título con un clic; plegado se abre al pasar el puntero, y queda abierto si contiene la vista activa o si se vuelve a hacer clic.
-- Botones de la barra de pestañas: 28 px, borde `--line`, sin acento. `.action.primary` usa superficie neutra, no el acento.
+- El botón de panel de la barra superior, a la izquierda del título, colapsa la barra lateral a una columna de iconos (52 px). Colapsada, se abre sobre la vista (232 px, 180 ms) mientras el puntero o el foco de teclado están encima, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`); si no se puede leer, arranca abierta.
+- Arriba de la barra lateral van los estados (Terminal, Codex, Authority, versión), uno por línea. Colapsada queda solo el punto; el texto sigue leyéndose para lectores de pantalla.
+- Cada grupo (Terminals, Agents & activity, Capabilities, System) se pliega con un clic en su título. Un grupo plegado se abre al pasar el puntero y queda abierto al elegir uno de sus ítems o al volver a hacer clic en el título. Plegar con clic cierra el grupo en el acto, aunque el puntero siga encima, hasta que el puntero salga.
+- Abajo de la barra lateral: dividir en dos columnas, dividir en dos filas y atajos de teclado.
+- Barra de pestañas: solo el botón **Launch ▾**, a la derecha. Su menú (vertical) lista **New terminal**, **Start agent…** y los lanzamientos de `~/.config/wyss-console/launch`, en el orden que el dueño les dio con **Order** (flechas ▲▼; se guarda en `localStorage`, `wyss-console.launch-order`).
+- Botones: 28 px, borde `--line`, sin acento. `.action.primary` usa superficie neutra.
 - Pestañas de terminal: texto con subrayado de 2 px en la activa, sobre una línea de base; no son botones con borde.
+- El título de la vista y su subtítulo van en la misma línea.
 
 ## Copywriting
 

@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import TopBar from '../src/lib/shell/TopBar.svelte';
+import TopBar from '../src/lib/shell/StatusList.svelte';
 import { pendingAuthority } from '../src/lib/shell/authority';
 import { pendingLifecycle } from '../src/lib/shell/lifecycle';
 import { linkText } from '../src/lib/features/f8/present';
@@ -14,8 +14,6 @@ afterEach(() => {
 });
 
 const base = {
-  title: 'Arsenal',
-  subtitle: '',
   runtime: { label: 'Running', tone: 'ok' as const },
   authority: pendingAuthority,
   lifecycle: pendingLifecycle,

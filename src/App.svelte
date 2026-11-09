@@ -384,8 +384,12 @@
     );
   }
 
+  let terminal = $state<TerminalView>();
+  let canSplit = $state(false);
+  let legend = $state(false);
   function observeWorkspace(state: WorkspaceState) {
     runtime = summarizeRuntime(state);
+    canSplit = !!state.active;
   }
 </script>
 
@@ -394,11 +398,8 @@
   <TopBar
     title={current?.label ?? ''}
     subtitle={current?.subtitle ?? ''}
-    {runtime}
-    {authority}
-    {lifecycle}
-    f8={f8.gate === 'active' && f8.link ? linkText(f8.link) : null}
-    {version}
+    rail={sidebar.rail}
+    ontogglerail={toggleRail}
   />
   <Sidebar
     active={activeView}
@@ -407,8 +408,16 @@
     {items}
     rail={sidebar.rail}
     closed={sidebar.closed}
-    ontogglerail={toggleRail}
     ontogglegroup={toggleGroup}
+    {runtime}
+    {authority}
+    {lifecycle}
+    f8={f8.gate === 'active' && f8.link ? linkText(f8.link) : null}
+    {version}
+    canSplit={activeView === 'console' && canSplit}
+    onsplit={(dir) => terminal?.split(dir)}
+    legend={legend && activeView === 'console'}
+    ontogglelegend={() => (legend = !legend)}
   />
   <main id="main-content" class="content" tabindex="-1">
     {#if notice}
@@ -417,6 +426,8 @@
     <!-- Mounted on the first visit to the Console, then kept: leaving the Console never ends a terminal. -->
     {#if consoleOpened}
       <TerminalView
+        bind:this={terminal}
+        bind:legend
         visible={activeView === 'console'}
         onworkspace={observeWorkspace}
         onagents={() => go('workspace')}

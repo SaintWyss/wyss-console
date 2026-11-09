@@ -145,7 +145,7 @@ it('keeps AppInfo IPC in the minimal application header', async () => {
   component = mount(App, { target: document.body });
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
-  expect(document.querySelector('header')?.textContent).toContain('1B-test');
+  expect(document.querySelector('.sidebar')?.textContent).toContain('1B-test');
   expect(commands.filter((c) => c === 'get_app_info')).toHaveLength(1);
 });
 
@@ -416,10 +416,19 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   expect(config.app.security.csp).not.toContain('unsafe-eval');
 });
 
-const newTerminal = () =>
-  Array.from(document.querySelectorAll('button')).find(
-    (b) => b.textContent === 'New Terminal',
-  )!;
+/** New terminal is the first entry of the Launch menu: opens the menu when it is closed. */
+const newTerminal = () => {
+  const find = () =>
+    Array.from(document.querySelectorAll('.launch-panel button')).find((b) =>
+      b.textContent?.includes('New terminal'),
+    ) as HTMLButtonElement | undefined;
+  if (!find()) {
+    flushSync(() =>
+      document.querySelector<HTMLButtonElement>('.launch-trigger')!.click(),
+    );
+  }
+  return find()!;
+};
 it('creates distinct tabs, ARIA panels and selects the new terminal', async () => {
   component = mount(TerminalView, { target: document.body });
   await flush();

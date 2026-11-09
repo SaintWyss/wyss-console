@@ -177,7 +177,9 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
   const nav = Array.from(
-    document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
+    document.querySelectorAll<HTMLButtonElement>(
+      '.sidebar .nav-scroll .nav-item',
+    ),
   );
   // The fifteen views include Pipelines, Arsenal and Providers, which only read.
   expect(nav).toHaveLength(15);

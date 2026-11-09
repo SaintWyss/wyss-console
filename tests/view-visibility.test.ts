@@ -69,7 +69,7 @@ it('takes no space for a view that is hidden, whatever display its class sets', 
   }
 });
 
-it('never removes a status from the top bar, at any width', () => {
+it('never removes a status from the sidebar, collapsed or not', () => {
   // A window of 800 px or less once dropped the Codex status, and one of 560 px or less
   // the authority's: which of the three is broken could not be seen. A status may be drawn
   // smaller (its state's word, then its name, are clipped); none may be taken away.
@@ -87,7 +87,13 @@ it('never removes a status from the top bar, at any width', () => {
     .filter((selector) => statuses.includes(selector));
   expect(removed).toEqual([]);
   // What is clipped is clipped for the eye only: it keeps a box, so it is still read out.
-  const narrow = ['.top-bar .pill-value', '.top-bar .pill-key', '.brand h1'];
+  const rail =
+    ".sidebar[data-rail='true']:not(:hover):not(:has(:focus-visible))";
+  const narrow = [
+    `${rail} .pill-value`,
+    `${rail} .pill-key`,
+    `${rail} .pill-note`,
+  ];
   const about = rules.filter((rule) =>
     rule.selectors.some((selector) => narrow.includes(selector)),
   );

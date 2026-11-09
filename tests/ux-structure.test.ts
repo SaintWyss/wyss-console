@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import Sidebar from '../src/lib/shell/Sidebar.svelte';
+import { pendingAuthority } from '../src/lib/shell/authority';
+import { pendingLifecycle } from '../src/lib/shell/lifecycle';
 import {
   NAV_ITEMS,
   navItems,
@@ -57,10 +59,15 @@ it('renders each group as a labelled group and marks only the open view', () => 
       active: 'arsenal' as ViewId,
       onselect: () => undefined,
       waiting: 2,
+      runtime: { label: 'Running', tone: 'ok' as const },
+      authority: pendingAuthority,
+      lifecycle: pendingLifecycle,
+      f8: null,
+      version: '0.2.0',
     },
   });
   flushSync();
-  const groups = [...document.querySelectorAll('[role="group"]')];
+  const groups = [...document.querySelectorAll('.nav-group[role="group"]')];
   expect(groups).toHaveLength(4);
   for (const group of groups) {
     const label = document.getElementById(
