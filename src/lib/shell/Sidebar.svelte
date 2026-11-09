@@ -58,20 +58,6 @@
 
 <div class="sidebar-slot">
   <nav class="sidebar" aria-label="Primary" data-rail={rail}>
-    <div class="sidebar-head">
-      <button
-        type="button"
-        class="sidebar-toggle"
-        aria-label={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
-        aria-pressed={rail}
-        title={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
-        onclick={() => ontogglerail?.()}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M4 5h16v14H4zM9 5v14" /></svg
-        >
-      </button>
-    </div>
     <StatusList {runtime} {authority} {lifecycle} {f8} />
     <div class="nav-scroll">
       {#each sections as section (section.group)}
@@ -125,6 +111,22 @@
           </div>
         </div>
       {/each}
+    </div>
+    <div class="sidebar-foot">
+      <button
+        type="button"
+        class="nav-item"
+        aria-pressed={rail}
+        title={rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}
+        onclick={() => ontogglerail?.()}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M4 5h16v14H4zM9 5v14" /></svg
+        >
+        <span class="nav-label"
+          >{rail ? 'Pin the sidebar open' : 'Collapse the sidebar'}</span
+        >
+      </button>
     </div>
   </nav>
 </div>

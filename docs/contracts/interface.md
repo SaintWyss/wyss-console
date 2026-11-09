@@ -64,12 +64,13 @@ token de texto ≥ 4,5:1 sobre **todas** las superficies opacas de su tema; `--l
 ## Barra lateral y controles
 
 - Jerarquía de superficies del tema oscuro, medida en Warp: barra lateral y barra superior `#1c1c1c`, contenido y terminal `#121212`, paneles `#1c1c1c`, controles `#242424`. La barra lateral ocupa todo el alto de la ventana; la barra superior solo la columna del contenido.
-- El botón de panel, arriba a la izquierda de la barra lateral, la colapsa a una columna de iconos (52 px). Colapsada, se abre sobre la vista (232 px, 180 ms) mientras el puntero o el foco de teclado están encima, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`); si no se puede leer, arranca abierta. La lista de vistas se desplaza sin dibujar barra de desplazamiento.
+- El botón de abajo de la barra lateral la colapsa a una columna de iconos (52 px). Colapsada, se abre sobre la vista (232 px, 180 ms) mientras el puntero o el foco de teclado están encima, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`); si no se puede leer, arranca abierta. La lista de vistas se desplaza sin dibujar barra de desplazamiento. La barra lateral no tiene cabecera: empieza con los estados.
 - Arriba de la lista van los estados (Terminal, Codex, Authority), uno por línea; colapsada queda el punto y el texto sigue leyéndose para lectores de pantalla. La versión no se dibuja: la leen los lectores de pantalla.
 - Cada grupo (Terminals, Agents & activity, Capabilities, System) se pliega con un clic en su título. Un grupo plegado se abre al pasar el puntero y queda abierto al elegir uno de sus ítems o al volver a hacer clic en el título. Plegar con clic cierra el grupo en el acto, aunque el puntero siga encima, hasta que el puntero salga.
 - Barra superior, en la Console: título y subtítulo en una línea, y a la derecha, centrados, cuatro botones de 28 px: dividir en dos columnas, dividir en dos filas, atajos de teclado y **Launch ▾**. Su menú (vertical) lista **New terminal**, **Start agent…** y los lanzamientos de `~/.config/wyss-console/launch`, en el orden que el dueño les dio con **Order** (flechas ▲▼; se guarda en `localStorage`, `wyss-console.launch-order`).
 - Botones: 28 px, borde `--line`, sin acento. `.action.primary` usa superficie neutra.
-- Pestañas de terminal: texto con subrayado de 2 px en la activa, sobre una línea de base; no son botones con borde.
+- Pestañas de terminal: texto con subrayado de 2 px en la activa; no son botones con borde ni hay línea de base. Sin pestañas no se dibuja la franja.
+- Estado vacío de la Console: el mensaje centrado en toda el área de contenido, sin recuadro.
 
 ## Copywriting
 

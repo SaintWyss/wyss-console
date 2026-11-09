@@ -340,7 +340,7 @@ code,
   inset: 0 auto 0 0;
   box-sizing: border-box;
   width: 232px;
-  padding: 8px 8px 8px;
+  padding: 12px 8px 8px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -358,14 +358,6 @@ code,
   width: 232px;
   box-shadow: var(--shadow-pop);
 }
-.sidebar-head {
-  flex: 0 0 var(--topbar-h);
-  display: flex;
-  align-items: center;
-  margin: -8px -8px 8px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--line);
-}
 /* The list scrolls without drawing a scrollbar. */
 .nav-scroll {
   flex: 1;
@@ -377,28 +369,12 @@ code,
 .nav-scroll::-webkit-scrollbar {
   display: none;
 }
-.sidebar-toggle {
-  width: 36px;
-  min-height: 32px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-}
-.sidebar-toggle:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-.sidebar-toggle svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.sidebar-foot {
+  flex-shrink: 0;
+  overflow: hidden;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
 .visually-hidden {
   position: absolute;
@@ -917,7 +893,10 @@ code,
   display: flex;
   align-items: center;
   gap: 6px;
-  border-bottom: 1px solid var(--line);
+}
+/* No tabs, no strip: nothing to draw above the empty state. */
+.workspace-toolbar:not(:has(.terminal-tab)) {
+  display: none;
 }
 .terminal-tabs {
   flex: 1;
@@ -1190,15 +1169,15 @@ code,
   background-color: var(--terminal-bg);
 }
 .terminal-empty {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   padding: 24px;
   color: var(--muted);
   font-size: var(--text-md);
   text-align: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-lg);
+  pointer-events: none;
 }
 /* Launches (ADR 0059): a menu under the Launch button. New terminal and Start agent come first,
    then the owner's launch files in the order the owner gave them. */
