@@ -486,6 +486,7 @@ export class NativeController {
               m9_native_status: launcher.m9_native_status,
             };
           this.m9Uncertain = false;
+          if (this.failure?.code === 'readiness_busy') this.failure = null;
           this.emit();
           return true;
         },
