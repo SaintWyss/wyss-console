@@ -717,6 +717,19 @@ impl Store {
         Ok(())
     }
 
+    /// Creates, for each provider a preset holds, a selection named like the preset, unless the
+    /// library already has a selection with that provider and name. The id comes from the preset and
+    /// the provider, so two computers holding the same preset agree on it. Returns how many were
+    /// created. Existing selections and presets are never changed.
+    pub fn migrate_presets(&mut self) -> Result<usize, Error> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let created = create_preset_selections(&tx)?;
+        tx.commit()?;
+        Ok(created)
+    }
+
     /// Every file of one revision, each checked against the digest it was stored under.
     pub fn revision_content(&self, id: &str, number: i64) -> Result<Vec<(String, Vec<u8>)>, Error> {
         let files = self.files(id, number)?;
@@ -1351,6 +1364,77 @@ fn check_composites(keys: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
+/// Creates the selections a preset of this library implies, one per provider it holds. Returns how
+/// many were created.
+fn create_preset_selections(tx: &Transaction<'_>) -> Result<usize, Error> {
+    let presets = {
+        let mut statement = tx.prepare("SELECT id, name, items FROM preset ORDER BY id")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut taken = {
+        let mut statement = tx.prepare("SELECT provider, name FROM selection")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.map(|row| row.map(|(provider, name)| (provider, name.trim().to_owned())))
+            .collect::<rusqlite::Result<HashSet<_>>>()?
+    };
+    let mut created = 0;
+    for (preset_id, name, items) in presets {
+        // A preset whose items cannot be read is skipped.
+        let Ok(items) = decode_items(&items) else {
+            continue;
+        };
+        let name = name.trim().to_owned();
+        for provider in ["claude_code", "codex"] {
+            let mut kept = Vec::new();
+            for item in &items {
+                let owner: Option<String> = tx
+                    .query_row(
+                        "SELECT provider FROM capability WHERE id = ?1",
+                        [&item.capability],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if owner.as_deref() == Some(provider) {
+                    kept.push(item.clone());
+                }
+            }
+            if kept.is_empty() || taken.contains(&(provider.to_owned(), name.clone())) {
+                continue;
+            }
+            let hash =
+                digest(format!("wyss-arsenal-preset-v1\0{preset_id}\0{provider}").as_bytes());
+            let id = format!(
+                "{}-{}-{}-{}-{}",
+                &hash[0..8],
+                &hash[8..12],
+                &hash[12..16],
+                &hash[16..20],
+                &hash[20..32]
+            );
+            let kept = encode_items(&kept)?;
+            let inserted = tx.execute(
+                "INSERT OR IGNORE INTO selection (id, name, provider, items, created_at, updated_at, \
+                 composites) VALUES (?1, ?2, ?3, ?4, ?5, ?5, '[]')",
+                params![id, name, provider, kept, now()],
+            )?;
+            if inserted > 0 {
+                created += 1;
+                taken.insert((provider.to_owned(), name.clone()));
+            }
+        }
+    }
+    Ok(created)
+}
+
 fn encode_items(items: &[Item]) -> Result<String, Error> {
     serde_json::to_string(items).map_err(|_| Error::Invalid)
 }
@@ -1769,5 +1853,137 @@ mod tests {
             };
             assert_eq!(store.save_selection(&input), Err(Error::Invalid));
         }
+    }
+
+    /// A version 2 library: one Claude Code and one Codex capability, and the preset Kit holding
+    /// both plus an item whose capability no longer exists.
+    fn version_2_library(db: Connection) -> Connection {
+        db.execute_batch(SCHEMA).unwrap();
+        db.execute_batch(SCHEMA_V2).unwrap();
+        db.execute_batch("PRAGMA user_version = 2;").unwrap();
+        for (id, provider, source) in [
+            ("c1", "claude_code", "claude_user_skills"),
+            ("c2", "codex", "codex_home_skills"),
+        ] {
+            db.execute(
+                "INSERT INTO capability (id, identity, provider, source, kind, name, \
+                 current_revision, created_at, updated_at) \
+                 VALUES (?1, ?1, ?2, ?3, 'skill', ?1, 1, 1, 1)",
+                params![id, provider, source],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO preset (id, name, description, items, created_at, updated_at) \
+             VALUES ('p1', 'Kit', '', ?1, 5, 5)",
+            [r#"[{"capability":"c1","revision":null},{"capability":"c2","revision":null},{"capability":"gone","revision":null}]"#],
+        )
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn a_version_2_library_turns_each_provider_of_a_preset_into_a_selection() {
+        let mut store =
+            Store::open(version_2_library(Connection::open_in_memory().unwrap())).unwrap();
+        assert_eq!(store.migrate_presets(), Ok(2));
+        let selections = store.selections().unwrap();
+        assert_eq!(selections.len(), 2);
+        for selection in &selections {
+            assert_eq!(selection.name, "Kit");
+            assert!(uuid_ok(&selection.id));
+            assert!(selection.composites.is_empty());
+            assert_eq!(selection.items.len(), 1);
+        }
+        let claude = selections
+            .iter()
+            .find(|selection| selection.provider == "claude_code")
+            .unwrap();
+        assert_eq!(claude.items[0].capability, "c1");
+        let codex = selections
+            .iter()
+            .find(|selection| selection.provider == "codex")
+            .unwrap();
+        assert_eq!(codex.items[0].capability, "c2");
+        let presets = store.presets().unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].name, "Kit");
+        assert_eq!(presets[0].updated_at, 5);
+        assert_eq!(presets[0].items.len(), 3);
+        assert_eq!(presets[0].items[2].capability, "gone");
+    }
+
+    #[test]
+    fn the_preset_migration_never_touches_an_existing_selection() {
+        let db = version_2_library(Connection::open_in_memory().unwrap());
+        db.execute(
+            "INSERT INTO selection (id, name, provider, items, created_at, updated_at) \
+             VALUES ('kept', ' Kit ', 'codex', '[{\"capability\":\"other\",\"revision\":3}]', 7, 7)",
+            [],
+        )
+        .unwrap();
+        let mut store = Store::open(db).unwrap();
+        // The codex provider already has "Kit", so only the claude_code selection is created.
+        assert_eq!(store.migrate_presets(), Ok(1));
+        let selections = store.selections().unwrap();
+        assert_eq!(selections.len(), 2);
+        let kept = selections
+            .iter()
+            .find(|selection| selection.id == "kept")
+            .unwrap();
+        assert_eq!(kept.name, " Kit ");
+        assert_eq!(kept.created_at, 7);
+        assert_eq!(kept.updated_at, 7);
+        assert_eq!(
+            kept.items,
+            vec![Item {
+                capability: "other".into(),
+                revision: Some(3),
+            }]
+        );
+        let created: Vec<_> = selections
+            .iter()
+            .filter(|selection| selection.provider == "claude_code")
+            .collect();
+        assert_eq!(created.len(), 1);
+        assert_ne!(created[0].id, "kept");
+    }
+
+    #[test]
+    fn two_libraries_with_the_same_preset_create_the_same_selection_id() {
+        let ids = |db: Connection| {
+            let mut store = Store::open(version_2_library(db)).unwrap();
+            store.migrate_presets().unwrap();
+            let mut ids: Vec<String> = store
+                .selections()
+                .unwrap()
+                .into_iter()
+                .map(|selection| selection.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        let first = ids(Connection::open_in_memory().unwrap());
+        assert_eq!(first.len(), 2);
+        assert_eq!(first, ids(Connection::open_in_memory().unwrap()));
+    }
+
+    #[test]
+    fn running_the_preset_migration_twice_creates_nothing_more() {
+        let mut store =
+            Store::open(version_2_library(Connection::open_in_memory().unwrap())).unwrap();
+        assert_eq!(store.migrate_presets(), Ok(2));
+        assert_eq!(store.migrate_presets(), Ok(0));
+        assert_eq!(store.selections().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn the_library_has_no_group_table_and_stays_at_version_2() {
+        let store = memory();
+        let version: i64 = store
+            .db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
     }
 }

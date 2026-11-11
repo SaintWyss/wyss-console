@@ -5,6 +5,7 @@
 
 pub mod analysis;
 pub mod commands;
+pub mod groups;
 pub mod store;
 pub mod sync;
 pub mod terminal;
@@ -23,6 +24,8 @@ use store::{Error, Store};
 /// reported by every command, so the window can say so instead of showing an empty library.
 pub struct Arsenal {
     store: Result<Arc<Mutex<Store>>, Error>,
+    /// The library's folder, when the library opened. Holds `groups.json` beside the database.
+    directory: Option<PathBuf>,
     /// The details of the last scan, by identity. Read by `arsenal_candidate`, replaced by each scan.
     details: Arc<Mutex<BTreeMap<String, commands::CandidateDetail>>>,
     /// Synchronization with the owner's other computers, when the library opened and it is not off.
@@ -31,16 +34,78 @@ pub struct Arsenal {
 
 impl Arsenal {
     pub fn start() -> Self {
-        let store = open().map(|store| Arc::new(Mutex::new(store)));
+        let opened = open();
+        let directory = opened.as_ref().ok().map(|(_, directory)| directory.clone());
+        let store = opened.map(|(store, _)| Arc::new(Mutex::new(store)));
+        if let (Ok(store), Some(directory)) = (&store, &directory) {
+            let mut state = groups::load(directory);
+            if !state.presets_migrated {
+                let migrated = store
+                    .lock()
+                    .is_ok_and(|mut guard| guard.migrate_presets().is_ok());
+                // A failure is not reported here: the migration is tried again at the next start.
+                if migrated {
+                    state.presets_migrated = true;
+                    let _ = groups::save(directory, &state);
+                }
+            }
+        }
         let sync = match (&store, sync::Paths::from_env()) {
             (Ok(store), Some(paths)) => Some(sync::start(store.clone(), paths)),
             _ => None,
         };
         Self {
             store,
+            directory,
             details: Arc::new(Mutex::new(BTreeMap::new())),
             sync,
         }
+    }
+
+    /// The owner's group corrections, by identity.
+    // Called by the group commands.
+    #[allow(dead_code)]
+    pub(super) fn groups(&self) -> Result<BTreeMap<String, String>, Error> {
+        let directory = self.directory.as_ref().ok_or(Error::Storage)?;
+        Ok(groups::load(directory).groups)
+    }
+
+    /// Puts a capability of the library in a group. Runs under the store's lock, so two changes
+    /// cannot overwrite each other's file.
+    // Called by the group commands.
+    #[allow(dead_code)]
+    pub(super) fn set_group(&self, identity: &str, group_id: &str) -> Result<(), Error> {
+        if !groups::identity_ok(identity) || !groups::group_ok(group_id) {
+            return Err(Error::Invalid);
+        }
+        let directory = self.directory.clone().ok_or(Error::Storage)?;
+        self.with_store(|store| {
+            if store.current(identity)?.is_none() {
+                return Err(Error::NotFound);
+            }
+            let mut state = groups::load(&directory);
+            if state.groups.len() >= groups::MAX_GROUPS && !state.groups.contains_key(identity) {
+                return Err(Error::Invalid);
+            }
+            state
+                .groups
+                .insert(identity.to_owned(), group_id.to_owned());
+            groups::save(&directory, &state).map_err(|_| Error::Storage)
+        })
+    }
+
+    /// Takes a capability out of its group. Removing a capability with no group changes nothing.
+    // Called by the group commands.
+    #[allow(dead_code)]
+    pub(super) fn clear_group(&self, identity: &str) -> Result<(), Error> {
+        let directory = self.directory.clone().ok_or(Error::Storage)?;
+        self.with_store(|_| {
+            let mut state = groups::load(&directory);
+            if state.groups.remove(identity).is_some() {
+                groups::save(&directory, &state).map_err(|_| Error::Storage)?;
+            }
+            Ok(())
+        })
     }
 
     /// Synchronization's status; `enabled: false` when it does not run here.
@@ -121,8 +186,8 @@ pub fn open_read_only() -> Result<Store, Error> {
 }
 
 /// `wyss-console/arsenal` under `XDG_DATA_HOME` (or `~/.local/share`), in a folder only its owner
-/// can open. The database file itself is created 0600.
-fn open() -> Result<Store, Error> {
+/// can open. The database file itself is created 0600. Returns the store and that folder.
+fn open() -> Result<(Store, PathBuf), Error> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -152,5 +217,5 @@ fn open() -> Result<Store, Error> {
         .mode(0o600)
         .open(&path)
         .map_err(|_| Error::Storage)?;
-    Store::open(Connection::open(path)?)
+    Ok((Store::open(Connection::open(path)?)?, directory))
 }
