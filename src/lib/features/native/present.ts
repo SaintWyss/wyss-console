@@ -104,6 +104,10 @@ export const FAILURE_TEXT: Record<string, string> = {
   unavailable:
     'The Console has no private folder to keep native sessions in, so it cannot start agents.',
   request_invalid: 'The request was not valid.',
+  host_unavailable:
+    'The terminal host is not answering. Nothing was sent; nothing changed.',
+  host_outcome_unknown:
+    'The terminal host did not confirm this request: it may or may not have taken effect, and it was not sent again. Check the sessions listed here before repeating it, so nothing runs twice.',
   host_outdated:
     'The terminal host is older than this window and cannot keep these profile options. Update it before using effort or preview-bound profiles; existing sessions are unchanged.',
   export_failed: 'The file could not be written.',

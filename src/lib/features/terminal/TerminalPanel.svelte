@@ -4,6 +4,7 @@
     TerminalSession,
     TerminalSessionManager,
   } from './session-manager';
+  import { failureWords, inputNoticeWords } from './failure-words';
   import { parserNote } from './parser-status';
   let {
     session,
@@ -104,7 +105,9 @@
           : ''}
       {:else if session.view.state === 'closing'}Closing terminal…
       {:else if session.view.state === 'closed'}Terminal closed
-      {:else}Terminal failed: {session.view.error ?? 'terminal_error'}{/if}
+      {:else}<span title={session.view.error ?? 'terminal_error'}
+          >Terminal failed: {failureWords(session.view.error)}</span
+        >{/if}
       {#if session.view.truncated}
         · Output truncated{/if}
     </p>
@@ -114,6 +117,11 @@
       </p>
     {/if}
   </div>
+  {#if session.view.inputNotice}
+    <p class="terminal-input-notice" role="alert">
+      {inputNoticeWords(session.view.inputNotice)}
+    </p>
+  {/if}
   {#if searching}
     <div class="terminal-search" role="search">
       <input

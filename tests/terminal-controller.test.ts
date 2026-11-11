@@ -202,12 +202,115 @@ describe('real IPC bridge plus terminal lifecycle controller', () => {
     await controller.start();
     render.text('x'.repeat(65537));
     await flush();
+    // The batch is refused whole and said; the terminal is neither failed nor closed for it.
     expect(states.at(-1)).toMatchObject({
-      state: 'failed',
-      error: 'input_limit',
+      state: 'running',
+      inputNotice: 'input_limit',
     });
     expect(count('terminal_write')).toBe(0);
-    expect(count('close_terminal')).toBe(1);
+    expect(count('close_terminal')).toBe(0);
+    // What fits afterwards still goes, and a confirmed write clears the notice.
+    render.text('y');
+    await flush();
+    expect(count('terminal_write')).toBe(1);
+    expect(states.at(-1)?.inputNotice).toBeUndefined();
+  });
+  it('keeps what was waiting when a later batch does not fit', async () => {
+    const first = deferred<number>();
+    let writes = 0;
+    handle = (command, args) =>
+      command === 'terminal_read_output'
+        ? new Promise(() => undefined)
+        : command === 'terminal_write'
+          ? ++writes === 1
+            ? first.promise
+            : (args!.request as { data: number[] }).data.length
+          : info;
+    await controller.start();
+    render.text('a'.repeat(60000));
+    render.text('b'.repeat(6000)); // 66000 with the chunk in flight: refused whole
+    await flush();
+    expect(states.at(-1)?.inputNotice).toBe('input_limit');
+    first.resolve(4096);
+    for (let i = 0; i < 20; i++) await flush();
+    const sent = calls
+      .filter(([c]) => c === 'terminal_write')
+      .flatMap(([, args]) => (args!.request as { data: number[] }).data);
+    expect(sent).toHaveLength(60000);
+    expect(sent.every((byte) => byte === 97)).toBe(true);
+  });
+  it('never resends input whose answer was lost, drops what waited behind it and keeps the terminal', async () => {
+    let writes = 0;
+    handle = (command, args) =>
+      command === 'terminal_read_output'
+        ? new Promise(() => undefined)
+        : command === 'terminal_write'
+          ? ++writes === 1
+            ? Promise.reject({ code: 'host_outcome_unknown', bytes_written: 0 })
+            : (args!.request as { data: number[] }).data.length
+          : info;
+    await controller.start();
+    render.text('x'.repeat(9000));
+    await flush();
+    expect(writes).toBe(1);
+    expect(states.at(-1)).toMatchObject({
+      state: 'running',
+      inputNotice: 'input_outcome_unknown',
+    });
+    expect(count('close_terminal')).toBe(0);
+    // Later typing is new input: it is sent once, and confirms the terminal still takes input.
+    render.text('y');
+    await flush();
+    const later = calls.filter(([c]) => c === 'terminal_write').at(-1)!;
+    expect((later[1]!.request as { data: number[] }).data).toEqual([121]);
+    expect(writes).toBe(2);
+    expect(states.at(-1)?.inputNotice).toBeUndefined();
+  });
+  it('reports a create whose answer was lost as uncertain and does not create again', async () => {
+    await controller.dispose();
+    render = renderer();
+    states = [];
+    calls = [];
+    handle = (command) =>
+      command === 'create_terminal'
+        ? Promise.reject({ code: 'host_outcome_unknown', bytes_written: 0 })
+        : info;
+    controller = new TerminalController(
+      document.createElement('div'),
+      render.value,
+      (state) => states.push(state),
+    );
+    await controller.start();
+    expect(states.at(-1)).toMatchObject({
+      state: 'failed',
+      error: 'host_outcome_unknown',
+    });
+    expect(count('create_terminal')).toBe(1);
+    // There is no id to close: nothing is guessed about a terminal that may exist.
+    expect(count('close_terminal')).toBe(0);
+  });
+  it('does not fail the terminal when a resize is left unconfirmed', async () => {
+    let resizes = 0;
+    handle = (command) =>
+      command === 'terminal_read_output'
+        ? new Promise(() => undefined)
+        : command === 'terminal_resize'
+          ? ++resizes === 1
+            ? Promise.reject({ code: 'host_outcome_unknown', bytes_written: 0 })
+            : { ...info, size: { rows: 30, cols: 100 } }
+          : info;
+    await controller.start();
+    vi.mocked(render.value.fit).mockReturnValue({ rows: 30, cols: 100 });
+    Observer.instances.at(-1)!.callback();
+    await vi.advanceTimersByTimeAsync(60);
+    await flush();
+    expect(resizes).toBe(1);
+    expect(states.at(-1)?.state).toBe('running');
+    // The size is unknown now, so the same size is sent when the pane is next measured.
+    Observer.instances.at(-1)!.callback();
+    await vi.advanceTimersByTimeAsync(60);
+    await flush();
+    expect(resizes).toBe(2);
   });
   it('coalesces observer notifications and skips identical sizes', async () => {
     await controller.start();

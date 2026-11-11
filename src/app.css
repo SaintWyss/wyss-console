@@ -4141,3 +4141,14 @@ li.native-row .native-note {
 .m3-history .mode-option {
   flex: 0 0 auto;
 }
+
+/* A notice about input on a terminal that keeps running (uncertain or refused input). */
+.terminal-input-notice {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--warn-line);
+}

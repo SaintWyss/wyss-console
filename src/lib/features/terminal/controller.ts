@@ -6,6 +6,7 @@ import type {
   TerminalInfo,
   TerminalSize,
 } from '../../contracts/terminal';
+import type { InputNotice } from './failure-words';
 import type { TerminalRenderer } from './renderer';
 
 export type ViewState =
@@ -19,6 +20,11 @@ export interface TerminalViewState {
   parser?: ParserBrief;
   /** How this window came to show a terminal that was already running; absent for a new one. */
   attach?: Attach;
+  /**
+   * Something about input the person has to know while the terminal keeps running. It stays
+   * until input is next confirmed by the host.
+   */
+  inputNotice?: InputNotice;
 }
 const INPUT_CAPACITY = 64 * 1024;
 const WRITE_LIMIT = 4096;
@@ -29,13 +35,20 @@ const LONG_POLL_SEEN_MS = 500;
 const BUSY_RETRIES = 40;
 const BUSY_DELAY_MS = 25;
 
+function codeOf(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : undefined;
+}
 function isBusy(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'busy'
-  );
+  return codeOf(error) === 'busy';
+}
+/**
+ * The request left and no answer came back: the host may have done it. Such a request is
+ * never sent again, here or in the desktop (ENG-02).
+ */
+function isUnknownOutcome(error: unknown): boolean {
+  return codeOf(error) === 'host_outcome_unknown';
 }
 
 /** One local human-terminal owner. No command interpretation or domain authority. */
@@ -67,6 +80,7 @@ export class TerminalController {
   private readonly abort = new AbortController();
   private parser?: ParserBrief;
   private attached?: Attach;
+  private inputNotice?: InputNotice;
 
   constructor(
     private readonly host: HTMLElement,
@@ -123,6 +137,7 @@ export class TerminalController {
         info: this.info,
         parser: this.parser,
         attach: this.attached,
+        inputNotice: this.inputNotice,
         ...extra,
       });
   }
@@ -274,30 +289,44 @@ export class TerminalController {
         this.sentSize = size;
       }
     } catch (error) {
-      if (!this.stopped && this.state === 'running') this.fail(error);
+      if (isUnknownOutcome(error)) {
+        // The program may be at either size. That ends no terminal: the size is simply not
+        // known any more, so the next change of the pane's size is sent whatever it is.
+        this.sentSize = undefined;
+      } else if (!this.stopped && this.state === 'running') this.fail(error);
     } finally {
       this.resizing = false;
     }
   }
   private enqueueText(data: string) {
     if (data.length > INPUT_CAPACITY) {
-      this.fail(new Error('input_limit'));
+      this.refuseInput();
       return;
     }
     this.enqueue(new TextEncoder().encode(data));
   }
   private enqueueBinary(data: string) {
     if (data.length > INPUT_CAPACITY) {
-      this.fail(new Error('input_limit'));
+      this.refuseInput();
       return;
     }
     // xterm onBinary is a binary string, not UTF-8 text (protocol replies/mouse).
     this.enqueue(Uint8Array.from(data, (char) => char.charCodeAt(0) & 255));
   }
+  /**
+   * A batch that does not fit in what a terminal holds (64 KiB with the chunk in flight) is
+   * refused whole, before any of it is queued, and said. The queue never grows past its bound
+   * and nothing of the batch is sent; the terminal and what was already waiting are kept.
+   */
+  private refuseInput() {
+    if (this.stopped || this.state !== 'running') return;
+    this.inputNotice = 'input_limit';
+    this.publish();
+  }
   private enqueue(data: Uint8Array) {
     if (this.stopped || this.state !== 'running' || !data.length) return;
     if (this.inputBytes + data.length > INPUT_CAPACITY) {
-      this.fail(new Error('input_limit'));
+      this.refuseInput();
       return;
     }
     this.inputs.push(data);
@@ -333,9 +362,23 @@ export class TerminalController {
         this.inputBytes -= chunk.length;
         if (data.length === chunk.length) this.inputs.shift();
         else this.inputs[0] = data.subarray(chunk.length);
+        if (this.inputNotice) {
+          // Input is confirmed again: what was uncertain is behind the person now.
+          this.inputNotice = undefined;
+          this.publish();
+        }
       }
     } catch (error) {
-      if (!this.stopped && this.state === 'running') this.fail(error);
+      if (this.stopped || this.state !== 'running') return;
+      if (isUnknownOutcome(error)) {
+        // The chunk may have been typed into the program. Sending it again could type it
+        // twice, and sending what was queued behind it could run it out of order: both are
+        // dropped and said. The terminal itself is not failed or closed for it.
+        this.inputs = [];
+        this.inputBytes = 0;
+        this.inputNotice = 'input_outcome_unknown';
+        this.publish();
+      } else this.fail(error);
     } finally {
       this.writing = false;
     }
@@ -468,8 +511,8 @@ export class TerminalController {
       'limit_reached',
       'operation_timeout',
       'close_timeout',
-      'input_limit',
       'host_unavailable',
+      'host_outcome_unknown',
     ]);
     this.publish({ error: known.has(code) ? code : 'terminal_error' });
     void this.closeOnce().catch(() => undefined);

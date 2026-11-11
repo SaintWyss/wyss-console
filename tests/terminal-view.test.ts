@@ -125,7 +125,9 @@ it('shows terminal-local creation failure without internal details', async () =>
   );
   component = mount(TerminalView, { target: document.body });
   await flush();
-  expect(document.body.textContent).toContain('Terminal failed: spawn_failed');
+  expect(document.body.textContent).toContain(
+    'Terminal failed: The shell could not be started.',
+  );
   expect(document.body.textContent).not.toContain('private chain');
 });
 it('serializes remount retirement, preventing leaked duplicate ownership', async () => {
@@ -156,7 +158,7 @@ it('reports renderer initialization failure without crashing the app', async () 
   component = mount(TerminalView, { target: document.body });
   await flush();
   expect(document.body.textContent).toContain(
-    'Terminal failed: renderer_error',
+    'Terminal failed: The terminal could not be drawn in this window.',
   );
   expect(document.body.textContent).not.toContain('private renderer detail');
   expect(commands).not.toContain('create_terminal');
@@ -174,6 +176,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // filesystem, shell, process, socket, dialog or event permission of the framework.
   expect(capability.permissions).toEqual([
     'allow-get-app-info',
+    'allow-orchestration-call',
     'allow-authority-state',
     'allow-authority-lifecycle',
     'allow-authority-retry',
