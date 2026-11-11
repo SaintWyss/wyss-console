@@ -488,7 +488,7 @@
       {launchError.translatable ? t(launchError.text) : launchError.text}
     </p>{/if}
   {#if launchNote}<p role="status" class="launch-note">
-      {#each launchNote as note, index}{index > 0 ? ' ' : ''}{t(
+      {#each launchNote as note, index (index)}{index > 0 ? ' ' : ''}{t(
           note.text,
           note.values,
         )}{/each}

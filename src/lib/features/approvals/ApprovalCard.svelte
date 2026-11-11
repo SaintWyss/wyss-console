@@ -142,7 +142,7 @@
       role="alert"
     >
       <p>
-        {#each decisionFailureMessage(card.decision.kind, card.decision.failure.code) as sentence, index}{index >
+        {#each decisionFailureMessage(card.decision.kind, card.decision.failure.code) as sentence, index (index)}{index >
           0
             ? ' '
             : ''}{t(sentence.text, sentence.values)}{/each}
