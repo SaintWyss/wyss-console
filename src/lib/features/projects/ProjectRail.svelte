@@ -5,9 +5,12 @@
   let {
     projects,
     controller,
+    oninsight = null,
   }: {
     projects: ProjectsState;
     controller: ProjectsController;
+    /** Opens the details of a project whose folder is available. */
+    oninsight?: ((projectId: string) => void) | null;
   } = $props();
 
   let showArchived = $state(false);
@@ -142,6 +145,15 @@
         >
           {current.archived ? 'Unarchive' : 'Archive'}
         </button>
+        {#if current.root?.availability === 'available' && oninsight}
+          <button
+            type="button"
+            class="action"
+            onclick={() => oninsight?.(current.id)}
+          >
+            Detalles
+          </button>
+        {/if}
         {#if current.root}
           <button
             type="button"
