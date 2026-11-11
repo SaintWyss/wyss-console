@@ -1,3 +1,4 @@
+import { msg } from '../i18n/msg';
 import type {
   AgentActualState,
   AuthorityFault,
@@ -81,28 +82,28 @@ const FAULTS: Record<
   Pick<StatusSummary, 'label' | 'tone' | 'detail'>
 > = {
   absent: {
-    label: 'Offline',
+    label: msg('Offline'),
     tone: 'idle',
     detail:
       'The authority is not running. Local terminals do not depend on it.',
   },
   lost: {
-    label: 'Reconnecting',
+    label: msg('Reconnecting'),
     tone: 'warn',
     detail: 'The authority stopped answering. Reconnecting.',
   },
   incompatible: {
-    label: 'Incompatible',
+    label: msg('Incompatible'),
     tone: 'error',
     detail: 'The authority speaks another protocol or storage version.',
   },
   malformed: {
-    label: 'Rejected',
+    label: msg('Rejected'),
     tone: 'error',
     detail: 'The authority broke the control protocol and was disconnected.',
   },
   unsafe_path: {
-    label: 'Unsafe',
+    label: msg('Unsafe'),
     tone: 'error',
     detail: 'The runtime directory or control socket is not private.',
   },
@@ -120,14 +121,14 @@ export function summarizeAuthority(
   if (observation.state === 'pending')
     return {
       key,
-      label: 'Connecting',
+      label: msg('Connecting'),
       tone: 'pending',
       detail: 'Looking for the Wyss authority.',
     };
   if (observation.state === 'unavailable')
     return {
       key,
-      label: 'Unavailable',
+      label: msg('Unavailable'),
       tone: 'error',
       detail: 'The desktop could not read the authority state.',
     };
@@ -137,7 +138,7 @@ export function summarizeAuthority(
     const sessions = `${a.prepared_sessions} prepared, ${a.closed_sessions} closed`;
     return {
       key,
-      label: 'Connected',
+      label: msg('Connected'),
       tone: 'ok',
       note: plural(a.prepared_sessions, 'session'),
       detail: [
@@ -151,33 +152,33 @@ export function summarizeAuthority(
   if (view.connection === 'synchronizing')
     return {
       key,
-      label: 'Syncing',
+      label: msg('Syncing'),
       tone: 'pending',
       detail: 'Reading the canonical authority state.',
     };
   if (view.connection === 'stopped')
     return {
       key,
-      label: 'Stopped',
+      label: msg('Stopped'),
       tone: 'idle',
       detail: 'The console is closing its authority link.',
     };
   if (view.reason) return { key, ...FAULTS[view.reason] };
   return {
     key,
-    label: 'Connecting',
+    label: msg('Connecting'),
     tone: 'pending',
     detail: 'Looking for the Wyss authority.',
   };
 }
 
 const AGENT: Record<AgentActualState, Pick<StatusSummary, 'label' | 'tone'>> = {
-  ready: { label: 'Ready', tone: 'ok' },
-  starting: { label: 'Starting', tone: 'pending' },
-  initializing: { label: 'Initializing', tone: 'pending' },
-  stopping: { label: 'Stopping', tone: 'pending' },
-  stopped: { label: 'Stopped', tone: 'idle' },
-  failed: { label: 'Failed', tone: 'error' },
+  ready: { label: msg('Ready'), tone: 'ok' },
+  starting: { label: msg('Starting'), tone: 'pending' },
+  initializing: { label: msg('Initializing'), tone: 'pending' },
+  stopping: { label: msg('Stopping'), tone: 'pending' },
+  stopped: { label: msg('Stopped'), tone: 'idle' },
+  failed: { label: msg('Failed'), tone: 'error' },
 };
 
 /** Presentation only: the managed agent runtime, as the authority reports it. */
@@ -191,7 +192,7 @@ export function summarizeAgent(
   if (!agent)
     return {
       key: 'Codex',
-      label: 'Unknown',
+      label: msg('Unknown'),
       tone: 'idle',
       detail: 'Codex status is known only while the authority is connected.',
     };

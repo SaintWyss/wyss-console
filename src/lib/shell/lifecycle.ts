@@ -1,3 +1,4 @@
+import { msg } from '../i18n/msg';
 import type {
   LifecycleDiagnostics,
   LifecycleFailure,
@@ -74,15 +75,15 @@ const PROGRESS: Partial<
   Record<LifecycleView['phase'], Pick<StatusSummary, 'label' | 'detail'>>
 > = {
   installing: {
-    label: 'Installing',
+    label: msg('Installing'),
     detail: 'Installing the Wyss authority for this account.',
   },
   starting: {
-    label: 'Starting',
+    label: msg('Starting'),
     detail: 'Starting the Wyss authority.',
   },
   connecting: {
-    label: 'Starting',
+    label: msg('Starting'),
     detail: 'The Wyss authority is starting. Waiting for it to answer.',
   },
 };
@@ -127,7 +128,7 @@ export function summarizeLink(
   if (view.phase === 'incompatible')
     return {
       key: link.key,
-      label: 'Incompatible',
+      label: msg('Incompatible'),
       tone: 'error',
       detail: 'An incompatible Wyss authority is running.',
     };
@@ -135,7 +136,7 @@ export function summarizeLink(
     const quiet = view.failure === 'stopped' || view.failure === 'not_packaged';
     return {
       key: link.key,
-      label: quiet ? 'Offline' : 'Failed to start',
+      label: quiet ? msg('Offline') : msg('Failed to start'),
       tone: quiet ? 'idle' : 'error',
       detail: FAILURE[view.failure],
     };

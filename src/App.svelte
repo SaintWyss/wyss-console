@@ -56,6 +56,7 @@
     type LifecycleObservation,
   } from './lib/shell/lifecycle';
   import Sidebar from './lib/shell/Sidebar.svelte';
+  import { setLanguage } from './lib/i18n/index.svelte';
   import { loadSidebar, saveSidebar } from './lib/shell/sidebar-prefs';
   import type { NavGroup } from './lib/shell/nav';
   import TopBar from './lib/shell/TopBar.svelte';
@@ -269,6 +270,7 @@
   $effect(() => {
     const theme = settings.preferences.interface.theme;
     document.documentElement.dataset.theme = theme;
+    setLanguage(settings.preferences.interface.language);
     const t = settings.preferences.terminal;
     setAppearance({
       theme,

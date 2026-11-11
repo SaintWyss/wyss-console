@@ -2,6 +2,14 @@
 
 Superficies opacas y estados honestos en toda la ventana principal. Fuente de tokens: `src/app.css`. La aceptación visual, de accesibilidad y del dueño sigue el roadmap.
 
+## Idioma
+
+- Preferencia `interface.language` (`en` | `es`, esquema de preferencias 3; un archivo de esquema 2 se lee como `en` sin reescribirlo). Por defecto `en`: la ventana en inglés es idéntica a la anterior.
+- La frase en inglés es la clave. En un componente se escribe `t('Sentence {place}', { place })`; fuera de un componente (tablas de etiquetas, presentadores) se marca con `msg('Sentence')` y se traduce con `t()` donde se dibuja. Módulo: `src/lib/i18n/`.
+- `src/lib/i18n/es.ts` es el único diccionario. `tests/i18n.test.ts` falla si una frase de `src/` no tiene entrada o si los lugares `{…}` no coinciden.
+- Solo se traduce el texto propio de la ventana. Lo que redacta el escritorio (Rust), la autoridad o un proveedor se muestra como llega.
+- No se traducen nombres de producto ni de proveedor, ni las palabras que el producto usa como nombres (Inference, Local Tools, Native, Managed).
+
 ## Design System
 
 Fuente única: tokens en `src/app.css` (`:root`, `[data-theme='light']`, `[data-theme='high_contrast']`).

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n/index.svelte';
   import type { LifecycleNotice } from './lifecycle';
 
   let {
@@ -18,7 +19,7 @@
 <section
   class="authority-notice"
   data-tone={notice.tone}
-  aria-label="Authority status"
+  aria-label={t('Authority status')}
 >
   <div class="authority-notice-main" role="status">
     <p class="authority-notice-title">{notice.title}</p>
@@ -26,11 +27,11 @@
   </div>
   {#if notice.retry}
     <button type="button" class="action" disabled={retrying} onclick={onretry}
-      >{retrying ? 'Retrying…' : 'Retry'}</button
+      >{retrying ? t('Retrying…') : t('Retry')}</button
     >
   {/if}
   <details class="authority-notice-details">
-    <summary>Details</summary>
+    <summary>{t('Details')}</summary>
     <dl>
       {#each notice.details as detail (detail.term)}
         <dt>{detail.term}</dt>

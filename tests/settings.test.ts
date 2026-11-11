@@ -6,6 +6,7 @@ import {
   DEFAULT_PREFERENCES,
   EVENT_FILTER_PREFERENCES,
   LANDING_PAGES,
+  LANGUAGES,
   STORAGE_STATES,
   TIME_FORMATS,
   parsePreferences,
@@ -33,8 +34,8 @@ function keys(value: unknown, prefix = ''): string[] {
 
 it('has the defaults the desktop has: the product as it was before preferences', () => {
   expect(DEFAULT_PREFERENCES).toEqual({
-    schema_version: 2,
-    interface: { landing_page: 'console', theme: 'dark' },
+    schema_version: 3,
+    interface: { landing_page: 'console', theme: 'dark', language: 'en' },
     terminal: {
       font_size: 16,
       scrollback: 5000,
@@ -56,6 +57,7 @@ it('names no setting that could decide anything', () => {
       'events.time_format',
       'interface',
       'interface.landing_page',
+      'interface.language',
       'interface.theme',
       'schema_version',
       'terminal',
@@ -78,6 +80,7 @@ it('names no setting that could decide anything', () => {
   for (const words of [
     LANDING_PAGES,
     APPEARANCE_THEMES,
+    LANGUAGES,
     CURSOR_STYLES,
     TIME_FORMATS,
     EVENT_FILTER_PREFERENCES,
@@ -106,6 +109,36 @@ it('accepts only the three reviewed appearance themes', () => {
       ),
     ).toThrow('settings: invalid_theme');
   }
+});
+
+it('accepts only the languages the window is written in', () => {
+  for (const language of LANGUAGES)
+    expect(
+      parsePreferences(
+        withPreferences((p) => ({
+          ...p,
+          interface: { ...p.interface, language },
+        })),
+      ).interface.language,
+    ).toBe(language);
+  for (const language of ['system', 'EN', 'es-AR', 'fr', '']) {
+    expect(() =>
+      parsePreferences(
+        withPreferences((p) => ({
+          ...p,
+          interface: { ...p.interface, language } as typeof p.interface,
+        })),
+      ),
+    ).toThrow('settings: invalid_language');
+  }
+  // A schema 2 set, which had no language, is not this version's shape.
+  expect(() =>
+    parsePreferences({
+      ...DEFAULT_PREFERENCES,
+      schema_version: 2,
+      interface: { landing_page: 'console', theme: 'dark' },
+    }),
+  ).toThrow();
 });
 
 it('accepts a set at each bound, and nothing beyond', () => {

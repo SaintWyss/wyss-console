@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n/index.svelte';
   import StatusList from './StatusList.svelte';
   import type { AuthorityObservation } from './authority';
   import type { LifecycleObservation } from './lifecycle';
@@ -57,7 +58,7 @@
 </script>
 
 <div class="sidebar-slot">
-  <nav class="sidebar" aria-label="Primary" data-rail={rail}>
+  <nav class="sidebar" aria-label={t('Primary')} data-rail={rail}>
     <StatusList {runtime} {authority} {lifecycle} {f8} />
     <div class="nav-scroll">
       {#each sections as section (section.group)}
@@ -78,7 +79,7 @@
             aria-expanded={!closed.includes(section.group)}
             onclick={() => toggle(section.group)}
           >
-            <span>{section.label}</span>
+            <span>{t(section.label)}</span>
             <svg viewBox="0 0 24 24" aria-hidden="true"
               ><path d="M6 9l6 6 6-6" /></svg
             >
@@ -91,17 +92,18 @@
                     type="button"
                     class="nav-item"
                     aria-current={active === item.id ? 'page' : undefined}
-                    title={`${item.label} · ${item.subtitle}`}
+                    title={`${t(item.label)} · ${t(item.subtitle)}`}
                     onclick={() => choose(item)}
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true"
                       ><path d={item.icon} /></svg
                     >
-                    <span class="nav-label">{item.label}</span>
+                    <span class="nav-label">{t(item.label)}</span>
                     {#if item.id === 'approvals' && waiting > 0}
                       <span
                         class="nav-tag waiting"
-                        aria-label={`${waiting} waiting`}>{waiting}</span
+                        aria-label={t('{count} waiting', { count: waiting })}
+                        >{waiting}</span
                       >
                     {/if}
                   </button>
@@ -117,14 +119,14 @@
         type="button"
         class="nav-item"
         aria-pressed={rail}
-        title={rail ? 'Expand the sidebar' : 'Collapse the sidebar'}
+        title={rail ? t('Expand the sidebar') : t('Collapse the sidebar')}
         onclick={() => ontogglerail?.()}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"
           ><path d="M4 5h16v14H4zM9 5v14" /></svg
         >
         <span class="nav-label"
-          >{rail ? 'Expand the sidebar' : 'Collapse the sidebar'}</span
+          >{rail ? t('Expand the sidebar') : t('Collapse the sidebar')}</span
         >
       </button>
     </div>

@@ -254,7 +254,7 @@ fn exact_keys(value: &serde_json::Value, expected: &[&str]) -> bool {
 
 /// M1-M7 preferences used schema 1, whose exact shape had no theme field. Add only the
 /// documented dark default and return the current in-memory shape. Reading remains
-/// non-mutating; the next explicit preference update writes schema 2 atomically.
+/// non-mutating; `migrate_v2` then brings the shape to the current schema.
 fn migrate_v1(value: &mut serde_json::Value) -> bool {
     if !exact_keys(
         value,
@@ -281,6 +281,33 @@ fn migrate_v1(value: &mut serde_json::Value) -> bool {
         "theme".to_owned(),
         serde_json::Value::String("dark".to_owned()),
     );
+    root.insert("schema_version".to_owned(), serde_json::Value::from(2));
+    true
+}
+
+/// Schema 2 had no language field. Add only the documented English default: the window read
+/// as it did before. Reading remains non-mutating; the next explicit update writes schema 3.
+fn migrate_v2(value: &mut serde_json::Value) -> bool {
+    if !exact_keys(
+        value,
+        &["schema_version", "interface", "terminal", "events"],
+    ) || !exact_keys(&value["interface"], &["landing_page", "theme"])
+    {
+        return false;
+    }
+    let Some(root) = value.as_object_mut() else {
+        return false;
+    };
+    let Some(interface) = root
+        .get_mut("interface")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return false;
+    };
+    interface.insert(
+        "language".to_owned(),
+        serde_json::Value::String("en".to_owned()),
+    );
     root.insert(
         "schema_version".to_owned(),
         serde_json::Value::from(SCHEMA_VERSION),
@@ -299,6 +326,9 @@ fn parse(bytes: &[u8]) -> Parsed {
         return Parsed::Newer;
     }
     if version == 1 && !migrate_v1(&mut value) {
+        return Parsed::Rejected;
+    }
+    if (1..=2).contains(&version) && !migrate_v2(&mut value) {
         return Parsed::Rejected;
     }
     match serde_json::from_value::<Preferences>(value) {

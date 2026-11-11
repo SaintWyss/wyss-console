@@ -29,7 +29,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['**/*.svelte'],
+    files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: {
       parserOptions: { parser: ts.parser, svelteConfig },
     },

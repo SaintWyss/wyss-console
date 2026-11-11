@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// The version of the file a preference set is stored in. A file with a larger one was
 /// written by a newer Wyss Console and is not interpreted.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 pub const FONT_SIZE: std::ops::RangeInclusive<u8> = 10..=24;
 pub const SCROLLBACK: std::ops::RangeInclusive<u32> = 500..=50_000;
@@ -50,6 +50,16 @@ pub enum AppearanceTheme {
     HighContrast,
 }
 
+/// The language the window's own text is written in. A closed word: it selects one of the
+/// dictionaries the window ships with and cannot name a file, a region or a provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    #[default]
+    En,
+    Es,
+}
+
 /// The filter the Events view starts with. It narrows what is shown of what was read;
 /// it never changes what the authority records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +79,8 @@ pub struct Interface {
     pub landing_page: LandingPage,
     /// Theme selected for the Console window and terminal renderer.
     pub theme: AppearanceTheme,
+    /// Language of the window's own text. Text a provider or the desktop wrote is not translated.
+    pub language: Language,
 }
 
 /// How the human terminal looks. What it runs, where and with what is not here: human
@@ -112,6 +124,7 @@ impl Default for Preferences {
             interface: Interface {
                 landing_page: LandingPage::Console,
                 theme: AppearanceTheme::Dark,
+                language: Language::En,
             },
             terminal: Terminal {
                 font_size: 16,

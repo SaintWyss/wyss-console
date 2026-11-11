@@ -13,34 +13,35 @@ import {
   type AuthorityObservation,
 } from '../../shell/authority';
 import type { LifecycleObservation } from '../../shell/lifecycle';
+import { msg } from '../../i18n/msg';
 import type { RuntimeTone } from '../../shell/runtime';
 
 /** Presentation only: nothing here is read back as a preference or as state. */
 
 export const LANDING_LABEL: Record<LandingPage, string> = {
-  console: 'Console',
-  sessions: 'Sessions',
-  agents: 'Agents',
-  approvals: 'Approvals',
-  events: 'Events',
+  console: msg('Console'),
+  sessions: msg('Sessions'),
+  agents: msg('Agents'),
+  approvals: msg('Approvals'),
+  events: msg('Events'),
 };
 export const CURSOR_LABEL: Record<CursorStyle, string> = {
-  block: 'Block',
-  bar: 'Bar',
-  underline: 'Underline',
+  block: msg('Block'),
+  bar: msg('Bar'),
+  underline: msg('Underline'),
 };
 export const TIME_LABEL: Record<TimeFormat, string> = {
-  system: 'Follow the system',
-  h12: '12-hour',
-  h24: '24-hour',
+  system: msg('Follow the system'),
+  h12: msg('12-hour'),
+  h24: msg('24-hour'),
 };
 export const FILTER_PREFERENCE_LABEL: Record<EventFilterPreference, string> = {
-  all: 'All events',
-  sessions: 'Sessions',
-  runtime: 'Runtime',
-  turns: 'Turns',
-  approvals: 'Approvals',
-  security: 'Security',
+  all: msg('All events'),
+  sessions: msg('Sessions'),
+  runtime: msg('Runtime'),
+  turns: msg('Turns'),
+  approvals: msg('Approvals'),
+  security: msg('Security'),
 };
 
 /** Sizes offered. The bounds are the desktop's; these are only the steps shown. */
@@ -69,38 +70,50 @@ export const STORAGE_NOTICE: Record<StorageState, SettingsNotice | null> = {
   ready: null,
   recovered: {
     tone: 'warn',
-    title: 'Your saved preferences could not be read',
-    text: 'They were set aside and the defaults are in use. Change a preference to save a new set, or reset to start clean.',
+    title: msg('Your saved preferences could not be read'),
+    text: msg(
+      'They were set aside and the defaults are in use. Change a preference to save a new set, or reset to start clean.',
+    ),
   },
   newer: {
     tone: 'warn',
-    title: 'Saved by a newer version of Wyss Console',
-    text: 'These preferences were left as they are and the defaults are in use. They cannot be changed from this version until they are reset.',
+    title: msg('Saved by a newer version of Wyss Console'),
+    text: msg(
+      'These preferences were left as they are and the defaults are in use. They cannot be changed from this version until they are reset.',
+    ),
   },
   unsafe: {
     tone: 'warn',
-    title: 'Your saved preferences were not trusted',
-    text: 'The file is not private to you, so it was not read and the defaults are in use. Changing a preference replaces it.',
+    title: msg('Your saved preferences were not trusted'),
+    text: msg(
+      'The file is not private to you, so it was not read and the defaults are in use. Changing a preference replaces it.',
+    ),
   },
   unavailable: {
     tone: 'error',
-    title: 'Preferences cannot be saved here',
-    text: 'The place they are kept in is not safely yours, so the defaults are in use and changes are not kept.',
+    title: msg('Preferences cannot be saved here'),
+    text: msg(
+      'The place they are kept in is not safely yours, so the defaults are in use and changes are not kept.',
+    ),
   },
 };
 
 export const FAILURE_TEXT: Record<SettingsFailureCode, string> = {
-  invalid: 'That value is not allowed.',
-  read_only:
+  invalid: msg('That value is not allowed.'),
+  read_only: msg(
     'These preferences were saved by a newer version. Reset them to change them from this version.',
-  not_saved: 'The preference could not be saved. Nothing was changed.',
-  busy: 'Wyss Console is busy. Try again in a moment.',
-  internal: 'The preference could not be saved. Nothing was changed.',
+  ),
+  not_saved: msg('The preference could not be saved. Nothing was changed.'),
+  busy: msg('Wyss Console is busy. Try again in a moment.'),
+  internal: msg('The preference could not be saved. Nothing was changed.'),
 };
 
 export interface Fact {
+  /** English sentences, translated where they are drawn. */
   term: string;
   value: string;
+  /** What fills the `{name}` places of `value`. */
+  values?: Record<string, string | number>;
   tone?: RuntimeTone;
 }
 
@@ -119,62 +132,68 @@ export function authorityFacts(
   const view = lifecycle.state === 'observed' ? lifecycle.view : null;
   const facts: Fact[] = [
     {
-      term: 'Authority',
+      term: msg('Authority'),
       value: connected
-        ? 'Connected'
+        ? msg('Connected')
         : view?.phase === 'failed'
-          ? 'Not running'
-          : link.label === 'Offline'
-            ? 'Not running'
+          ? msg('Not running')
+          : link.label === msg('Offline')
+            ? msg('Not running')
             : link.label,
       tone: link.tone,
     },
   ];
   const agent = summarizeAgent(authority);
   facts.push({
-    term: 'Codex runtime',
-    value: connected ? agent.label : 'Not available while offline',
+    term: msg('Codex runtime'),
+    value: connected ? agent.label : msg('Not available while offline'),
     tone: connected ? agent.tone : 'idle',
   });
   facts.push({
-    term: 'Installation',
+    term: msg('Installation'),
     value:
       view?.origin === 'managed'
-        ? 'Managed by Wyss Console'
+        ? msg('Managed by Wyss Console')
         : view?.origin === 'external'
-          ? 'Started outside Wyss Console'
+          ? msg('Started outside Wyss Console')
           : view?.diagnostics.installation === 'current'
-            ? 'Installed by Wyss Console'
+            ? msg('Installed by Wyss Console')
             : view?.diagnostics.installation === 'absent'
-              ? 'Not installed'
-              : 'Not known yet',
+              ? msg('Not installed')
+              : msg('Not known yet'),
   });
   const incompatible =
     view?.phase === 'incompatible' ||
     (authority.state === 'observed' &&
       authority.view.reason === 'incompatible');
   facts.push({
-    term: 'Compatibility',
+    term: msg('Compatibility'),
     value: incompatible
-      ? 'This Wyss authority is not compatible with this version of the app.'
+      ? msg(
+          'This Wyss authority is not compatible with this version of the app.',
+        )
       : connected
-        ? 'Compatible'
-        : 'Checked when the authority answers',
+        ? msg('Compatible')
+        : msg('Checked when the authority answers'),
     tone: incompatible ? 'error' : connected ? 'ok' : 'idle',
   });
   if (authority.state === 'observed' && authority.view.authority) {
     const { service_version: version, protocol_version: protocol } =
       authority.view.authority;
     facts.push({
-      term: 'Authority version',
-      value: version ?? 'Not reported',
+      term: msg('Authority version'),
+      value: version ?? msg('Not reported'),
     });
-    facts.push({ term: 'Protocol', value: `Version ${protocol}` });
+    facts.push({
+      term: msg('Protocol'),
+      value: msg('Version {version}'),
+      values: { version: protocol },
+    });
   }
   if (view?.update_pending)
     facts.push({
-      term: 'Update',
-      value: 'A newer authority is installed the next time it starts',
+      term: msg('Update'),
+      value: msg('A newer authority is installed the next time it starts'),
     });
   return facts;
 }

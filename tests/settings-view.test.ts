@@ -12,6 +12,7 @@ import {
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import views from './fixtures/authority-view-v1.json';
 import { lifecycle } from './lifecycle-harness';
+import { setLanguage } from '../src/lib/i18n/index.svelte';
 import { FakeDesktopSettings, withPreferences } from './settings-harness';
 
 const fakes = vi.hoisted(() => ({ factory: vi.fn() }));
@@ -71,7 +72,7 @@ function desktop(
 const openSettings = async () => {
   const item = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'),
-  ).find((b) => b.textContent?.includes('Settings'))!;
+  ).find((b) => /Settings|Ajustes/.test(b.textContent ?? ''))!;
   item.click();
   await flush();
 };
@@ -124,6 +125,7 @@ afterEach(async () => {
   await flush();
   resetAppearance();
   document.documentElement.dataset.theme = 'dark';
+  setLanguage('en');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -172,13 +174,14 @@ it('offers only the closed appearance themes and does not expose policy settings
   );
 });
 
-it('offers exactly eight preferences, none of them free text', async () => {
+it('offers exactly nine preferences, none of them free text', async () => {
   await show();
   const controls = Array.from(
     page().querySelectorAll<HTMLElement>('select, input, textarea'),
   );
   expect(controls.map((c) => c.id)).toEqual([
     'setting-theme',
+    'setting-language',
     'setting-landing',
     'setting-font',
     'setting-scrollback',
@@ -321,6 +324,70 @@ it('shows what was saved last time, and applies it to the terminals', async () =
   await choose('setting-theme', 'high_contrast');
   expect(document.documentElement.dataset.theme).toBe('high_contrast');
   expect(currentAppearance().theme).toBe('high_contrast');
+});
+
+it('is in English until Spanish is chosen, then redraws the page and the shell and saves it', async () => {
+  const settings = new FakeDesktopSettings();
+  await show(settings);
+  expect(select('setting-language').value).toBe('en');
+  expect(
+    Array.from(select('setting-language').options).map((o) => [
+      o.value,
+      o.textContent,
+    ]),
+  ).toEqual([
+    ['en', 'English'],
+    ['es', 'Español'],
+  ]);
+  expect(text(page().querySelector('h2'))).toBe('Settings');
+
+  await choose('setting-language', 'es');
+  expect(document.documentElement.lang).toBe('es');
+  expect(text(page().querySelector('h2'))).toBe('Ajustes');
+  expect(text(document.querySelector('.context-title'))).toBe('Ajustes');
+  expect(
+    Array.from(page().querySelectorAll('h3'))
+      .slice(0, 7)
+      .map((h) => text(h)),
+  ).toEqual([
+    'Apariencia',
+    'Interfaz',
+    'Terminal',
+    'Eventos',
+    'Autoridad · protocolo 1',
+    'Acerca de',
+    'Restablecer',
+  ]);
+  expect(
+    Array.from(select('setting-theme').options).map((o) => o.textContent),
+  ).toEqual(['Oscuro', 'Claro', 'Alto contraste']);
+  expect(
+    Array.from(
+      document.querySelectorAll<HTMLElement>('.sidebar .nav-label'),
+    ).map((l) => text(l)),
+  ).toContain('Aprobaciones');
+  // The names of the languages do not change with the language.
+  expect(select('setting-language').options[0].textContent).toBe('English');
+  expect(settings.preferences.interface.language).toBe('es');
+
+  await choose('setting-language', 'en');
+  expect(text(page().querySelector('h2'))).toBe('Settings');
+  expect(document.documentElement.lang).toBe('en');
+});
+
+it('opens in the language that was saved', async () => {
+  await show(
+    new FakeDesktopSettings(
+      withPreferences((p) => ({
+        ...p,
+        interface: { ...p.interface, language: 'es' },
+      })),
+    ),
+  );
+  expect(select('setting-language').value).toBe('es');
+  expect(text(page().querySelector('.sessions-count'))).toBe(
+    'Guardado en esta computadora',
+  );
 });
 
 it('keeps a scrollback it was handed that is not one of the steps', async () => {

@@ -18,6 +18,10 @@ export type LandingPage = (typeof LANDING_PAGES)[number];
 export const APPEARANCE_THEMES = ['dark', 'light', 'high_contrast'] as const;
 export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
 
+/** The languages the window's own text exists in. Text the desktop or a provider wrote is not translated. */
+export const LANGUAGES = ['en', 'es'] as const;
+export type Language = (typeof LANGUAGES)[number];
+
 export const CURSOR_STYLES = ['block', 'bar', 'underline'] as const;
 export type CursorStyle = (typeof CURSOR_STYLES)[number];
 
@@ -38,8 +42,12 @@ export const FONT_SIZE = { min: 10, max: 24 } as const;
 export const SCROLLBACK = { min: 500, max: 50_000 } as const;
 
 export interface Preferences {
-  schema_version: 2;
-  interface: { landing_page: LandingPage; theme: AppearanceTheme };
+  schema_version: 3;
+  interface: {
+    landing_page: LandingPage;
+    theme: AppearanceTheme;
+    language: Language;
+  };
   terminal: {
     font_size: number;
     scrollback: number;
@@ -51,8 +59,8 @@ export interface Preferences {
 
 /** What the product was before it had preferences. The desktop's defaults are these. */
 export const DEFAULT_PREFERENCES: Preferences = {
-  schema_version: 2,
-  interface: { landing_page: 'console', theme: 'dark' },
+  schema_version: 3,
+  interface: { landing_page: 'console', theme: 'dark', language: 'en' },
   terminal: {
     font_size: 16,
     scrollback: 5000,
@@ -145,8 +153,12 @@ export function parsePreferences(value: unknown): Preferences {
     ['schema_version', 'interface', 'terminal', 'events'],
     'preferences',
   );
-  if (v.schema_version !== 2) throw invalid('schema_version');
-  const i = record(v.interface, ['landing_page', 'theme'], 'interface');
+  if (v.schema_version !== 3) throw invalid('schema_version');
+  const i = record(
+    v.interface,
+    ['landing_page', 'theme', 'language'],
+    'interface',
+  );
   const t = record(
     v.terminal,
     ['font_size', 'scrollback', 'cursor_style', 'cursor_blink'],
@@ -154,10 +166,11 @@ export function parsePreferences(value: unknown): Preferences {
   );
   const e = record(v.events, ['time_format', 'default_filter'], 'events');
   return {
-    schema_version: 2,
+    schema_version: 3,
     interface: {
       landing_page: member(i.landing_page, LANDING_PAGES, 'landing'),
       theme: member(i.theme, APPEARANCE_THEMES, 'theme'),
+      language: member(i.language, LANGUAGES, 'language'),
     },
     terminal: {
       font_size: bounded(t.font_size, FONT_SIZE, 'font_size'),

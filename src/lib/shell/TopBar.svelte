@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n/index.svelte';
   let {
     title,
     subtitle,
@@ -34,17 +35,17 @@
     {#if version}<span>v{version}</span>{/if}
   </div>
   <div class="context">
-    <p class="context-title">{title}</p>
-    <p class="context-subtitle">{subtitle}</p>
+    <p class="context-title">{t(title)}</p>
+    <p class="context-subtitle">{t(subtitle)}</p>
   </div>
   {#if tools}
-    <div class="top-actions" role="group" aria-label="Terminal tools">
+    <div class="top-actions" role="group" aria-label={t('Terminal tools')}>
       <button
         type="button"
         class="top-action icon"
         disabled={!canSplit}
-        title="Split side by side (Ctrl+Shift+D)"
-        aria-label="Split side by side"
+        title={t('Split side by side (Ctrl+Shift+D)')}
+        aria-label={t('Split side by side')}
         onclick={() => onsplit?.('row')}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"
@@ -55,8 +56,8 @@
         type="button"
         class="top-action icon"
         disabled={!canSplit}
-        title="Split, one above the other (Ctrl+Shift+E)"
-        aria-label="Split one above the other"
+        title={t('Split, one above the other (Ctrl+Shift+E)')}
+        aria-label={t('Split one above the other')}
         onclick={() => onsplit?.('col')}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"
@@ -67,8 +68,8 @@
         type="button"
         class="top-action icon"
         aria-expanded={legend}
-        aria-label="Keyboard shortcuts"
-        title="Keyboard shortcuts"
+        aria-label={t('Keyboard shortcuts')}
+        title={t('Keyboard shortcuts')}
         onclick={() => ontogglelegend?.()}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true"
@@ -81,8 +82,8 @@
         aria-expanded={launchOpen}
         aria-haspopup="true"
         aria-controls="launch-panel"
-        title="Launches from your files in ~/.config/wyss-console/launch"
-        onclick={() => onlaunch?.()}>Launch ▾</button
+        title={t('Launches from your files in ~/.config/wyss-console/launch')}
+        onclick={() => onlaunch?.()}>{t('Launch')} ▾</button
       >
     </div>
   {/if}

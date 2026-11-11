@@ -323,7 +323,7 @@ const settings = {
   storage: 'ready',
   preferences: {
     ...DEFAULT_PREFERENCES,
-    interface: { landing_page: 'console', theme },
+    interface: { landing_page: 'console', theme, language: 'en' },
   },
   about: { version: '0.2.0', revision: '426ddb7', platform: 'linux-x86_64' },
 };

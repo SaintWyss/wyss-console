@@ -15,7 +15,7 @@ mod tests;
 
 pub use model::{
     AppearanceTheme, CursorStyle, EventFilter, Events, FONT_SIZE, Interface, Invalid, LandingPage,
-    Preferences, SCHEMA_VERSION, SCROLLBACK, Terminal, TimeFormat,
+    Language, Preferences, SCHEMA_VERSION, SCROLLBACK, Terminal, TimeFormat,
 };
 pub use service::{About, SettingsError, SettingsFailure, SettingsService, SettingsView, Storage};
 pub use store::{Loaded, MAX_FILE, Store, StoreError};
