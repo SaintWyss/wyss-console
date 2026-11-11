@@ -341,4 +341,207 @@ export const ES: Readonly<Record<string, string>> = {
   'TerminalId:': 'Id de terminal:',
   'State:': 'Estado:',
   'bytes received:': 'bytes recibidos:',
+
+  // Agent: the turn view and the presenter that words its states
+  Agent: 'Agente',
+  'Open sessions': 'Abrir sesiones',
+  'Active session': 'Sesión activa',
+  'Turn being started': 'Turno que se está iniciando',
+  'No session is open.': 'No hay ninguna sesión abierta.',
+  'Open a Ready session from Sessions to give Codex an objective in its project.':
+    'Abrí una sesión en estado Listo desde Sesiones para darle a Codex un objetivo en su proyecto.',
+  'Go to Sessions': 'Ir a Sesiones',
+  'Close {name}': 'Cerrar {name}',
+  Refresh: 'Actualizar',
+  'Connecting to the authority…': 'Conectando con la autoridad…',
+  'What is shown was read before the connection was lost.':
+    'Lo que se muestra se leyó antes de que se cortara la conexión.',
+  'Reload turns': 'Recargar turnos',
+  'Loading older turns…': 'Cargando turnos anteriores…',
+  'No turns in the part of the history just searched. There is more further back.':
+    'No hay turnos en el tramo del historial que se acaba de buscar. Hay más hacia atrás.',
+  'Keep looking': 'Seguir buscando',
+  'Load older turns': 'Cargar turnos anteriores',
+  '{count} older turns are shown, the most this view keeps.':
+    'Se muestran {count} turnos anteriores, el máximo que guarda esta vista.',
+  'Start over from the newest': 'Empezar otra vez desde el más nuevo',
+  "This is the start of this session's history.":
+    'Este es el comienzo del historial de esta sesión.',
+  'Reading turns…': 'Leyendo turnos…',
+  'No turns yet.': 'Todavía no hay turnos.',
+  'Write an objective below. The authority decides whether the turn may start and what Codex is allowed to do in it.':
+    'Escribí un objetivo abajo. La autoridad decide si el turno puede empezar y qué puede hacer Codex en él.',
+  Turn: 'Turno',
+  Accepted: 'Aceptado',
+  You: 'Vos',
+  'The input of this turn is not shown: Wyss keeps no conversation text.':
+    'La entrada de este turno no se muestra: Wyss no guarda texto de conversación.',
+  'The beginning of this output is no longer shown.':
+    'Ya no se muestra el principio de esta salida.',
+  'Output here was not kept by the authority.':
+    'La autoridad no guardó esta salida.',
+  'This turn produced no answer.': 'Este turno no produjo respuesta.',
+  'The authority no longer holds the output of this turn.':
+    'La autoridad ya no tiene la salida de este turno.',
+  'Thinking…': 'Pensando…',
+  'Waiting for approval': 'Esperando aprobación',
+  'Cancelling…': 'Cancelando…',
+  'Read again': 'Leer de nuevo',
+  'Asking the authority to start the turn…':
+    'Pidiéndole a la autoridad que inicie el turno…',
+  Dismiss: 'Descartar',
+  'New turn': 'Turno nuevo',
+  Objective: 'Objetivo',
+  'What should Codex do in this project?':
+    '¿Qué debería hacer Codex en este proyecto?',
+  'Enter to run · Shift+Enter for a new line':
+    'Enter para ejecutar · Shift+Enter para una línea nueva',
+  'Cancel turn': 'Cancelar turno',
+  Run: 'Ejecutar',
+  Completed: 'Completado',
+  Interrupted: 'Interrumpido',
+  Indeterminate: 'Indeterminado',
+  'Stopped at your request.': 'Detenido a tu pedido.',
+  'Its execution lease expired, so the authority stopped it.':
+    'Venció su concesión de ejecución, así que la autoridad lo detuvo.',
+  'Its execution lease was revoked, so the authority stopped it.':
+    'Se revocó su concesión de ejecución, así que la autoridad lo detuvo.',
+  'The session was closed while it ran.': 'La sesión se cerró mientras corría.',
+  'Codex was stopped while it ran.': 'Codex se detuvo mientras corría.',
+  'The authority shut down while it ran.':
+    'La autoridad se apagó mientras corría.',
+  'The authority restarted while it ran. What Codex did after that is not known.':
+    'La autoridad se reinició mientras corría. No se sabe qué hizo Codex después.',
+  'Codex stopped unexpectedly.': 'Codex se detuvo de forma inesperada.',
+  'Codex reported that the turn failed.': 'Codex informó que el turno falló.',
+  'The authority could not confirm whether Codex received the turn.':
+    'La autoridad no pudo confirmar si Codex recibió el turno.',
+  'Codex tried to act outside what this session allows, and the authority stopped it.':
+    'Codex intentó actuar fuera de lo que permite esta sesión, y la autoridad lo detuvo.',
+  'Codex did not confirm the cancel in time. What it did is not known.':
+    'Codex no confirmó la cancelación a tiempo. No se sabe qué hizo.',
+  'The approval it waited on expired undecided.':
+    'La aprobación que esperaba venció sin decisión.',
+  'Codex asked for an action this session cannot allow.':
+    'Codex pidió una acción que esta sesión no puede permitir.',
+  'Command proposed': 'Comando propuesto',
+  'Command started': 'Comando iniciado',
+  'Command output': 'Salida del comando',
+  'Command finished': 'Comando terminado',
+  'Command failed': 'Comando con error',
+  'File change proposed': 'Cambio de archivo propuesto',
+  'File change started': 'Cambio de archivo iniciado',
+  'File change applied': 'Cambio de archivo aplicado',
+  'File change failed': 'Cambio de archivo con error',
+  'Approval requested': 'Aprobación pedida',
+  Activity: 'Actividad',
+  'Approval accepted': 'Aprobación aceptada',
+  'Approval declined': 'Aprobación rechazada',
+  'Approval cancelled': 'Aprobación cancelada',
+  'Approval expired undecided': 'Aprobación vencida sin decidir',
+  'Approval no longer applies': 'La aprobación ya no aplica',
+  'Approval outcome unknown': 'Resultado de la aprobación desconocido',
+  'Approval closed': 'Aprobación cerrada',
+  'Codex asked to run a command. The authority holds the turn until that is decided, or until {until}.':
+    'Codex pidió ejecutar un comando. La autoridad retiene el turno hasta que se decida, o hasta {until}.',
+  'Codex asked to change files. The authority holds the turn until that is decided, or until {until}.':
+    'Codex pidió cambiar archivos. La autoridad retiene el turno hasta que se decida, o hasta {until}.',
+  'The authority did not answer.': 'La autoridad no respondió.',
+  'This console and the authority speak different versions.':
+    'Esta consola y la autoridad hablan versiones distintas.',
+  'The console sent a request it should not have. Nothing changed.':
+    'La consola envió un pedido que no debía enviar. No cambió nada.',
+  'The authority no longer has it.': 'La autoridad ya no lo tiene.',
+  'It changed after it was shown. It has been read again.':
+    'Cambió después de mostrarse. Se volvió a leer.',
+  'The authority refused: it is no longer allowed.':
+    'La autoridad lo rechazó: ya no está permitido.',
+  'The session has no workspace. Activate it in Sessions.':
+    'La sesión no tiene workspace. Activala en Sesiones.',
+  'The session is not attached to a running Codex. Resume it in Sessions.':
+    'La sesión no está conectada a un Codex en ejecución. Reanudala en Sesiones.',
+  'The authority refused to start Codex.':
+    'La autoridad rechazó iniciar Codex.',
+  'A turn is running. The runtime is not restarted under it.':
+    'Hay un turno corriendo. El runtime no se reinicia mientras tanto.',
+  'The session is attached in the other mode: its conversation exists only there.':
+    'La sesión está conectada en el otro modo: su conversación existe solo ahí.',
+  'The authority did not accept the workspace.':
+    'La autoridad no aceptó el workspace.',
+  'The session already has a workspace binding.':
+    'La sesión ya tiene un workspace asociado.',
+  'The authority denied it: no execution lease allows a turn for this session.':
+    'La autoridad lo denegó: ninguna concesión de ejecución permite un turno en esta sesión.',
+  'The authority is busy with another operation. Try again in a moment.':
+    'La autoridad está ocupada con otra operación. Probá de nuevo en un momento.',
+  'Codex refused it.': 'Codex lo rechazó.',
+  'The authority could not confirm what Codex did. Nothing is sent again by itself.':
+    'La autoridad no pudo confirmar lo que hizo Codex. No se vuelve a enviar nada por sí solo.',
+  'That request was already used for something else.':
+    'Ese pedido ya se usó para otra cosa.',
+  'Something unexpected happened. Nothing is assumed to have changed.':
+    'Pasó algo inesperado. No se asume que haya cambiado nada.',
+  'The authority did not answer, so it is not known whether the turn started. Retrying repeats the same request: it cannot start a second turn.':
+    'La autoridad no respondió, así que no se sabe si el turno empezó. Reintentar repite el mismo pedido: no puede iniciar un segundo turno.',
+  'The input is empty or longer than a turn can carry.':
+    'La entrada está vacía o es más larga de lo que puede tener un turno.',
+  'The authority no longer has this session.':
+    'La autoridad ya no tiene esta sesión.',
+  'The session changed after it was shown. It has been read again.':
+    'La sesión cambió después de mostrarse. Se volvió a leer.',
+  'The session is closed, so the authority refused.':
+    'La sesión está cerrada, así que la autoridad la rechazó.',
+  'Another turn is running. The authority runs one turn at a time.':
+    'Hay otro turno corriendo. La autoridad corre un turno a la vez.',
+  'Codex refused the turn.': 'Codex rechazó el turno.',
+  'The authority could not confirm whether Codex received the turn. Nothing is sent again by itself.':
+    'La autoridad no pudo confirmar si Codex recibió el turno. No se vuelve a enviar nada por sí solo.',
+  'That request was already used for another input.':
+    'Ese pedido ya se usó para otra entrada.',
+  'The turn was not started. {reason}': 'El turno no se inició. {reason}',
+  'The authority did not answer, so it is not known whether the cancel was taken. The turn is shown as the authority reports it.':
+    'La autoridad no respondió, así que no se sabe si la cancelación se tomó. El turno se muestra como lo informa la autoridad.',
+  'The authority no longer has this turn.':
+    'La autoridad ya no tiene este turno.',
+  'The turn changed after it was shown. Try again.':
+    'El turno cambió después de mostrarse. Probá de nuevo.',
+  'The turn had already ended.': 'El turno ya había terminado.',
+  'The cancel was not taken. {reason}': 'La cancelación no se tomó. {reason}',
+  'This could not be read: the authority did not answer.':
+    'No se pudo leer: la autoridad no respondió.',
+  'This could not be read: the authority no longer has it.':
+    'No se pudo leer: la autoridad ya no lo tiene.',
+  'This could not be read. {reason}': 'No se pudo leer. {reason}',
+  'This could not be read. Nothing is shown rather than something unverified.':
+    'No se pudo leer. No se muestra nada en lugar de algo sin verificar.',
+  'Older turns could not be loaded: the authority did not answer.':
+    'No se pudieron cargar los turnos anteriores: la autoridad no respondió.',
+  'The history changed while it was being read, so the place reached in it is no longer good. Reload the turns to start again from the newest.':
+    'El historial cambió mientras se leía, así que el lugar al que se llegó ya no sirve. Recargá los turnos para empezar otra vez desde el más nuevo.',
+  'Older turns could not be loaded: the authority no longer has this session.':
+    'No se pudieron cargar los turnos anteriores: la autoridad ya no tiene esta sesión.',
+  'Older turns could not be loaded. {reason}':
+    'No se pudieron cargar los turnos anteriores. {reason}',
+  'Older turns could not be loaded. Nothing is shown rather than something unverified.':
+    'No se pudieron cargar los turnos anteriores. No se muestra nada en lugar de algo sin verificar.',
+  'The authority is unavailable: a turn cannot be started.':
+    'La autoridad no está disponible: no se puede iniciar un turno.',
+  'Starting the turn…': 'Iniciando el turno…',
+  'Retry or dismiss the turn that was not started.':
+    'Reintentá o descartá el turno que no se inició.',
+  'The session could not be read.': 'No se pudo leer la sesión.',
+  'Reading the session…': 'Leyendo la sesión…',
+  'This session is closed.': 'Esta sesión está cerrada.',
+  'A turn is running. The authority runs one at a time.':
+    'Hay un turno corriendo. La autoridad corre uno a la vez.',
+  'This session has no workspace. Activate it in Sessions.':
+    'Esta sesión no tiene workspace. Activala en Sesiones.',
+  'This session is not attached to Codex. Resume it in Sessions.':
+    'Esta sesión no está conectada a Codex. Reanudala en Sesiones.',
+  'The workspace binding of this session is not settled.':
+    'La asociación de workspace de esta sesión no está definida.',
+  'The authority reports that a turn cannot start now.':
+    'La autoridad informa que ahora no se puede iniciar un turno.',
+  'The input is longer than one turn can carry.':
+    'La entrada es más larga de lo que puede tener un turno.',
 };

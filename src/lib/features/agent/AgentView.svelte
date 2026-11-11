@@ -5,7 +5,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
-  import { tJoin } from '../../i18n/index.svelte';
+  import { t, tJoin, tPhrase } from '../../i18n/index.svelte';
   import { BINDING, localTime } from '../sessions/present';
   import ApprovalCard from '../approvals/ApprovalCard.svelte';
   import type {
@@ -129,24 +129,25 @@
 
 <section
   class="agent-feature"
-  aria-label="Agent"
+  aria-label={t('Agent')}
   hidden={!visible}
   inert={!visible}
 >
   {#if !view}
     <div class="sessions-empty">
-      <p class="empty-title">No session is open.</p>
+      <p class="empty-title">{t('No session is open.')}</p>
       <p>
-        Open a Ready session from Sessions to give Codex an objective in its
-        project.
+        {t(
+          'Open a Ready session from Sessions to give Codex an objective in its project.',
+        )}
       </p>
       <button type="button" class="action primary" onclick={onsessions}
-        >Go to Sessions</button
+        >{t('Go to Sessions')}</button
       >
     </div>
   {:else}
     <div class="agent-toolbar">
-      <div class="agent-tabs" role="tablist" aria-label="Open sessions">
+      <div class="agent-tabs" role="tablist" aria-label={t('Open sessions')}>
         {#each agent.tabs as tab (tab.session)}
           <div class="agent-tab">
             <button
@@ -158,7 +159,7 @@
             <button
               type="button"
               class="tab-close"
-              aria-label={`Close ${tab.label}`}
+              aria-label={t('Close {name}', { name: tab.label })}
               disabled={tab.session === view.session &&
                 view.start?.status === 'pending'}
               onclick={() => controller.close(tab.session)}>×</button
@@ -170,12 +171,12 @@
         type="button"
         class="action"
         disabled={!connected || view.reading}
-        onclick={() => controller.refresh()}>Refresh</button
+        onclick={() => controller.refresh()}>{t('Refresh')}</button
       >
     </div>
 
     <!-- The session every turn below belongs to, and every turn started here goes to. -->
-    <header class="agent-session" aria-label="Active session">
+    <header class="agent-session" aria-label={t('Active session')}>
       <h2>{view.label}</h2>
       {#if view.facts}
         <span
@@ -186,8 +187,8 @@
         >
           <span class="dot" aria-hidden="true"></span>
           {view.facts.state === 'closed'
-            ? 'Closed'
-            : BINDING[view.facts.binding].label}
+            ? t('Closed')
+            : t(BINDING[view.facts.binding].label)}
         </span>
         {#if view.facts.workspace}
           <span class="agent-path">{view.facts.workspace}</span>
@@ -198,17 +199,20 @@
 
     {#if !connected}
       <p class="sessions-status failed unknown" role="status">
-        {agent.link === 'connecting'
-          ? 'Connecting to the authority…'
-          : `${tJoin(summarizeAuthority(authority).detail)} What is shown was read before the connection was lost.`}
+        {#if agent.link === 'connecting'}
+          {t('Connecting to the authority…')}
+        {:else}
+          {tJoin(summarizeAuthority(authority).detail)}
+          {t('What is shown was read before the connection was lost.')}
+        {/if}
       </p>
     {:else if view.readFailure}
       <div class="sessions-status failed" role="alert">
-        <p>{readFailureMessage(view.readFailure.code)}</p>
+        <p>{tPhrase(readFailureMessage(view.readFailure.code))}</p>
         <button
           type="button"
           class="action"
-          onclick={() => controller.refresh()}>Try again</button
+          onclick={() => controller.refresh()}>{t('Try again')}</button
         >
       </div>
     {/if}
@@ -216,7 +220,7 @@
     <div
       class="agent-transcript"
       role="log"
-      aria-label="Turns"
+      aria-label={t('Turns')}
       bind:this={transcript}
       onscroll={scrolled}
     >
@@ -225,7 +229,7 @@
       {:else if history.status === 'loading'}
         <p class="turn-activity live" role="status">
           <span class="dot" aria-hidden="true"></span>
-          Loading older turns…
+          {t('Loading older turns…')}
         </p>
       {:else if history.status === 'failed' && history.failure}
         <div
@@ -233,27 +237,29 @@
           class:unknown={outcomeUnknown(history.failure.code)}
           role="alert"
         >
-          <p>{historyFailureMessage(history.failure.code)}</p>
+          <p>{tPhrase(historyFailureMessage(history.failure.code))}</p>
           {#if history.failure.code === 'changed'}
             <button
               type="button"
               class="action"
-              onclick={() => controller.restartHistory()}>Reload turns</button
+              onclick={() => controller.restartHistory()}
+              >{t('Reload turns')}</button
             >
           {:else}
             <button
               type="button"
               class="action"
               disabled={!connected}
-              onclick={older}>Try again</button
+              onclick={older}>{t('Try again')}</button
             >
           {/if}
         </div>
       {:else}
         {#if history.searched}
           <p class="turn-note">
-            No turns in the part of the history just searched. There is more
-            further back.
+            {t(
+              'No turns in the part of the history just searched. There is more further back.',
+            )}
           </p>
         {/if}
         {#if history.more}
@@ -262,31 +268,38 @@
             class="action history-more"
             disabled={!connected}
             onclick={older}
-            >{history.searched ? 'Keep looking' : 'Load older turns'}</button
+            >{history.searched
+              ? t('Keep looking')
+              : t('Load older turns')}</button
           >
         {:else if history.capped}
           <p class="turn-note">
-            {history.loaded} older turns are shown, the most this view keeps.
+            {t('{count} older turns are shown, the most this view keeps.', {
+              count: history.loaded,
+            })}
             <button
               type="button"
               class="action"
               onclick={() => controller.restartHistory()}
-              >Start over from the newest</button
+              >{t('Start over from the newest')}</button
             >
           </p>
         {:else if history.reachedStart}
-          <p class="turn-note">This is the start of this session's history.</p>
+          <p class="turn-note">
+            {t("This is the start of this session's history.")}
+          </p>
         {/if}
       {/if}
       {#if view.turns.length === 0 && !view.start}
         <div class="agent-blank">
           {#if view.facts === null && !view.readFailure}
-            <p class="empty-title">Reading turns…</p>
+            <p class="empty-title">{t('Reading turns…')}</p>
           {:else}
-            <p class="empty-title">No turns yet.</p>
+            <p class="empty-title">{t('No turns yet.')}</p>
             <p>
-              Write an objective below. The authority decides whether the turn
-              may start and what Codex is allowed to do in it.
+              {t(
+                'Write an objective below. The authority decides whether the turn may start and what Codex is allowed to do in it.',
+              )}
             </p>
           {/if}
         </div>
@@ -295,7 +308,7 @@
       {#each view.turns as entry (entry.id)}
         {@const turn = entry.turn}
         {@const ended = turn !== null && turnEnded(turn.state)}
-        <article class="turn" aria-label="Turn">
+        <article class="turn" aria-label={t('Turn')}>
           <header class="turn-head">
             {#if turn}
               <span
@@ -303,7 +316,7 @@
                 data-tone={TURN_STATE[turn.state].tone}
               >
                 <span class="dot" aria-hidden="true"></span>
-                {TURN_STATE[turn.state].label}
+                {t(TURN_STATE[turn.state].label)}
               </span>
               <time
                 datetime={turn.started_at}
@@ -311,25 +324,26 @@
                 >{localClock(turn.started_at)}</time
               >
               {#if turn.reason && TURN_REASON[turn.reason]}
-                <span class="turn-reason">{TURN_REASON[turn.reason]}</span>
+                <span class="turn-reason">{t(TURN_REASON[turn.reason])}</span>
               {/if}
             {:else}
               <span class="pill compact" data-tone="pending">
                 <span class="dot" aria-hidden="true"></span>
-                Accepted
+                {t('Accepted')}
               </span>
             {/if}
           </header>
 
           {#if entry.prompt !== null}
             <div class="turn-prompt">
-              <p class="turn-who">You</p>
+              <p class="turn-who">{t('You')}</p>
               <p class="turn-text">{entry.prompt}</p>
             </div>
           {:else}
             <p class="turn-note">
-              The input of this turn is not shown: Wyss keeps no conversation
-              text.
+              {t(
+                'The input of this turn is not shown: Wyss keeps no conversation text.',
+              )}
             </p>
           {/if}
 
@@ -337,7 +351,7 @@
             <p class="turn-who">Codex</p>
             {#if entry.clipped}
               <p class="turn-note">
-                The beginning of this output is no longer shown.
+                {t('The beginning of this output is no longer shown.')}
               </p>
             {/if}
             {#each entry.items as item, index (index)}
@@ -346,27 +360,27 @@
                 <p class="turn-text">{item.text}</p>
               {:else if item.type === 'activity'}
                 <p class="turn-activity">
-                  {activityLabel(item.kind, item.count)}
+                  {tJoin(activityLabel(item.kind, item.count))}
                 </p>
               {:else if item.type === 'resolved'}
-                <p class="turn-activity">{outcomeLabel(item.outcome)}</p>
+                <p class="turn-activity">{t(outcomeLabel(item.outcome))}</p>
               {:else}
                 <p class="turn-gap">
-                  Output here was not kept by the authority.
+                  {t('Output here was not kept by the authority.')}
                 </p>
               {/if}
             {/each}
             {#if ended && entry.items.length === 0}
               <p class="turn-note">
                 {turn?.output
-                  ? 'This turn produced no answer.'
-                  : 'The authority no longer holds the output of this turn.'}
+                  ? t('This turn produced no answer.')
+                  : t('The authority no longer holds the output of this turn.')}
               </p>
             {/if}
             {#if !ended && entry.thinking && !entry.approval}
               <p class="turn-activity live">
                 <span class="dot" aria-hidden="true"></span>
-                Thinking…
+                {t('Thinking…')}
               </p>
             {/if}
             {#if !ended && entry.approval}
@@ -379,11 +393,13 @@
                 />
               {:else}
                 <div class="turn-approval" role="status">
-                  <p class="approval-title">Waiting for approval</p>
+                  <p class="approval-title">{t('Waiting for approval')}</p>
                   <p>
-                    {approvalMessage(
-                      entry.approval.kind,
-                      localClock(entry.approval.expires_at),
+                    {tPhrase(
+                      approvalMessage(
+                        entry.approval.kind,
+                        localClock(entry.approval.expires_at),
+                      ),
                     )}
                   </p>
                 </div>
@@ -392,7 +408,7 @@
             {#if !ended && entry.cancel !== 'idle'}
               <p class="turn-activity live" role="status">
                 <span class="dot" aria-hidden="true"></span>
-                Cancelling…
+                {t('Cancelling…')}
               </p>
             {/if}
             {#if entry.cancelFailure}
@@ -401,7 +417,7 @@
                 class:unknown={outcomeUnknown(entry.cancelFailure.code)}
                 role="alert"
               >
-                {cancelFailureMessage(entry.cancelFailure.code)}
+                {tPhrase(cancelFailureMessage(entry.cancelFailure.code))}
               </p>
             {/if}
             {#if entry.readFailure}
@@ -410,12 +426,12 @@
                 class:unknown={outcomeUnknown(entry.readFailure.code)}
                 role="alert"
               >
-                <p>{readFailureMessage(entry.readFailure.code)}</p>
+                <p>{tPhrase(readFailureMessage(entry.readFailure.code))}</p>
                 <button
                   type="button"
                   class="action"
                   disabled={!connected}
-                  onclick={() => controller.refresh()}>Read again</button
+                  onclick={() => controller.refresh()}>{t('Read again')}</button
                 >
               </div>
             {/if}
@@ -424,15 +440,15 @@
       {/each}
 
       {#if view.start}
-        <article class="turn" aria-label="Turn being started">
+        <article class="turn" aria-label={t('Turn being started')}>
           <div class="turn-prompt">
-            <p class="turn-who">You</p>
+            <p class="turn-who">{t('You')}</p>
             <p class="turn-text">{view.start.prompt}</p>
           </div>
           {#if view.start.status === 'pending'}
             <p class="turn-activity live" role="status">
               <span class="dot" aria-hidden="true"></span>
-              Asking the authority to start the turn…
+              {t('Asking the authority to start the turn…')}
             </p>
           {:else if view.start.failure}
             <div
@@ -440,19 +456,19 @@
               class:unknown={outcomeUnknown(view.start.failure.code)}
               role="alert"
             >
-              <p>{startFailureMessage(view.start.failure.code)}</p>
+              <p>{tPhrase(startFailureMessage(view.start.failure.code))}</p>
               {#if view.start.failure.retry}
                 <button
                   type="button"
                   class="action"
                   disabled={!connected}
-                  onclick={() => controller.retryStart()}>Retry</button
+                  onclick={() => controller.retryStart()}>{t('Retry')}</button
                 >
               {/if}
               <button
                 type="button"
                 class="action"
-                onclick={() => controller.dismissStart()}>Dismiss</button
+                onclick={() => controller.dismissStart()}>{t('Dismiss')}</button
               >
             </div>
           {/if}
@@ -460,10 +476,10 @@
       {/if}
     </div>
 
-    <form class="agent-composer" aria-label="New turn" onsubmit={submit}>
+    <form class="agent-composer" aria-label={t('New turn')} onsubmit={submit}>
       <textarea
-        aria-label="Objective"
-        placeholder="What should Codex do in this project?"
+        aria-label={t('Objective')}
+        placeholder={t('What should Codex do in this project?')}
         rows="3"
         spellcheck="false"
         value={view.draft}
@@ -471,7 +487,7 @@
         onkeydown={keydown}></textarea>
       <div class="composer-row">
         <p class="composer-hint" class:warn={overLimit(view.draft)}>
-          {hint ?? 'Enter to run · Shift+Enter for a new line'}
+          {t(hint ?? 'Enter to run · Shift+Enter for a new line')}
         </p>
         {#if active?.turn}
           <button
@@ -479,11 +495,13 @@
             class="action danger"
             disabled={!connected || active.cancel !== 'idle'}
             onclick={() => controller.cancel(active.id)}
-            >{active.cancel === 'idle' ? 'Cancel turn' : 'Cancelling…'}</button
+            >{active.cancel === 'idle'
+              ? t('Cancel turn')
+              : t('Cancelling…')}</button
           >
         {/if}
         <button type="submit" class="action primary" disabled={!runnable}
-          >Run</button
+          >{t('Run')}</button
         >
       </div>
     </form>

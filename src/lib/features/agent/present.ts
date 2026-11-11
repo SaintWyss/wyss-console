@@ -7,6 +7,7 @@ import {
   type TurnReason,
   type TurnState,
 } from '../../contracts/turns';
+import { msg, type Phrase } from '../../i18n/msg';
 import type { RuntimeTone } from '../../shell/runtime';
 import type { AgentLink, AgentSessionView } from './controller';
 
@@ -17,79 +18,93 @@ export const TURN_STATE: Record<
   TurnState,
   { label: string; tone: RuntimeTone }
 > = {
-  starting: { label: 'Starting', tone: 'pending' },
-  running: { label: 'Running', tone: 'ok' },
-  completed: { label: 'Completed', tone: 'idle' },
-  interrupted: { label: 'Interrupted', tone: 'warn' },
-  failed: { label: 'Failed', tone: 'error' },
-  indeterminate: { label: 'Indeterminate', tone: 'warn' },
+  starting: { label: msg('Starting'), tone: 'pending' },
+  running: { label: msg('Running'), tone: 'ok' },
+  completed: { label: msg('Completed'), tone: 'idle' },
+  interrupted: { label: msg('Interrupted'), tone: 'warn' },
+  failed: { label: msg('Failed'), tone: 'error' },
+  indeterminate: { label: msg('Indeterminate'), tone: 'warn' },
 };
 
 /** Why a turn ended, in one sentence. Empty when the state already says it. */
 export const TURN_REASON: Record<TurnReason, string> = {
   completed: '',
   // Both a cancelled turn and a denied command end this way at the authority.
-  user_cancel: 'Stopped at your request.',
-  lease_expired: 'Its execution lease expired, so the authority stopped it.',
-  lease_revoked:
+  user_cancel: msg('Stopped at your request.'),
+  lease_expired: msg(
+    'Its execution lease expired, so the authority stopped it.',
+  ),
+  lease_revoked: msg(
     'Its execution lease was revoked, so the authority stopped it.',
-  session_closed: 'The session was closed while it ran.',
-  runtime_stopped: 'Codex was stopped while it ran.',
-  authority_shutdown: 'The authority shut down while it ran.',
-  authority_restarted:
+  ),
+  session_closed: msg('The session was closed while it ran.'),
+  runtime_stopped: msg('Codex was stopped while it ran.'),
+  authority_shutdown: msg('The authority shut down while it ran.'),
+  authority_restarted: msg(
     'The authority restarted while it ran. What Codex did after that is not known.',
-  runtime_failed: 'Codex stopped unexpectedly.',
-  provider_failed: 'Codex reported that the turn failed.',
-  dispatch_unknown:
+  ),
+  runtime_failed: msg('Codex stopped unexpectedly.'),
+  provider_failed: msg('Codex reported that the turn failed.'),
+  dispatch_unknown: msg(
     'The authority could not confirm whether Codex received the turn.',
-  inference_isolation_violation:
+  ),
+  inference_isolation_violation: msg(
     'Codex tried to act outside what this session allows, and the authority stopped it.',
-  interrupt_timeout:
+  ),
+  interrupt_timeout: msg(
     'Codex did not confirm the cancel in time. What it did is not known.',
-  approval_expired: 'The approval it waited on expired undecided.',
-  action_rejected: 'Codex asked for an action this session cannot allow.',
+  ),
+  approval_expired: msg('The approval it waited on expired undecided.'),
+  action_rejected: msg('Codex asked for an action this session cannot allow.'),
 };
 
 const ACTIVITY: Partial<Record<TurnEventKind, string>> = {
-  command_proposed: 'Command proposed',
-  command_started: 'Command started',
-  command_output: 'Command output',
-  command_completed: 'Command finished',
-  command_failed: 'Command failed',
-  file_change_proposed: 'File change proposed',
-  file_change_started: 'File change started',
-  file_change_completed: 'File change applied',
-  file_change_failed: 'File change failed',
-  approval_required: 'Approval requested',
+  command_proposed: msg('Command proposed'),
+  command_started: msg('Command started'),
+  command_output: msg('Command output'),
+  command_completed: msg('Command finished'),
+  command_failed: msg('Command failed'),
+  file_change_proposed: msg('File change proposed'),
+  file_change_started: msg('File change started'),
+  file_change_completed: msg('File change applied'),
+  file_change_failed: msg('File change failed'),
+  approval_required: msg('Approval requested'),
 };
-/** What a mediated action did. Never its content: the window is not given it. */
-export function activityLabel(kind: TurnEventKind, count: number): string {
-  const label = ACTIVITY[kind] ?? 'Activity';
-  return count > 1 ? `${label} · ${count}` : label;
+/**
+ * What a mediated action did, and how many times it was seen. Never its content: the window
+ * is not given it. The count, when there is one, is joined after the label.
+ */
+export function activityLabel(kind: TurnEventKind, count: number): Phrase[] {
+  const label: Phrase = { text: ACTIVITY[kind] ?? msg('Activity') };
+  return count > 1 ? [label, { text: String(count) }] : [label];
 }
 
 const OUTCOME: Record<ApprovalOutcome, string> = {
-  accepted: 'Approval accepted',
-  declined: 'Approval declined',
-  cancelled: 'Approval cancelled',
-  expired: 'Approval expired undecided',
-  invalidated: 'Approval no longer applies',
-  indeterminate: 'Approval outcome unknown',
+  accepted: msg('Approval accepted'),
+  declined: msg('Approval declined'),
+  cancelled: msg('Approval cancelled'),
+  expired: msg('Approval expired undecided'),
+  invalidated: msg('Approval no longer applies'),
+  indeterminate: msg('Approval outcome unknown'),
 };
 export function outcomeLabel(outcome: ApprovalOutcome | null): string {
-  return outcome ? OUTCOME[outcome] : 'Approval closed';
+  return outcome ? OUTCOME[outcome] : msg('Approval closed');
 }
 
-const ASKED: Record<ApprovalKind, string> = {
-  command_execution: 'run a command',
-  file_change: 'change files',
-};
 /**
  * What the turn waits on, while what the approval is about has not been read yet. It
  * names the kind of action, never the action.
  */
-export function approvalMessage(kind: ApprovalKind, until: string): string {
-  return `Codex asked to ${ASKED[kind]}. The authority holds the turn until that is decided, or until ${until}.`;
+const ASKED: Record<ApprovalKind, string> = {
+  command_execution: msg(
+    'Codex asked to run a command. The authority holds the turn until that is decided, or until {until}.',
+  ),
+  file_change: msg(
+    'Codex asked to change files. The authority holds the turn until that is decided, or until {until}.',
+  ),
+};
+export function approvalMessage(kind: ApprovalKind, until: string): Phrase {
+  return { text: ASKED[kind], values: { until } };
 }
 
 const MODE: Record<SessionMode, string> = {
@@ -103,86 +118,137 @@ export function agentLabel(mode: SessionMode | undefined): string {
 }
 
 const COMMON: Record<SessionFailureCode, string> = {
-  unavailable: 'The authority did not answer.',
-  incompatible: 'This console and the authority speak different versions.',
-  invalid: 'The console sent a request it should not have. Nothing changed.',
-  not_found: 'The authority no longer has it.',
-  changed: 'It changed after it was shown. It has been read again.',
-  not_allowed: 'The authority refused: it is no longer allowed.',
-  not_bound: 'The session has no workspace. Activate it in Sessions.',
-  runtime_unavailable:
+  unavailable: msg('The authority did not answer.'),
+  incompatible: msg('This console and the authority speak different versions.'),
+  invalid: msg(
+    'The console sent a request it should not have. Nothing changed.',
+  ),
+  not_found: msg('The authority no longer has it.'),
+  changed: msg('It changed after it was shown. It has been read again.'),
+  not_allowed: msg('The authority refused: it is no longer allowed.'),
+  not_bound: msg('The session has no workspace. Activate it in Sessions.'),
+  runtime_unavailable: msg(
     'The session is not attached to a running Codex. Resume it in Sessions.',
-  start_refused: 'The authority refused to start Codex.',
-  turn_active: 'A turn is running. The runtime is not restarted under it.',
-  mode_fixed:
+  ),
+  start_refused: msg('The authority refused to start Codex.'),
+  turn_active: msg('A turn is running. The runtime is not restarted under it.'),
+  mode_fixed: msg(
     'The session is attached in the other mode: its conversation exists only there.',
-  workspace_invalid: 'The authority did not accept the workspace.',
-  already_bound: 'The session already has a workspace binding.',
-  permission_denied:
+  ),
+  workspace_invalid: msg('The authority did not accept the workspace.'),
+  already_bound: msg('The session already has a workspace binding.'),
+  permission_denied: msg(
     'The authority denied it: no execution lease allows a turn for this session.',
-  busy: 'The authority is busy with another operation. Try again in a moment.',
-  rejected: 'Codex refused it.',
-  uncertain:
+  ),
+  busy: msg(
+    'The authority is busy with another operation. Try again in a moment.',
+  ),
+  rejected: msg('Codex refused it.'),
+  uncertain: msg(
     'The authority could not confirm what Codex did. Nothing is sent again by itself.',
-  conflict: 'That request was already used for something else.',
-  internal:
+  ),
+  conflict: msg('That request was already used for something else.'),
+  internal: msg(
     'Something unexpected happened. Nothing is assumed to have changed.',
+  ),
 };
 
 const START: Partial<Record<SessionFailureCode, string>> = {
-  unavailable:
+  unavailable: msg(
     'The authority did not answer, so it is not known whether the turn started. Retrying repeats the same request: it cannot start a second turn.',
-  invalid: 'The input is empty or longer than a turn can carry.',
-  not_found: 'The authority no longer has this session.',
-  changed: 'The session changed after it was shown. It has been read again.',
-  not_allowed: 'The session is closed, so the authority refused.',
-  busy: 'Another turn is running. The authority runs one turn at a time.',
-  rejected: 'Codex refused the turn.',
-  uncertain:
+  ),
+  invalid: msg('The input is empty or longer than a turn can carry.'),
+  not_found: msg('The authority no longer has this session.'),
+  changed: msg(
+    'The session changed after it was shown. It has been read again.',
+  ),
+  not_allowed: msg('The session is closed, so the authority refused.'),
+  busy: msg('Another turn is running. The authority runs one turn at a time.'),
+  rejected: msg('Codex refused the turn.'),
+  uncertain: msg(
     'The authority could not confirm whether Codex received the turn. Nothing is sent again by itself.',
-  conflict: 'That request was already used for another input.',
+  ),
+  conflict: msg('That request was already used for another input.'),
 };
 /** One sentence for a start that failed. An unknown outcome is never worded as a refusal. */
-export function startFailureMessage(code: SessionFailureCode): string {
-  if (code === 'unavailable' || code === 'uncertain') return START[code]!;
-  return `The turn was not started. ${START[code] ?? COMMON[code]}`;
+export function startFailureMessage(code: SessionFailureCode): Phrase {
+  if (code === 'unavailable' || code === 'uncertain')
+    return { text: START[code]! };
+  return {
+    text: msg('The turn was not started. {reason}'),
+    values: { reason: { text: START[code] ?? COMMON[code] } },
+  };
 }
 
 const CANCEL: Partial<Record<SessionFailureCode, string>> = {
-  unavailable:
+  unavailable: msg(
     'The authority did not answer, so it is not known whether the cancel was taken. The turn is shown as the authority reports it.',
-  not_found: 'The authority no longer has this turn.',
-  changed: 'The turn changed after it was shown. Try again.',
-  not_allowed: 'The turn had already ended.',
+  ),
+  not_found: msg('The authority no longer has this turn.'),
+  changed: msg('The turn changed after it was shown. Try again.'),
+  not_allowed: msg('The turn had already ended.'),
 };
-export function cancelFailureMessage(code: SessionFailureCode): string {
-  if (code === 'unavailable') return CANCEL[code]!;
-  return `The cancel was not taken. ${CANCEL[code] ?? COMMON[code]}`;
+export function cancelFailureMessage(code: SessionFailureCode): Phrase {
+  if (code === 'unavailable') return { text: CANCEL[code]! };
+  return {
+    text: msg('The cancel was not taken. {reason}'),
+    values: { reason: { text: CANCEL[code] ?? COMMON[code] } },
+  };
 }
 
-export function readFailureMessage(code: SessionFailureCode): string {
-  return code === 'unavailable'
-    ? 'This could not be read: the authority did not answer.'
-    : code === 'not_found'
-      ? 'This could not be read: the authority no longer has it.'
-      : code === 'busy'
-        ? `This could not be read. ${COMMON.busy}`
-        : 'This could not be read. Nothing is shown rather than something unverified.';
+export function readFailureMessage(code: SessionFailureCode): Phrase {
+  if (code === 'unavailable')
+    return {
+      text: msg('This could not be read: the authority did not answer.'),
+    };
+  if (code === 'not_found')
+    return {
+      text: msg('This could not be read: the authority no longer has it.'),
+    };
+  if (code === 'busy')
+    return {
+      text: msg('This could not be read. {reason}'),
+      values: { reason: { text: COMMON.busy } },
+    };
+  return {
+    text: msg(
+      'This could not be read. Nothing is shown rather than something unverified.',
+    ),
+  };
 }
 
 /** One sentence for older turns that could not be loaded. Nothing is shown in their place. */
-export function historyFailureMessage(code: SessionFailureCode): string {
+export function historyFailureMessage(code: SessionFailureCode): Phrase {
   switch (code) {
     case 'unavailable':
-      return 'Older turns could not be loaded: the authority did not answer.';
+      return {
+        text: msg(
+          'Older turns could not be loaded: the authority did not answer.',
+        ),
+      };
     case 'changed':
-      return 'The history changed while it was being read, so the place reached in it is no longer good. Reload the turns to start again from the newest.';
+      return {
+        text: msg(
+          'The history changed while it was being read, so the place reached in it is no longer good. Reload the turns to start again from the newest.',
+        ),
+      };
     case 'not_found':
-      return 'Older turns could not be loaded: the authority no longer has this session.';
+      return {
+        text: msg(
+          'Older turns could not be loaded: the authority no longer has this session.',
+        ),
+      };
     case 'busy':
-      return `Older turns could not be loaded. ${COMMON.busy}`;
+      return {
+        text: msg('Older turns could not be loaded. {reason}'),
+        values: { reason: { text: COMMON.busy } },
+      };
     default:
-      return 'Older turns could not be loaded. Nothing is shown rather than something unverified.';
+      return {
+        text: msg(
+          'Older turns could not be loaded. Nothing is shown rather than something unverified.',
+        ),
+      };
   }
 }
 
@@ -205,28 +271,28 @@ export function runHint(
 ): string | null {
   if (link !== 'connected')
     return link === 'connecting'
-      ? 'Connecting to the authority…'
-      : 'The authority is unavailable: a turn cannot be started.';
-  if (view.start?.status === 'pending') return 'Starting the turn…';
-  if (view.start) return 'Retry or dismiss the turn that was not started.';
+      ? msg('Connecting to the authority…')
+      : msg('The authority is unavailable: a turn cannot be started.');
+  if (view.start?.status === 'pending') return msg('Starting the turn…');
+  if (view.start) return msg('Retry or dismiss the turn that was not started.');
   const facts = view.facts;
   if (facts === null)
     return view.readFailure
-      ? 'The session could not be read.'
-      : 'Reading the session…';
-  if (facts.state === 'closed') return 'This session is closed.';
+      ? msg('The session could not be read.')
+      : msg('Reading the session…');
+  if (facts.state === 'closed') return msg('This session is closed.');
   if (view.active !== null)
-    return 'A turn is running. The authority runs one at a time.';
+    return msg('A turn is running. The authority runs one at a time.');
   if (facts.binding === 'unbound')
-    return 'This session has no workspace. Activate it in Sessions.';
+    return msg('This session has no workspace. Activate it in Sessions.');
   if (facts.binding === 'bound_detached')
-    return 'This session is not attached to Codex. Resume it in Sessions.';
+    return msg('This session is not attached to Codex. Resume it in Sessions.');
   if (facts.binding !== 'bound_attached')
-    return 'The workspace binding of this session is not settled.';
+    return msg('The workspace binding of this session is not settled.');
   if (!view.runnable)
-    return 'The authority reports that a turn cannot start now.';
+    return msg('The authority reports that a turn cannot start now.');
   if (overLimit(view.draft))
-    return 'The input is longer than one turn can carry.';
+    return msg('The input is longer than one turn can carry.');
   return null;
 }
 

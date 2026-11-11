@@ -8,7 +8,10 @@ import {
   msg,
   setLanguage,
   t,
+  tJoin,
+  tPhrase,
 } from '../src/lib/i18n/index.svelte';
+import { activityLabel } from '../src/lib/features/agent/present';
 
 afterEach(() => setLanguage('en'));
 
@@ -54,6 +57,27 @@ it('shows a sentence it has no translation for in English, never as nothing', ()
 
 it('marks a sentence without changing it', () => {
   expect(msg('Console')).toBe('Console');
+});
+
+it('draws a phrase whose place takes another phrase, and joins phrases', () => {
+  const nested = {
+    text: 'The turn was not started. {reason}',
+    values: { reason: { text: 'Codex refused the turn.' } },
+  };
+  setLanguage('es');
+  expect(tPhrase(nested)).toBe(
+    'El turno no se inició. Codex rechazó el turno.',
+  );
+  expect(tJoin(activityLabel('command_completed', 2))).toBe(
+    'Comando terminado · 2',
+  );
+  setLanguage('en');
+  expect(tPhrase(nested)).toBe(
+    'The turn was not started. Codex refused the turn.',
+  );
+  expect(tJoin(activityLabel('command_completed', 2))).toBe(
+    'Command finished · 2',
+  );
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {

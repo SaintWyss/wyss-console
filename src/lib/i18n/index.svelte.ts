@@ -26,11 +26,15 @@ export function currentLanguage(): Language {
   return language;
 }
 
-function fill(template: string, values?: Record<string, string | number>) {
+type Values = Record<string, string | number | Phrase>;
+
+function fill(template: string, values?: Values) {
   if (!values) return template;
-  return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
-    Object.hasOwn(values, name) ? String(values[name]) : whole,
-  );
+  return template.replace(/\{(\w+)\}/g, (whole, name: string) => {
+    if (!Object.hasOwn(values, name)) return whole;
+    const value = values[name];
+    return typeof value === 'object' ? tPhrase(value) : String(value);
+  });
 }
 
 /**
@@ -38,11 +42,16 @@ function fill(template: string, values?: Record<string, string | number>) {
  * the dictionary does not have is shown in English: missing text is never an empty screen.
  * Reads the language, so a component that calls it is redrawn when the language changes.
  */
-export function t(text: string, values?: Record<string, string | number>) {
+export function t(text: string, values?: Values) {
   return fill(DICTIONARIES[language]?.[text] ?? text, values);
+}
+
+/** A phrase a presenter handed over, drawn in the language in force. */
+export function tPhrase(phrase: Phrase): string {
+  return t(phrase.text, phrase.values);
 }
 
 /** Several phrases drawn as one sentence, joined the way the window joins its parts. */
 export function tJoin(parts: readonly Phrase[]): string {
-  return parts.map((part) => t(part.text, part.values)).join(' · ');
+  return parts.map(tPhrase).join(' · ');
 }

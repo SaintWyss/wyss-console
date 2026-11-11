@@ -9,8 +9,9 @@ export const msg = <T extends string>(text: T): T => text;
 /**
  * A sentence a presenter hands to a view: a `msg()` sentence and the values its places take.
  * The view draws it with `t(text, values)`, so every part is translated where it is drawn.
+ * A place can take another phrase, drawn the same way, so a sentence can carry a sentence.
  */
 export interface Phrase {
   text: string;
-  values?: Record<string, string | number>;
+  values?: Record<string, string | number | Phrase>;
 }
