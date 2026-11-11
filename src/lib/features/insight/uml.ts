@@ -81,6 +81,11 @@ function members(t: TypeDecl): string[] {
   return [...t.fields, ...t.methods];
 }
 
+/** The header line of a box: the stereotype (for non-classes) and the name. */
+export function headerText(t: TypeDecl): string {
+  return t.kind === 'class' ? t.name : `«${t.kind}» ${t.name}`;
+}
+
 /** Unique diagram identifiers for the types, in order (`Name`, `Name_2`, ...). */
 export function nodeIds(types: TypeDecl[]): string[] {
   const used = new Set<string>();
@@ -217,7 +222,8 @@ export function layout(types: TypeDecl[], rels: Relation[]): Layout {
     for (const i of row ?? []) {
       const t = types[i];
       const lines = members(t);
-      const longest = Math.max(t.name.length, ...lines.map((m) => m.length));
+      const head = headerText(t).length;
+      const longest = Math.max(head, ...lines.map((m) => m.length));
       const w = longest * CHAR_W + BOX_PAD;
       const h = HEAD_H + LINE_H * lines.length;
       boxes.push({ index: i, name: t.name, x, y, w, h });
