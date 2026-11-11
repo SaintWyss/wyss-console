@@ -6,6 +6,7 @@
     type ProjectsClient,
   } from '../../desktop/projects-client';
   import { createRenderer, type TerminalRenderer } from '../terminal/renderer';
+  import { InputQueue, inputReportWords } from './input-queue';
 
   let {
     session,
@@ -30,6 +31,20 @@
   let inputNote = $state('');
   let truncated = $state(false);
   let holding = $state(false);
+  // How this pane came to show a session that was already running: its screen, or a replay of
+  // what the host kept, with the reason. Said, never implied.
+  let recovery = $state('');
+  const REPLAY: Record<string, string> = {
+    host_without_screen: 'this host keeps no screen',
+    helper_missing: 'the screen helper is not running',
+    too_large: 'the screen was too large to send',
+    timeout: 'the screen helper did not answer in time',
+    no_answer: 'the host did not answer',
+    invalid_screen: 'the screen could not be used',
+    not_drawn: 'the screen could not be drawn here',
+    commit_refused: 'the host or session changed while it was drawn',
+    attach_failed: 'the screen could not be asked for',
+  };
   // A terminal is drawn for Native and shell sessions. A Managed session has none: it shows what
   // the authority says, and its input stays with the Managed screens.
   const terminal = $derived(session.kind !== 'managed');
@@ -74,8 +89,51 @@
       inputNote = words(error, 'Input was not sent.');
     };
 
+    // The screen is drawn before reading on, through the checked owner. The read position moves
+    // only when the backend answers the commit: a screen that was not drawn, or that the backend
+    // no longer vouches for, is cleared and what the host kept is read from its start.
+    async function recover() {
+      const replay = (reason: string) => {
+        from = 0;
+        recovery = `Replayed from the output the host kept (${REPLAY[reason] ?? reason}). A full-screen program may look incomplete until it redraws.`;
+      };
+      let attach;
+      try {
+        attach = await client.attachScreen(session.id);
+      } catch {
+        // No screen could be asked for (host offline or changed): reading says why, below.
+        if (!stopped) replay('attach_failed');
+        return;
+      }
+      if (stopped) return;
+      if (attach.mode !== 'screen') {
+        await client.commitScreen(session.id, null, false).catch(() => 0);
+        if (!stopped) replay(attach.reason);
+        return;
+      }
+      const drawn = await Promise.resolve(
+        renderer.restore?.(attach.repaint, attach.size) ?? false,
+      ).catch(() => false);
+      if (stopped) return;
+      try {
+        from = await client.commitScreen(session.id, attach.token, drawn);
+        if (stopped) return;
+        if (drawn) recovery = '';
+        else replay('not_drawn');
+      } catch {
+        if (stopped) return;
+        // Drawn, but not committed: reading on from anywhere would repeat or skip output.
+        if (drawn)
+          await renderer
+            .restore?.(new Uint8Array(0), attach.size)
+            .catch(() => false);
+        replay('commit_refused');
+      }
+    }
+
     // One long-poll per pane that is on screen; the host keeps the scrollback.
     async function read() {
+      await recover();
       while (!stopped) {
         try {
           const out = await client.readOutput(session.id, from, 1000);
@@ -111,18 +169,23 @@
     fit();
 
     // Taking input is explicit, and it is let go of when the window loses the keyboard.
-    // Keystrokes reach the terminal in the order they were typed: one call at a time.
-    let sending: Promise<unknown> = Promise.resolve();
-    // The host takes at most 4 KiB in one write: a longer paste goes in pieces of that size, in
-    // order, and stops at the first one that is refused.
-    const PIECE = 4096;
-    const send = (bytes: Uint8Array) => {
-      for (let at = 0; at < bytes.length; at += PIECE) {
-        const piece = bytes.subarray(at, at + PIECE);
-        sending = sending.then(() => client.writeInput(session.id, piece));
-      }
-      sending = sending.catch(sayInput);
-    };
+    // Keystrokes reach the terminal in the order they were typed: one call of at most 4 KiB at
+    // a time, at most 64 KiB waiting with it, and nothing is ever sent twice (input-queue.ts).
+    const queue = new InputQueue(
+      (piece) => client.writeInput(session.id, piece),
+      (report) => {
+        if (stopped) return;
+        inputNote = inputReportWords(
+          report,
+          report.kind === 'not_sent'
+            ? words(report.error, 'The terminal host refused the input.')
+            : '',
+        );
+        // A refusal can mean the claim is gone: what the backend says now is read again.
+        if (report.kind === 'not_sent') onrefresh();
+      },
+    );
+    const send = (bytes: Uint8Array) => void queue.push(bytes);
     // One claim at a time: a second click or the open-time claim while one is in flight is the
     // same claim, so the keyboard is wired once and a keystroke is sent once.
     let claiming = false;
@@ -164,6 +227,8 @@
       unlisten?.();
       unlisten = undefined;
       renderer.setInput(false);
+      // What was typed and not yet sent belongs to this hold: a later one never sends it.
+      queue.reset();
       await client.releaseInput(session.id).catch(() => undefined);
       if (!stopped) onrefresh();
     };
@@ -172,6 +237,7 @@
     void read();
     if (claimOnOpen) void holdInput();
     return () => {
+      queue.reset();
       stopped = true;
       window.removeEventListener('blur', blur);
       if (holding) void client.releaseInput(session.id).catch(() => undefined);
@@ -223,6 +289,7 @@
       bind:this={host}
       aria-label={`${title} terminal`}
     ></div>
+    {#if recovery}<p class="projects-note" role="status">{recovery}</p>{/if}
     {#if truncated}<p class="projects-note">
         Earlier output is no longer held.
       </p>{/if}

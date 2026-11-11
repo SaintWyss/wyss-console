@@ -46,8 +46,11 @@ pub fn classify(key: &str) -> Option<Enforcement> {
         "provider_init_timeout_ms" | "interrupt_answer_ms" => Enforced("f8::engine::poll"),
         "hello_timeout_ms" => NotProven,
         "owned_root_rss_soft_kib" | "aggregate_owned_roots_rss_soft_kib" => SoftObservation,
+        // One buffer of this size for each provider pipe; a test holds the constant to the JSON
+        // and shows that no stdout read exceeds it under a flood. This is a source bound on the
+        // read size only: it says nothing about real-provider timing or memory.
+        "provider_scratch_bytes" => Enforced("f8::process_worker (PROVIDER_SCRATCH)"),
         "max_clients"
-        | "provider_scratch_bytes"
         | "catalogue_bytes_per_runtime"
         | "catalogue_models_per_runtime"
         | "stream_turns_per_runtime"

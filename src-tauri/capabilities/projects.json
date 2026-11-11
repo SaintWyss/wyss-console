@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "projects",
-  "description": "The project-centered workspace (M1): reads of projects, workspaces and sessions, one closed command envelope for every change, one native folder dialog (a folder returns a one-use token, never a path), the migration preview and its commit, the exclusive terminal input claim with checked terminal reads and writes, and the release gate. None takes a path, a command line, an environment, a prompt or a credential. Everything but the reads answers `unsupported_capability` until the owner turns the workspace on in a native confirmation window. Windows opened by it carry only this capability.",
+  "description": "The project-centered workspace (M1): reads of projects, workspaces and sessions, one closed command envelope for every change, one native folder dialog (a folder returns a one-use token, never a path), the migration preview and its commit, the exclusive terminal input claim with checked terminal reads and writes (a write answers what is known of its outcome), a checked screen attach whose one-use token is committed once the pane drew it, and the release gate. None takes a path, a command line, an environment, a prompt or a credential. Everything but the reads answers `unsupported_capability` until the owner turns the workspace on in a native confirmation window. Windows opened by it carry only this capability.",
   "windows": ["main", "w-*"],
   "permissions": [
     "allow-projects-overview",
@@ -20,6 +20,8 @@
     "allow-projects-term-read",
     "allow-projects-term-write",
     "allow-projects-term-resize",
+    "allow-projects-term-attach",
+    "allow-projects-term-attach-commit",
     "allow-projects-orphans",
     "allow-projects-adoption-preview",
     "allow-projects-rollback-report",

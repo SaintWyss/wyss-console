@@ -75,12 +75,12 @@ scope validation and authority checks remain necessary; capabilities do not cont
 compromised Rust core or same-UID administrator. Production CSP permits the existing
 style rules, not inline JavaScript, remote scripts, frames or arbitrary frontend OS APIs.
 
-**Confirmed coverage gap:** `orchestration_call` is registered by the desktop extension
-but absent from `AppManifest::commands` and capability permission lists. Other examined
-annotated commands are declared, including fixture-only commands. The static gap is
-confirmed; its exact runtime denial/exposure has not been exercised here. Apply explicit
-main-only mediation and test another window's refusal before claiming complete command
-permission coverage. [ENG-01](ROADMAP.md#eng-01) specifies the correction.
+`orchestration_call` is registered by the desktop extension, declared in the application
+manifest and granted by the `main` capability. The configured `w-*` capability does not
+grant it. `orchestration_commands.rs::acl` exercises the framework's own mediation with the
+access-control list resolved from these files: `main` reaches the command's closed
+`DaemonRequest` argument check, and `w-*` or any other window is refused before the command.
+That is the mock runtime, not a packaged WebKitGTK window.
 
 Separate configuration and terminal WebViews remain a target requirement, not a current
 guarantee. Design their workflow/focus/data boundary before implementation; moving a
@@ -137,24 +137,27 @@ it is not a runtime gate or evidence that the implemented F8 entry point is abse
 | Coordinated step                    | Finite plan/review → journal/claim → F8 capability → prepared receipt → guarded commit → verification/settlement.                    | Missing guard or closed production execution blocks effects; provider completion alone cannot release a workspace claim.                                                                                        |
 | Reattach after GUI exit             | Existing host identity → parser snapshot staged with token → renderer draws → one-use commit, or labeled ring replay.                | Do not write recovered bytes back to the PTY. Replay fallback may nudge PTY geometry via redraw; successful screen restore does not. Host/parser loss, logout, suspend and power loss are distinct outcomes.    |
 
-The no-replay policy is required across effectful transports, but the generic HostLink
-does not yet meet it. Prefer refusing an uncertain mutation over automatically reconnecting
-and resending. Retrying known-safe reads must be an explicit allowlist; reconnecting cannot
-substitute a new host epoch for the target of an already submitted mutation. This correction
-is designed in [ENG-02](ROADMAP.md#eng-02); source behavior has not been changed by this review.
+The no-replay policy applies across effectful transports. `Remote::call` answers
+`host_unavailable` only when the whole frame was not written (the host acts on a complete
+frame) and `host_outcome_unknown` once it was. `HostLink::call` may send an unsent request
+to the host found next; after an unknown outcome it asks again only operations on a closed
+list of pure reads (`RETRY_SAFE_READS`). Every other operation, including ones this build
+does not know, is returned as uncertain: no resend, no host replacement and no local
+fallback for that request. Protocol 1 still has no receipt, so the uncertainty itself is
+not resolved; durable host-wide deduplication is not implemented.
 
 ## 7. Improvement decisions and verification
 
 Use [EXECUTION](EXECUTION.md) for evidence vocabulary, decision authority and model handoff.
 
-| Decision                                                                  | Reason and verification                                                                                                                                                                               |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enforce typed boundaries within the current package first.                | Existing separate state owners and binary extensions provide useful seams. Check dependency direction, command coverage and built binaries before proposing extraction.                               |
-| Make every registered desktop command explicitly permissioned.            | Close the confirmed orchestration manifest gap; verify both allowed main use and denied extra-window use.                                                                                             |
-| Refuse ambiguous host mutations without automatic resend.                 | Generic host retry can repeat effects; preserve existing work and test lost replies rather than assume the host died.                                                                                 |
-| Retain the 4096-byte provider scratch contract and align stdout to it.    | `process_worker.rs` uses `CHUNK = 16 * 1024`; stderr's separate 4096-byte buffer does not satisfy the stdout ceiling. Reconcile source, contract and classification without silently raising a limit. |
-| Keep guarded coordination unavailable until its exact prerequisites pass. | V10 support exists, but readiness/production enablement, source identity, credential/provider and review evidence cannot be inferred from fixtures.                                                   |
-| Freeze measured budgets before performance acceptance.                    | M01–M33 define workloads, not accepted numbers. Measure Console, WebKit, host, authority and provider costs separately on reference devices.                                                          |
+| Decision                                                                  | Reason and verification                                                                                                                                                 |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enforce typed boundaries within the current package first.                | Existing separate state owners and binary extensions provide useful seams. Check dependency direction, command coverage and built binaries before proposing extraction. |
+| Make every registered desktop command explicitly permissioned.            | `orchestration_call` is declared, granted to `main` only and checked through the framework's mediation for main use and extra-window refusal.                           |
+| Refuse ambiguous host mutations without automatic resend.                 | Implemented in `host/client.rs`; only a closed list of reads retries. Lost replies are tested with a synthetic host, never an installed one.                            |
+| Retain the 4096-byte provider scratch contract and align stdout to it.    | Done: one `PROVIDER_SCRATCH` sizes both pipe buffers and a test holds it to `resources.json`. The limit was not raised.                                                 |
+| Keep guarded coordination unavailable until its exact prerequisites pass. | V10 support exists, but readiness/production enablement, source identity, credential/provider and review evidence cannot be inferred from fixtures.                     |
+| Freeze measured budgets before performance acceptance.                    | M01–M33 define workloads, not accepted numbers. Measure Console, WebKit, host, authority and provider costs separately on reference devices.                            |
 
 The [roadmap's engineering tasks](ROADMAP.md#engineering-corrections) contain the remaining
 corrections. [Acceptance](contracts/acceptance.md) defines evidence levels and safe measurements.

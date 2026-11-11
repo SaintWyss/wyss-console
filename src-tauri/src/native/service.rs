@@ -1378,18 +1378,7 @@ impl NativeService {
                                 .store(true, Ordering::Release);
                             persisted = false;
                         }
-                    } else {
-                        if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
-                            && !session.state.finished()
-                        {
-                            session.state = state;
-                            session.ended_at = Some(store::now());
-                            session.exit_code = code;
-                            session.exit_signal = signal;
-                        }
-                    }
-                } else {
-                    if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                    } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
                         && !session.state.finished()
                     {
                         session.state = state;
@@ -1397,6 +1386,13 @@ impl NativeService {
                         session.exit_code = code;
                         session.exit_signal = signal;
                     }
+                } else if let Some(session) = lock(&self.inner.volatile_sessions).get_mut(id)
+                    && !session.state.finished()
+                {
+                    session.state = state;
+                    session.ended_at = Some(store::now());
+                    session.exit_code = code;
+                    session.exit_signal = signal;
                 }
             }
         }

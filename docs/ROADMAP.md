@@ -10,78 +10,13 @@ complete. If implementation exists, retain only its missing validation or change
 These are source-confirmed next slices from the architecture review. READY means specified
 for implementation, not implemented or verified. Complete these bounded corrections while
 independent qualification proceeds; do not wait for unrelated remote/Claude product work.
+ENG-01, ENG-02 and ENG-03 are implemented with source tests; see [STATUS](STATUS.md).
 Work states and handoff rules are in [EXECUTION](EXECUTION.md).
 
-| ID     | State     | Outcome                                                                            | Depends on                                                      | FP/AC                         |
-| ------ | --------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------- |
-| ENG-01 | READY     | Explicit main-only permission for the registered orchestration bridge.             | Existing closed DaemonRequest contract.                         | SEC-01, ORC-01/03             |
-| ENG-02 | READY     | Prevent resend of uncertain host mutations.                                        | No new provider, service or schema adoption.                    | TERM-01/02, SES-01/03, CTX-04 |
-| ENG-03 | READY     | Enforce the existing 4096-byte stdout scratch ceiling and truthful classification. | Existing F8 resource profile; do not change capacity.           | SES-04, NFR-01                |
-| ENG-04 | DISCOVERY | Close live DB/witness backup consistency with an explicit procedure.               | Exact witness validation and snapshot-loss semantics.           | NFR-03, SEC-03                |
-| ENG-05 | DISCOVERY | Design separate configuration and terminal WebView permission surfaces.            | ENG-01 command inventory; preserve product workflows and focus. | SEC-01/02, CTX-04, NFR-02     |
-
-<a id="eng-01"></a>
-
-### ENG-01 — Explicit orchestration command permission
-
-**Evidence:** `orchestration_commands.rs` registers `orchestration_call`; `build.rs` and
-capability JSON do not declare/grant it. Existing view mocks do not exercise ACL mediation.
-
-**Chosen change:** add the command to the application manifest and grant its generated
-permission to `main` only. Keep the closed `DaemonRequest` allowlist and authority checks.
-Do not grant a generic process/file/provider RPC, broaden `w-*`, or enable guarded execution.
-Relevant source: `build.rs`, `capabilities/main.json`, `orchestration_commands.rs` and
-`src/lib/desktop/orchestration-client.ts`.
-
-**Verification:** extend the existing capability coverage approach to this registered
-extension; compare handler/manifest/grant. Test permitted main invocation and actual denied
-extra-window invocation using a suitable Tauri harness, rather than relying only on a mocked
-`invoke`. Confirm production fixture exclusions and the unchanged closed daemon request shape.
-**Done when:** the command has an explicit least-privilege route and the positive/negative
-boundary checks pass. Existing F8/V10 release gates remain unchanged.
-
-<a id="eng-02"></a>
-
-### ENG-02 — Host transport uncertainty without resend
-
-**Evidence:** `host/client.rs::Remote::call` maps send and receive errors to the same
-`host_unavailable`; `HostLink::call` reconnects and resends any operation. Host protocol 1
-has no general intent receipt. `term_create` and `term_write` are effectful consumers.
-
-**Chosen change:** separate pre-dispatch availability from possible-send/no-reply. After
-a mutation might have been delivered, return an explicit uncertain result without retry,
-host replacement or local fallback for that request. Default unknown operations to mutation
-semantics; only explicitly proven pure reads may retry. Initial connection/bootstrap before
-the first send remains separate. Propagate truthful outcome to affected terminal/Native
-clients; do not retry under a new terminal/session identity. Preserve Projects Owner's
-stricter epoch-checked, attach-only path. Durable host-wide deduplication is outside this slice.
-
-**Verification:** owned synthetic host accepts a create/write, drops the reply and stays
-alive: one effect, one send, explicit uncertainty. Cover disconnect before send, lost reply,
-host epoch replacement, existing-host survival, unknown operation, allowed read retry,
-partial terminal input and Projects recovery. Never signal/restart an installed host to test it.
-**Done when:** the affected route cannot automatically resend a possibly executed mutation,
-and UI/error contracts distinguish known no-send from unknown-after-send.
-
-<a id="eng-03"></a>
-
-### ENG-03 — Provider scratch and classification
-
-**Evidence:** JSON `provider_scratch_bytes=4096`; stdout `ProcessWorker::CHUNK=16*1024`.
-The stderr buffer is separate. `budget::classify` currently marks scratch NotProven and
-other items vary independently; scheduler source bounds are not hard wall-clock guarantees.
-
-**Chosen change:** retain the existing 4096-byte limit, align the stdout chunk and tie its
-numeric definition to the resource contract with a meaningful consistency check. Preserve
-bounded partial-frame parsing, total read budget, EOF/malformed handling and control
-availability. Update only classifications whose enforcement is actually demonstrated;
-do not relabel all NotProven entries or change production cap one.
-
-**Verification:** existing worker/resource tests plus boundary and fragmented/oversized
-frame cases, noisy stdout/stderr and slow consumer/control availability. Show source-bound
-enforcement separately from real-provider timing/performance qualification.
-**Done when:** source, executable contract and classification agree for this ceiling,
-without weakening another byte/count bound or losing partial-frame data.
+| ID     | State     | Outcome                                                                 | Depends on                                                      | FP/AC                     |
+| ------ | --------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------- |
+| ENG-04 | DISCOVERY | Close live DB/witness backup consistency with an explicit procedure.    | Exact witness validation and snapshot-loss semantics.           | NFR-03, SEC-03            |
+| ENG-05 | DISCOVERY | Design separate configuration and terminal WebView permission surfaces. | ENG-01 command inventory; preserve product workflows and focus. | SEC-01/02, CTX-04, NFR-02 |
 
 ### ENG-04 — DB and witness consistency
 
@@ -107,11 +42,11 @@ The case catalogue refines all 31 FP/AC groups. These source-confirmed missing i
 remain implementation work; refining their acceptance does not count as delivering them.
 They can be reviewed without building or invoking providers.
 
-| ID     | State     | Required outcome                                                            | Dependency / invariant                                                           |
-| ------ | --------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| REQ-01 | DISCOVERY | Define a backend-bound project/configuration context bridge across windows. | Preserve independent drafts and captured targets; no mutable global retargeting. |
-| REQ-02 | DISCOVERY | Specify Projects screen attach/commit on its checked Owner transport.       | Preserve epoch/association/reader fences; never substitute generic HostLink.     |
-| REQ-03 | DISCOVERY | Specify and implement bounded project input with truthful write outcomes.   | Reuse existing queue limits; define Owner/service/DTO propagation before coding. |
+| ID     | State     | Required outcome                                                            | Dependency / invariant                                                                 |
+| ------ | --------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| REQ-01 | DISCOVERY | Define a backend-bound project/configuration context bridge across windows. | Preserve independent drafts and captured targets; no mutable global retargeting.       |
+| REQ-02 | VERIFY    | Accept Projects screen recovery on a real host with full-screen programs.   | Implemented on the checked Owner; source tests pass. No installed-host or IME run yet. |
+| REQ-03 | VERIFY    | Accept bounded project input and its outcomes against a real host.          | Implemented through Owner, service, DTO and pane; lost-reply cases are synthetic only. |
 
 <a id="req-01"></a>
 
@@ -132,37 +67,26 @@ plan-invalidation tests and Projects context tests without claiming they cover t
 
 <a id="req-02"></a>
 
-### REQ-02 — Projects terminal fidelity
+### REQ-02 — Projects terminal fidelity (remaining acceptance)
 
-**Source:** `SessionPane.svelte` reads the retained ring and does not use the snapshot
-attach/commit route exercised by ordinary terminal tests.
-
-**Chosen direction:** obtain snapshots through the epoch-checked Owner; bind a staged
-one-use cursor to association/terminal/epoch/reader, draw before commit and preserve output
-on failed draw. Define bounded DTOs and permissions by reusing the existing screen contract.
-Unsupported hosts get explicit replay/gap labels, not fabricated full-screen recovery.
-Do not use generic HostLink initialization/retry/fallback to attach a project session.
-**Closure:** the contract resolves stale token, renderer disposal, helper failure, host change
-and project-switch behavior; the resulting READY slice includes source test locations and
-real full-screen/IME acceptance still needed after implementation.
+Implemented: `projects_term_attach` / `projects_term_attach_commit` on the epoch-checked
+Owner, a one-use token bound to window, association, terminal and epoch, draw before commit,
+and a labelled replay when no usable screen exists or the commit is refused
+([contract](contracts/workspace.md#7-journey-semantics-and-implementation-gaps)).
+**Remaining:** run it against a real host with the packaged helper: full-screen programs,
+Unicode/IME, helper kill, host replacement, project switch and detach/reattach. The source
+tests use an Owner double and a renderer double; they are not that acceptance.
 
 <a id="req-03"></a>
 
-### REQ-03 — Projects input bound and outcome
+### REQ-03 — Projects input bound and outcome (remaining acceptance)
 
-**Source:** project input chains 4096-byte calls with no aggregate queue-byte bound.
-Owner/service return generic failures, and the pane can say input was not sent after
-earlier chunks were accepted. Current first-chunk refusal tests do not establish that claim.
-
-**Chosen direction:** retain at most 64 KiB including in-flight input, one 4096-byte call
-in flight, reject non-fitting new batches before enqueue, and invalidate unsent old-generation
-work on blur/detach/claim loss. Already admitted bytes may have reached the PTY.
-Specify no-send/known-prefix/unknown propagation through Owner, service, typed DTO and UI;
-never reconstruct an accepted count from an error code or replay uncertain bytes.
-Known busy refusal before admission may retry within its existing bound.
-**Closure:** settle the outcome DTO and claim-generation interaction before implementation;
-then define saturation, mid-paste failure, lost reply, blur/reclaim and pane-disposal cases.
-No provider or installed-host experiment is needed to prepare that design.
+Implemented: 64 KiB retained input including the piece in flight, one 4096-byte call in
+flight (also refused in the service), whole-batch refusal before enqueue, generation reset on
+blur/detach/release, and `written` / `partial` / `unknown` versus a pre-write refusal carried
+through Owner, service, DTO and pane without resend.
+**Remaining:** exercise saturation, mid-paste failure and lost reply against a real host and
+PTY; the lost-reply and partial cases are covered only with synthetic owners.
 
 ## Priority and dependencies
 
@@ -183,7 +107,7 @@ provider/device evidence.
 
 ## 1. Workspace adoption and terminal fidelity
 
-- [ ] Resolve and implement REQ-01, REQ-02 and REQ-03 context, project-screen and input gaps before
+- [ ] Resolve and implement REQ-01, and accept REQ-02 and REQ-03 on a real host, before
       treating the ordinary-terminal/configuration evidence as Projects acceptance.
 - [ ] Accept the real project/registry/layout import and rollback procedure;
       preserve existing session identities and prevent duplicate launches across

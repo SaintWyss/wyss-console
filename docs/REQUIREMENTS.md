@@ -952,7 +952,7 @@ and names what would be lost. No public publishing/auto-update/telemetry is impl
    preserve unknown work; do not automatically restart or resend input.
 
 Coverage: AC-FP-CTX-01/navigation, AC-FP-CTX-04/layout-save, AC-FP-TERM-02/snapshot,
-AC-FP-TERM-02/fallback, AC-FP-TERM-02/missing-owner and AC-FP-SES-01/observed-settings. Current missing implementation: REQ-02 project screen recovery;
+AC-FP-TERM-02/fallback, AC-FP-TERM-02/missing-owner and AC-FP-SES-01/observed-settings. REQ-02 project screen recovery is implemented and not yet accepted on a real host;
 real provider/full-screen/IME acceptance still follows separately.
 
 ### JF-14 — Keep a configuration draft scoped while navigating

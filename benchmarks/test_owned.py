@@ -143,7 +143,7 @@ class OwnedTests(Base):
         env = os.environ.copy()
         env["OWNED_TEST_RELEASE_FIFO"] = release
         with Owned(
-            [shell, "-c", 'IFS= read -r < "$OWNED_TEST_RELEASE_FIFO"'],
+            [shell, "-c", 'IFS= read -r unused < "$OWNED_TEST_RELEASE_FIFO"'],
             shell,
             env=env,
         ) as o:

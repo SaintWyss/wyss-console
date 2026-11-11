@@ -27,7 +27,11 @@ const INBOUND_FRAME_MAX: usize = 262_144;
 const OUTBOUND_BUFFER_MAX: usize = 262_144;
 /// Bytes read from one pipe in one call: bounds the work per `inbound`.
 const READ_BUDGET: usize = 128 * 1024;
-const CHUNK: usize = 16 * 1024;
+/// The one scratch buffer a provider pipe is read through, for stdout and stderr alike: the
+/// contract's `provider_scratch_bytes`. A single read never takes more than this, whatever the
+/// child wrote; a frame larger than it is assembled across reads in `inbuf`, whose own bound is
+/// `INBOUND_FRAME_MAX`. `budget::classify` names this constant, and a test holds it to the JSON.
+pub(crate) const PROVIDER_SCRATCH: usize = 4096;
 
 pub struct ProcessWorker {
     child: OwnedChild,
@@ -39,6 +43,9 @@ pub struct ProcessWorker {
     eof: bool,
     /// Spawned under the PID-namespace containment policy.
     namespace: bool,
+    /// The most bytes one stdout read returned, so a test can see the scratch bound hold.
+    #[cfg(test)]
+    largest_read: usize,
 }
 
 fn nonblocking(fd: i32) -> ControlResult<()> {
@@ -98,6 +105,8 @@ impl ProcessWorker {
             failed: None,
             eof: false,
             namespace: policy == ContainmentPolicy::DescendantsContained,
+            #[cfg(test)]
+            largest_read: 0,
         })
     }
     pub fn failure(&self) -> Option<E> {
@@ -112,7 +121,7 @@ impl ProcessWorker {
     }
 
     fn drain_stderr(&mut self) {
-        let mut scratch = [0u8; 4096];
+        let mut scratch = [0u8; PROVIDER_SCRATCH];
         for _ in 0..8 {
             match self.stderr.read(&mut scratch) {
                 Ok(0) | Err(_) => break,
@@ -229,8 +238,8 @@ impl Worker for ProcessWorker {
                 self.failed = Some(E::FrameTooLarge);
                 return Err(E::FrameTooLarge);
             }
-            let mut chunk = [0u8; CHUNK];
-            let want = CHUNK.min(budget);
+            let mut chunk = [0u8; PROVIDER_SCRATCH];
+            let want = PROVIDER_SCRATCH.min(budget);
             match self.stdout.read(&mut chunk[..want]) {
                 Ok(0) => {
                     self.eof = true;
@@ -240,6 +249,10 @@ impl Worker for ProcessWorker {
                     }
                 }
                 Ok(n) => {
+                    #[cfg(test)]
+                    {
+                        self.largest_read = self.largest_read.max(n);
+                    }
                     budget -= n;
                     self.inbuf.extend_from_slice(&chunk[..n]);
                 }

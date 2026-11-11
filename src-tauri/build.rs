@@ -79,6 +79,7 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_app_info",
+            "orchestration_call",
             "authority_state",
             "authority_lifecycle",
             "authority_retry",
@@ -210,6 +211,8 @@ fn main() {
             "projects_term_read",
             "projects_term_write",
             "projects_term_resize",
+            "projects_term_attach",
+            "projects_term_attach_commit",
             "projects_orphans",
             "projects_adoption_preview",
             "projects_rollback_report",

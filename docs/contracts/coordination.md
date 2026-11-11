@@ -75,10 +75,11 @@ exit alone is insufficient proof that its workspace is settled.
 ## Desktop permission gap and closure
 
 `orchestration_call` forwards a closed `DaemonRequest`; it is not raw arbitrary provider
-RPC. It is registered but not declared/granted in the current Tauri manifest/capabilities.
-Do not claim main-only enforcement from its file location or a mocked view test.
-[ENG-01](../ROADMAP.md#eng-01) specifies explicit mediation, main-only grant and negative
-extra-window tests. No runtime exploitation/denial was reproduced in this documentation pass.
+RPC. It is registered and declared in the Tauri manifest; its permission is granted to
+`main` in the capability configuration. The framework's mediation is tested with the
+resolved access-control list (`orchestration_commands.rs::acl`): main reaches the closed
+argument check, `w-*` is refused before the command. A mocked view test still proves nothing
+about it, and no packaged-window run has been made.
 
 Before production coordination, qualify the V10 adoption/rollback and immutable import,
 real source/root changes, same-root/ancestor/worktree conflicts, lost replies at prepare/

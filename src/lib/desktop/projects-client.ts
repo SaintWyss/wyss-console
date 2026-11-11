@@ -30,6 +30,11 @@ import {
   type StoreStatus,
   type WorkspaceView,
 } from '../contracts/projects';
+import { parseAttach, type Attach } from '../contracts/terminal';
+import {
+  parseWriteResult,
+  type WriteResult,
+} from '../features/projects/input-queue';
 
 export class ProjectsCallError extends Error {
   constructor(readonly failure: Failure) {
@@ -66,7 +71,16 @@ export interface ProjectsClient {
     from: number,
     waitMs: number,
   ): Promise<Output>;
-  writeInput(associationId: string, data: Uint8Array): Promise<void>;
+  /** Rejects when nothing was written; otherwise says what is known of the write. */
+  writeInput(associationId: string, data: Uint8Array): Promise<WriteResult>;
+  /** The screen of a session that was already running, or why there is none (REQ-02). */
+  attachScreen(associationId: string): Promise<Attach>;
+  /** Says whether the screen was drawn; answers where reading goes on from. */
+  commitScreen(
+    associationId: string,
+    token: string | null,
+    drawn: boolean,
+  ): Promise<number>;
   resize(associationId: string, rows: number, cols: number): Promise<void>;
   orphans(launchOperationId: string): Promise<Orphan[]>;
   /** Where the shell really is now; the answer is good for one adoption. */
@@ -171,9 +185,31 @@ export const desktopProjects: ProjectsClient = {
     );
   },
   async writeInput(associationId, data) {
-    await call('projects_term_write', {
-      request: { associationId, data: Array.from(data) },
-    });
+    return parseWriteResult(
+      await call('projects_term_write', {
+        request: { associationId, data: Array.from(data) },
+      }),
+      data.length,
+    );
+  },
+  async attachScreen(associationId) {
+    return checked(
+      await call('projects_term_attach', { request: { associationId } }),
+      parseAttach,
+    );
+  },
+  async commitScreen(associationId, token, drawn) {
+    return checked(
+      await call('projects_term_attach_commit', {
+        request: { associationId, token, drawn },
+      }),
+      (value) => {
+        const from = (value as { from?: unknown } | null)?.from;
+        if (typeof from !== 'number' || !Number.isSafeInteger(from) || from < 0)
+          throw new Error('invalid_from');
+        return from;
+      },
+    );
   },
   async resize(associationId, rows, cols) {
     await call('projects_term_resize', {

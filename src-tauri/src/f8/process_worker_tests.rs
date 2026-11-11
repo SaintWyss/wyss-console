@@ -84,7 +84,7 @@ fn inbound_floods_are_read_in_bounded_slices() {
         assert!(frames.len() <= 4);
         assert!(started.elapsed() < Duration::from_millis(500));
         assert!(
-            w.inbuf.len() <= INBOUND_FRAME_MAX + CHUNK,
+            w.inbuf.len() <= INBOUND_FRAME_MAX + PROVIDER_SCRATCH,
             "buffered bytes are bounded"
         );
         total += frames.len();
@@ -335,4 +335,127 @@ fn deferred_timeout_keeps_engine_slot_and_staging_until_reap() {
         "only a proved reap permits staging cleanup"
     );
     std::fs::remove_dir(root).unwrap();
+}
+
+// ---- ENG-03: the provider scratch ceiling --------------------------------------------------
+
+#[test]
+fn the_scratch_buffer_is_the_contracts_number_and_is_classified_by_what_enforces_it() {
+    let contract = crate::f8::budget::contract().unwrap();
+    assert_eq!(
+        contract["provider_scratch_bytes"], PROVIDER_SCRATCH as u64,
+        "resources.json and the worker's read buffer name different ceilings"
+    );
+    // The scratch is far below the frame bound: a frame is assembled, never read in one piece.
+    const _: () = assert!(PROVIDER_SCRATCH < INBOUND_FRAME_MAX);
+    assert_eq!(contract["provider_frame_bytes"], INBOUND_FRAME_MAX as u64);
+    match crate::f8::budget::classify("provider_scratch_bytes") {
+        Some(crate::f8::budget::Enforcement::Enforced(by)) => {
+            assert!(by.contains("process_worker"), "{by}")
+        }
+        other => panic!("scratch is not classified as enforced here: {other:?}"),
+    }
+}
+
+#[test]
+fn no_single_stdout_read_exceeds_the_scratch_however_much_the_child_wrote() {
+    // 64 KiB lines written as fast as the pipe takes them: every read is offered far more
+    // than the scratch holds.
+    let mut w = worker("yes \"$(head -c 65000 /dev/zero | tr '\\0' a)\"");
+    let mut frames = 0;
+    until(|| {
+        let got = w.inbound(4).unwrap();
+        assert!(got.iter().all(|f| f.len() == 65000), "a frame lost bytes");
+        frames += got.len();
+        (frames >= 8).then_some(())
+    });
+    assert!(w.largest_read > 0);
+    assert!(
+        w.largest_read <= PROVIDER_SCRATCH,
+        "one read took {} bytes",
+        w.largest_read
+    );
+    // The pipe was full the whole time, so the bound was actually reached, not merely unmet.
+    assert_eq!(w.largest_read, PROVIDER_SCRATCH);
+    finish(&mut w);
+}
+
+#[test]
+fn frames_at_and_around_the_scratch_and_frame_bounds_arrive_whole() {
+    let sizes = [1usize, 4095, 4096, 4097, 8192, 8193, INBOUND_FRAME_MAX];
+    let script = format!(
+        "for n in {}; do head -c $n /dev/zero | tr '\\0' a; echo; done; sleep 30",
+        sizes.map(|n| n.to_string()).join(" ")
+    );
+    let mut w = worker(&script);
+    let mut got = Vec::new();
+    until(|| {
+        got.extend(w.inbound(2).unwrap().into_iter().map(|f| f.len()));
+        (got.len() == sizes.len()).then_some(())
+    });
+    assert_eq!(got, sizes);
+    assert!(w.largest_read <= PROVIDER_SCRATCH);
+    finish(&mut w);
+}
+
+#[test]
+fn a_frame_one_byte_over_the_frame_bound_is_refused() {
+    let mut w = worker(&format!(
+        "head -c {} /dev/zero | tr '\\0' a; echo; sleep 30",
+        INBOUND_FRAME_MAX + 1
+    ));
+    assert_eq!(until(|| w.inbound(8).err()), E::FrameTooLarge);
+    finish(&mut w);
+}
+
+#[test]
+fn a_frame_that_arrives_in_pieces_is_delivered_once_and_only_when_complete() {
+    let mut w = worker(
+        "printf '{\"a\":'; sleep 0.2; printf '1,\"b\":'; sleep 0.2; printf '2}\\n{\"c\"'; \
+         sleep 0.2; printf ':3}\\n'; sleep 30",
+    );
+    let mut got: Vec<Vec<u8>> = Vec::new();
+    let mut polls_with_nothing = 0;
+    until(|| {
+        let frames = w.inbound(8).unwrap();
+        if frames.is_empty() {
+            polls_with_nothing += 1;
+        }
+        got.extend(frames);
+        (got.len() == 2).then_some(())
+    });
+    assert_eq!(
+        got,
+        vec![b"{\"a\":1,\"b\":2}".to_vec(), b"{\"c\":3}".to_vec()]
+    );
+    // The pieces were seen before their newline and held back, not handed on as frames.
+    assert!(polls_with_nothing > 0);
+    finish(&mut w);
+}
+
+#[test]
+fn a_child_flooding_both_pipes_with_a_slow_reader_still_takes_control_and_stops() {
+    let mut w = worker(
+        "(while :; do head -c 65536 /dev/zero >&2; done) & \
+         yes \"$(head -c 3000 /dev/zero | tr '\\0' b)\"",
+    );
+    let mut frames = 0;
+    for _ in 0..40 {
+        // A reader much slower than the child: the pipes stay full between polls.
+        std::thread::sleep(Duration::from_millis(10));
+        let started = Instant::now();
+        let got = w.inbound(4).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(got.len() <= 4 && got.iter().all(|f| f.len() == 3000));
+        assert!(w.inbuf.len() <= INBOUND_FRAME_MAX + PROVIDER_SCRATCH);
+        frames += got.len();
+        // A control frame is accepted (or refused at once by back pressure), never a wait.
+        let asked = Instant::now();
+        let _ = w.send(b"{\"control\":true}");
+        assert!(asked.elapsed() < Duration::from_millis(500));
+    }
+    assert!(frames > 0);
+    assert!(w.largest_read <= PROVIDER_SCRATCH);
+    // Stop is still served while both pipes are saturated.
+    finish(&mut w);
 }

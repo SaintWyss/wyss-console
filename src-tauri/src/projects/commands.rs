@@ -591,16 +591,107 @@ pub async fn projects_term_read(
     .await
 }
 
+/// What became of one write, for the pane (REQ-03). `accepted` is what the host itself said
+/// it wrote; it is absent when that is not known, and is never derived from an error word.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteResult {
+    /// `written`, `partial` or `unknown`.
+    outcome: &'static str,
+    accepted: Option<usize>,
+}
+
+impl From<super::owner::WriteOutcome> for WriteResult {
+    fn from(outcome: super::owner::WriteOutcome) -> Self {
+        use super::owner::WriteOutcome::{Partial, Unknown, Written};
+        match outcome {
+            Written(n) => Self {
+                outcome: "written",
+                accepted: Some(n),
+            },
+            Partial(n) => Self {
+                outcome: "partial",
+                accepted: Some(n),
+            },
+            Unknown => Self {
+                outcome: "unknown",
+                accepted: None,
+            },
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn projects_term_write(
     app: AppHandle,
     window: WebviewWindow,
     projects: State<'_, Projects>,
     request: WriteRequest,
-) -> Result<(), Failure> {
+) -> Result<WriteResult, Failure> {
     let service = projects.get(&app);
     let label = window.label().to_owned();
-    blocking(move || service.write_input(&label, &request.association_id, &request.data)).await
+    blocking(move || {
+        service
+            .write_input(&label, &request.association_id, &request.data)
+            .map(WriteResult::from)
+    })
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttachCommitRequest {
+    association_id: String,
+    /// The token the attach answer carried; none when that answer could not be read.
+    token: Option<String>,
+    /// The pane drew the screen it was given.
+    drawn: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadFrom {
+    /// Where in the host's output this pane reads from.
+    from: u64,
+}
+
+/// The screen a pane draws for a session that was already running, asked of the checked owner.
+#[tauri::command]
+pub async fn projects_term_attach(
+    app: AppHandle,
+    window: WebviewWindow,
+    projects: State<'_, Projects>,
+    request: AssociationRequest,
+) -> Result<serde_json::Value, Failure> {
+    let service = projects.get(&app);
+    let label = window.label().to_owned();
+    blocking(move || service.attach_screen(&label, &request.association_id)).await
+}
+
+/// The pane says whether it drew the screen; only then is it told where reading goes on.
+#[tauri::command]
+pub async fn projects_term_attach_commit(
+    app: AppHandle,
+    window: WebviewWindow,
+    projects: State<'_, Projects>,
+    request: AttachCommitRequest,
+) -> Result<ReadFrom, Failure> {
+    if request.token.as_deref().is_some_and(|t| t.len() > 64) {
+        return Err(Failure::new(ErrorCode::InvalidRecord).with_field("token"));
+    }
+    let service = projects.get(&app);
+    let label = window.label().to_owned();
+    blocking(move || {
+        service
+            .commit_screen(
+                &label,
+                &request.association_id,
+                request.token.as_deref(),
+                request.drawn,
+            )
+            .map(|from| ReadFrom { from })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -764,6 +855,8 @@ const COMMANDS: &[&str] = &[
     "projects_term_read",
     "projects_term_write",
     "projects_term_resize",
+    "projects_term_attach",
+    "projects_term_attach_commit",
     "projects_orphans",
     "projects_adoption_preview",
     "projects_rollback_report",
@@ -792,6 +885,8 @@ pub fn extension() -> wyss_console::Extension {
             projects_term_read,
             projects_term_write,
             projects_term_resize,
+            projects_term_attach,
+            projects_term_attach_commit,
             projects_orphans,
             projects_adoption_preview,
             projects_rollback_report,
