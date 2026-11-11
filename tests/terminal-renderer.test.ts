@@ -117,6 +117,120 @@ it('keeps hidden byte parsing and protocol responses alive while gating user key
   expect(data).toHaveBeenCalledWith('a');
 });
 
+// IBus under WebKitGTK reports a plain Space as keydown 229 ("Unidentified", not composing)
+// followed by a cancelable beforeinput. xterm's own fallback for that path diffs the helper
+// textarea, which is never cleared, and re-sent the word typed before the Space ("fg fg   fg").
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+function imeKey(
+  textarea: HTMLTextAreaElement,
+  inputType: string,
+  data: string | null,
+  imeRewrites: string,
+) {
+  textarea.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Unidentified',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const before = new InputEvent('beforeinput', {
+    inputType,
+    data,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  textarea.dispatchEvent(before);
+  if (!before.defaultPrevented) {
+    // What the IME does when nobody cancels it: it rewrites the whole word.
+    textarea.value = imeRewrites;
+    textarea.dispatchEvent(
+      new InputEvent('input', {
+        inputType,
+        data,
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+}
+
+it('sends a Space the IME reports as keydown 229 exactly once, without re-sending the word before it', async () => {
+  const data = vi.fn();
+  renderer.input(data, vi.fn());
+  renderer.setInput(true);
+  const textarea = host.querySelector('textarea')!;
+  imeKey(textarea, 'insertText', ' ', 'fg ');
+  await tick();
+  imeKey(textarea, 'insertText', ' ', 'fg  ');
+  await tick();
+  expect(data.mock.calls.map(([text]) => text)).toEqual([' ', ' ']);
+  expect(textarea.value).toBe('');
+});
+
+it('sends a character the IME reports as keydown 229 once, and a deletion as DEL', async () => {
+  const data = vi.fn();
+  renderer.input(data, vi.fn());
+  renderer.setInput(true);
+  const textarea = host.querySelector('textarea')!;
+  imeKey(textarea, 'insertText', '2', 'fg2');
+  imeKey(textarea, 'deleteContentBackward', null, 'fg');
+  await tick();
+  expect(data.mock.calls.map(([text]) => text)).toEqual(['2', '\x7f']);
+});
+
+it('leaves a real composition (dead keys) to xterm and sends the composed text once', async () => {
+  const data = vi.fn();
+  renderer.input(data, vi.fn());
+  renderer.setInput(true);
+  const textarea = host.querySelector('textarea')!;
+  textarea.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Dead',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  textarea.dispatchEvent(
+    new CompositionEvent('compositionstart', { bubbles: true }),
+  );
+  textarea.dispatchEvent(
+    new CompositionEvent('compositionupdate', { data: '´', bubbles: true }),
+  );
+  textarea.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Unidentified',
+      keyCode: 229,
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const during = new InputEvent('beforeinput', {
+    inputType: 'insertCompositionText',
+    data: 'é',
+    isComposing: true,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  textarea.dispatchEvent(during);
+  expect(during.defaultPrevented).toBe(false);
+  textarea.value = 'é';
+  textarea.dispatchEvent(
+    new CompositionEvent('compositionupdate', { data: 'é', bubbles: true }),
+  );
+  await tick();
+  textarea.dispatchEvent(
+    new CompositionEvent('compositionend', { data: 'é', bubbles: true }),
+  );
+  await tick();
+  expect(data.mock.calls.map(([text]) => text)).toEqual(['é']);
+});
+
 it('follows the appearance preferences, and says when a character changed size', async () => {
   const { setAppearance } =
     await import('../src/lib/features/terminal/appearance');

@@ -87,6 +87,47 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
   ];
   for (const event of guardedEvents)
     host.addEventListener(event, guardInput, true);
+  // An IME (IBus under WebKitGTK) reports even a plain Space as keydown 229 with no composition,
+  // and then a cancelable beforeinput carrying the text. For that, xterm falls back to diffing
+  // its helper textarea, which it never clears, and sends the word typed before the Space again.
+  // Outside a composition the beforeinput data is the whole truth: send it once and keep the
+  // textarea empty. A real composition (dead keys, CJK) stays with xterm.
+  let composing = false;
+  const imeCapture = (event: Event) => {
+    if (!(event.target instanceof HTMLTextAreaElement)) return;
+    if (event.type === 'compositionstart') composing = true;
+    else if (event.type === 'compositionend') composing = false;
+    else if (event.type === 'keydown') {
+      const key = event as KeyboardEvent;
+      if (
+        key.keyCode === 229 &&
+        !key.isComposing &&
+        !composing &&
+        key.key !== 'Dead'
+      )
+        event.stopImmediatePropagation();
+    } else if (event.type === 'beforeinput') {
+      const input = event as InputEvent;
+      if (input.isComposing || composing || !input.cancelable) return;
+      const text =
+        input.inputType === 'insertText' && input.data
+          ? input.data
+          : input.inputType === 'deleteContentBackward'
+            ? '\x7f'
+            : undefined;
+      if (text === undefined) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      term.input(text, true);
+    }
+  };
+  const imeEvents = [
+    'keydown',
+    'beforeinput',
+    'compositionstart',
+    'compositionend',
+  ];
+  for (const event of imeEvents) host.addEventListener(event, imeCapture, true);
   let pending: ((processed: boolean) => void) | undefined;
   let searchAt = -1;
   let searchQuery = '';
@@ -109,6 +150,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     unfollow();
     for (const event of guardedEvents)
       host.removeEventListener(event, guardInput, true);
+    for (const event of imeEvents)
+      host.removeEventListener(event, imeCapture, true);
     term.dispose();
     throw error;
   }
@@ -230,6 +273,8 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
       pending = undefined;
       for (const event of guardedEvents)
         host.removeEventListener(event, guardInput, true);
+      for (const event of imeEvents)
+        host.removeEventListener(event, imeCapture, true);
       // Terminal owns and disposes its loaded fit addon.
       term.dispose();
     },
