@@ -30,6 +30,11 @@ import {
   type StoreStatus,
   type WorkspaceView,
 } from '../contracts/projects';
+import {
+  parseInsight,
+  parseReadmeName,
+  type Insight,
+} from '../contracts/insight';
 import { parseAttach, type Attach } from '../contracts/terminal';
 import {
   parseWriteResult,
@@ -92,6 +97,10 @@ export interface ProjectsClient {
   compactReceipts(): Promise<number>;
   setEnabled(on: boolean): Promise<Overview>;
   openWindow(): Promise<string>;
+  /** What the project's folder holds; only the project id goes out, never a path. */
+  insight(projectId: string): Promise<Insight>;
+  /** Writes the README of the project; answers the file name that was written. */
+  saveReadme(projectId: string, content: string): Promise<string>;
 }
 
 async function call(
@@ -248,5 +257,19 @@ export const desktopProjects: ProjectsClient = {
     if (typeof answer !== 'string')
       throw new ProjectsCallError(parseFailure(null));
     return answer;
+  },
+  async insight(projectId) {
+    return checked(
+      await call('projects_insight', { request: { id: projectId } }),
+      parseInsight,
+    );
+  },
+  async saveReadme(projectId, content) {
+    return checked(
+      await call('projects_readme_save', {
+        request: { id: projectId, content },
+      }),
+      parseReadmeName,
+    );
   },
 };
