@@ -347,7 +347,7 @@ fn the_scratch_buffer_is_the_contracts_number_and_is_classified_by_what_enforces
         "resources.json and the worker's read buffer name different ceilings"
     );
     // The scratch is far below the frame bound: a frame is assembled, never read in one piece.
-    assert!(PROVIDER_SCRATCH < INBOUND_FRAME_MAX);
+    const _: () = assert!(PROVIDER_SCRATCH < INBOUND_FRAME_MAX);
     assert_eq!(contract["provider_frame_bytes"], INBOUND_FRAME_MAX as u64);
     match crate::f8::budget::classify("provider_scratch_bytes") {
         Some(crate::f8::budget::Enforcement::Enforced(by)) => {
