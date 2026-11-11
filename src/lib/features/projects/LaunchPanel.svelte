@@ -5,6 +5,7 @@
     ProfileRef,
     SafetyProfile,
   } from '../../contracts/projects';
+  import { t } from '../../i18n/index.svelte';
 
   export interface NativeProfileOption {
     id: string;
@@ -74,9 +75,9 @@
   }}
 >
   <label>
-    Start
-    <select bind:value={provider} aria-label="What to start">
-      <option value="shell">A shell</option>
+    {t('Start')}
+    <select bind:value={provider} aria-label={t('What to start')}>
+      <option value="shell">{t('A shell')}</option>
       {#if !scratch}
         <option value="claude">Claude Code</option>
         <option value="codex">Codex</option>
@@ -85,10 +86,10 @@
   </label>
   {#if needsProvider}
     <fieldset>
-      <legend>How</legend>
+      <legend>{t('How')}</legend>
       <label
-        ><input type="radio" bind:group={mode} value="native" /> Native (the agent's
-        own permissions)</label
+        ><input type="radio" bind:group={mode} value="native" />
+        {t("Native (the agent's own permissions)")}</label
       >
       <label
         ><input
@@ -97,37 +98,44 @@
           value="managed"
           disabled={provider === 'claude' || !managedAvailable}
         />
-        Managed (mediated by the authority){provider === 'claude'
-          ? ' — not available for Claude yet'
-          : ''}</label
+        {provider === 'claude'
+          ? t(
+              'Managed (mediated by the authority) — not available for Claude yet',
+            )
+          : t('Managed (mediated by the authority)')}</label
       >
     </fieldset>
     {#if managed}
       <fieldset>
-        <legend>Managed profile — choose one</legend>
+        <legend>{t('Managed profile — choose one')}</legend>
         <label
-          ><input type="radio" bind:group={safety} value="inference" /> Inference
-          (text only, no tools)</label
+          ><input type="radio" bind:group={safety} value="inference" />
+          {t('Inference (text only, no tools)')}</label
         >
         <label
-          ><input type="radio" bind:group={safety} value="local_tools" /> Local tools
-          (commands and file changes, each waiting for approval)</label
+          ><input type="radio" bind:group={safety} value="local_tools" />
+          {t(
+            'Local tools (commands and file changes, each waiting for approval)',
+          )}</label
         >
         <p class="projects-note">
-          This is a request. It grants nothing; the authority attaches the
-          session in the profile it allows.
+          {t(
+            'This is a request. It grants nothing; the authority attaches the session in the profile it allows.',
+          )}
         </p>
       </fieldset>
     {:else if profiles.length > 0}
       <label>
-        Native profile
-        <select bind:value={profile} aria-label="Native profile">
-          <option value="">Default</option>
+        {t('Native profile')}
+        <select bind:value={profile} aria-label={t('Native profile')}>
+          <option value="">{t('Default')}</option>
           {#each profiles as p (p.id)}<option value={p.id}>{p.name}</option
             >{/each}
         </select>
       </label>
     {/if}
   {/if}
-  <button type="submit" class="action primary" disabled={!can}>Start</button>
+  <button type="submit" class="action primary" disabled={!can}
+    >{t('Start')}</button
+  >
 </form>

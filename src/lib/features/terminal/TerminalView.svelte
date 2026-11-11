@@ -25,8 +25,9 @@
   import type { Profile } from '../../contracts/native';
   import { arsenalClient } from '../../desktop/arsenal-client';
   import { BYPASS_WARNING, failureText } from '../native/present';
-  import { isFullAccess, openLaunch } from './launch';
+  import { isFullAccess, openLaunch, type LaunchNote } from './launch';
   import { applyOrder, loadOrder, moveLaunch, saveOrder } from './launch-order';
+  import { msg, t } from '../../i18n/index.svelte';
   let {
     onworkspace,
     onagents,
@@ -57,8 +58,10 @@
   let launches = $state<LaunchList | null>(null);
   let launchProfiles = $state<Profile[]>([]);
   let launchBusy = $state<string | null>(null);
-  let launchNote = $state<string | null>(null);
-  let launchError = $state<string | null>(null);
+  let launchNote = $state<LaunchNote[] | null>(null);
+  let launchError = $state<{ text: string; translatable: boolean } | null>(
+    null,
+  );
   let launchOrder = $state<string[]>(loadOrder());
   let reordering = $state(false);
   const ordered = $derived(
@@ -105,17 +108,18 @@
   export function split(dir: 'row' | 'col') {
     if (activeId) manager?.split(activeId, dir);
   }
-  function explain(error: unknown): string {
+  function explain(error: unknown): { text: string; translatable: boolean } {
     const e = error as {
       code?: string;
       reasons?: string[];
       failure?: { code: string };
     };
-    if (e?.failure?.code) return failureText(e.failure.code);
-    if (e?.reasons?.length) return e.reasons[0];
+    if (e?.failure?.code)
+      return { text: failureText(e.failure.code), translatable: false };
+    if (e?.reasons?.length) return { text: e.reasons[0], translatable: false };
     return error instanceof Error
-      ? error.message
-      : 'The launch could not be opened.';
+      ? { text: error.message, translatable: false }
+      : { text: msg('The launch could not be opened.'), translatable: true };
   }
   /** Opens or closes the Launch menu; the top bar's button calls it. */
   export async function toggleLaunches() {
@@ -163,7 +167,7 @@
         openNative: (reply) => m.createNative(reply),
       });
       launchesOpen = false;
-      launchNote = opened.notes.join(' ') || null;
+      launchNote = opened.notes.length > 0 ? opened.notes : null;
     } catch (error) {
       launchError = explain(error);
     } finally {
@@ -266,10 +270,22 @@
   function tabTitle(tab: TabView): string {
     const focus = workspace.sessions.find((s) => s.id === tab.focus);
     const panes = leaves(tab.root).length;
-    return `${focus?.title ?? 'Terminal'}${panes > 1 ? ` ▦ ${panes}` : ''}`;
+    return `${focus?.title ?? t('Terminal')}${panes > 1 ? ` ▦ ${panes}` : ''}`;
   }
   function tabState(tab: TabView): string {
     return workspace.sessions.find((s) => s.id === tab.focus)?.view.state ?? '';
+  }
+  const TAB_STATE: Record<string, string> = {
+    starting: msg('starting'),
+    running: msg('running'),
+    closing: msg('closing'),
+    exited: msg('exited'),
+    closed: msg('closed'),
+    failed: msg('failed'),
+  };
+  function tabStatus(tab: TabView): string {
+    const state = tabState(tab);
+    return TAB_STATE[state] ? t(TAB_STATE[state]) : state;
   }
   function tabNative(tab: TabView): boolean {
     return !!workspace.sessions.find((s) => s.id === tab.focus)?.native;
@@ -309,7 +325,7 @@
 
 <section
   class="terminal-feature"
-  aria-label="Local terminal workspace"
+  aria-label={t('Local terminal workspace')}
   hidden={!visible}
   inert={!visible}
   onkeydowncapture={chord}
@@ -319,7 +335,7 @@
       bind:this={strip}
       class="terminal-tabs"
       role="tablist"
-      aria-label="Terminal sessions"
+      aria-label={t('Terminal sessions')}
     >
       {#each workspace.tabs as tab (tab.id)}
         <div class="terminal-tab">
@@ -334,13 +350,13 @@
           >
             {#if tabNative(tab)}<span class="tab-agent" aria-hidden="true"
                 >◆</span
-              >{/if}{tabTitle(tab)}{#if tabState(tab) !== 'running'}&#32;· {tabState(
+              >{/if}{tabTitle(tab)}{#if tabState(tab) !== 'running'}&#32;· {tabStatus(
                 tab,
               )}{/if}
           </button>
           <button
             class="tab-close"
-            aria-label={`Close ${tabTitle(tab)}`}
+            aria-label={t('Close {name}', { name: tabTitle(tab) })}
             disabled={tabState(tab) === 'closing'}
             onclick={() => void manager?.closeTab(tab.id)}>×</button
           >
@@ -349,7 +365,7 @@
     </div>
   </div>
   {#if launchesOpen}
-    <div id="launch-panel" class="launch-panel" aria-label="Launches">
+    <div id="launch-panel" class="launch-panel" aria-label={t('Launches')}>
       <ul class="launch-list">
         <li>
           <button
@@ -360,7 +376,7 @@
               void manager?.create();
             }}
           >
-            <span class="launch-name">New terminal</span>
+            <span class="launch-name">{t('New terminal')}</span>
           </button>
         </li>
         {#if onagents}
@@ -372,17 +388,19 @@
                 onagents?.();
               }}
             >
-              <span class="launch-name">Start agent…</span>
+              <span class="launch-name">{t('Start agent…')}</span>
             </button>
           </li>
         {/if}
       </ul>
       {#if launches === null && !launchError}
-        <p class="launch-empty">Reading launches…</p>
+        <p class="launch-empty">{t('Reading launches…')}</p>
       {:else if launches}
         {#if ordered.length === 0}
           <p class="launch-empty">
-            No launches. Add a file in <code>{launches.folder}</code>.
+            {t('No launches. Add a file in {folder}.', {
+              folder: launches.folder,
+            })}
           </p>
         {:else}
           <ul class="launch-list launch-files">
@@ -405,27 +423,27 @@
                   >
                   <span class="launch-kind"
                     >{launch.kind === 'commands'
-                      ? 'Terminal'
+                      ? t('Terminal')
                       : launch.agent === 'claude_code'
                         ? 'Claude Code'
                         : 'Codex'}</span
                   >
                   {#if full}
                     <span class="badge" data-tone="warn" title={BYPASS_WARNING}
-                      >Full access</span
+                      >{t('Full access')}</span
                     >
                   {/if}
                 </button>
                 {#if reordering}
                   <button
                     class="launch-move"
-                    aria-label={`Move ${launch.name} up`}
+                    aria-label={t('Move {name} up', { name: launch.name })}
                     disabled={index === 0}
                     onclick={() => shift(launch.id, -1)}>▲</button
                   >
                   <button
                     class="launch-move"
-                    aria-label={`Move ${launch.name} down`}
+                    aria-label={t('Move {name} down', { name: launch.name })}
                     disabled={index === ordered.length - 1}
                     onclick={() => shift(launch.id, 1)}>▼</button
                   >
@@ -441,14 +459,14 @@
         {/each}
         <div class="launch-foot">
           <span class="launch-folder"
-            >Files in <code>{launches.folder}</code></span
+            >{t('Files in {folder}', { folder: launches.folder })}</span
           >
           {#if ordered.length > 1}
             <button
               class="launch-order"
               aria-pressed={reordering}
               onclick={() => (reordering = !reordering)}
-              >{reordering ? 'Done' : 'Order'}</button
+              >{reordering ? t('Done') : t('Order')}</button
             >
           {/if}
         </div>
@@ -456,20 +474,25 @@
     </div>
   {/if}
   {#if legend}
-    <dl class="terminal-legend" aria-label="Keyboard shortcuts">
+    <dl class="terminal-legend" aria-label={t('Keyboard shortcuts')}>
       {#each KEY_LEGEND as [chord_, what] (chord_)}
         <dt>{chord_}</dt>
         <dd>{what}</dd>
       {/each}
       <dd class="terminal-legend-note">
-        Every other key goes to the program in the terminal.
+        {t('Every other key goes to the program in the terminal.')}
       </dd>
     </dl>
   {/if}
   {#if launchError}<p role="alert" class="workspace-error">
-      {launchError}
+      {launchError.translatable ? t(launchError.text) : launchError.text}
     </p>{/if}
-  {#if launchNote}<p role="status" class="launch-note">{launchNote}</p>{/if}
+  {#if launchNote}<p role="status" class="launch-note">
+      {#each launchNote as note, index}{index > 0 ? ' ' : ''}{t(
+          note.text,
+          note.values,
+        )}{/each}
+    </p>{/if}
   {#if workspace.error}<p role="alert" class="workspace-error">
       {workspace.error}
     </p>{/if}
@@ -516,6 +539,6 @@
     {/if}
   </div>
   {#if workspace.sessions.length === 0}<div class="terminal-empty">
-      No terminals open. Create a new terminal to continue.
+      {t('No terminals open. Create a new terminal to continue.')}
     </div>{/if}
 </section>

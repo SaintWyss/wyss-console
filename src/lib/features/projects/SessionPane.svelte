@@ -7,6 +7,7 @@
   } from '../../desktop/projects-client';
   import { createRenderer, type TerminalRenderer } from '../terminal/renderer';
   import { InputQueue, inputReportWords } from './input-queue';
+  import { msg, t } from '../../i18n/index.svelte';
 
   let {
     session,
@@ -33,28 +34,41 @@
   let holding = $state(false);
   // How this pane came to show a session that was already running: its screen, or a replay of
   // what the host kept, with the reason. Said, never implied.
-  let recovery = $state('');
+  let recovery = $state<{
+    text: string;
+    reason: string;
+    reasonKey: boolean;
+  } | null>(null);
   const REPLAY: Record<string, string> = {
-    host_without_screen: 'this host keeps no screen',
-    helper_missing: 'the screen helper is not running',
-    too_large: 'the screen was too large to send',
-    timeout: 'the screen helper did not answer in time',
-    no_answer: 'the host did not answer',
-    invalid_screen: 'the screen could not be used',
-    not_drawn: 'the screen could not be drawn here',
-    commit_refused: 'the host or session changed while it was drawn',
-    attach_failed: 'the screen could not be asked for',
+    host_without_screen: msg('this host keeps no screen'),
+    helper_missing: msg('the screen helper is not running'),
+    too_large: msg('the screen was too large to send'),
+    timeout: msg('the screen helper did not answer in time'),
+    no_answer: msg('the host did not answer'),
+    invalid_screen: msg('the screen could not be used'),
+    not_drawn: msg('the screen could not be drawn here'),
+    commit_refused: msg('the host or session changed while it was drawn'),
+    attach_failed: msg('the screen could not be asked for'),
   };
   // A terminal is drawn for Native and shell sessions. A Managed session has none: it shows what
   // the authority says, and its input stays with the Managed screens.
   const terminal = $derived(session.kind !== 'managed');
   const live = $derived(session.availability === 'live');
   const WORDS: Record<string, string> = {
-    host_changed: 'The terminal host is not the one this session lived in.',
-    host_offline: 'No terminal host answers.',
-    owner_refused: 'The terminal host refused that.',
-    unsupported_capability: 'Not available for this session.',
+    host_changed: msg(
+      'The terminal host is not the one this session lived in.',
+    ),
+    host_offline: msg('No terminal host answers.'),
+    owner_refused: msg('The terminal host refused that.'),
+    unsupported_capability: msg('Not available for this session.'),
   };
+
+  function recoveryText(): string {
+    if (!recovery) return '';
+    return t(recovery.text, {
+      reason: recovery.reasonKey ? t(recovery.reason) : recovery.reason,
+    });
+  }
 
   const encoder = new TextEncoder();
   const binary = (data: string) =>
@@ -67,7 +81,7 @@
     try {
       renderer = createRenderer(host);
     } catch {
-      note = 'The terminal could not be drawn.';
+      note = msg('The terminal could not be drawn.');
       return;
     }
     renderer.setInput(false);
@@ -79,14 +93,14 @@
       const failure = error instanceof ProjectsCallError ? error.failure : null;
       // A refused claim is its own thing: someone else types, and this view mirrors.
       if (failure?.field === 'input_claim')
-        return 'Another window holds input.';
+        return msg('Another window holds input.');
       return WORDS[failure?.code ?? ''] ?? fallback;
     };
     const say = (error: unknown) => {
-      note = words(error, 'Reading stopped.');
+      note = words(error, msg('Reading stopped.'));
     };
     const sayInput = (error: unknown) => {
-      inputNote = words(error, 'Input was not sent.');
+      inputNote = words(error, msg('Input was not sent.'));
     };
 
     // The screen is drawn before reading on, through the checked owner. The read position moves
@@ -95,7 +109,14 @@
     async function recover() {
       const replay = (reason: string) => {
         from = 0;
-        recovery = `Replayed from the output the host kept (${REPLAY[reason] ?? reason}). A full-screen program may look incomplete until it redraws.`;
+        const text = REPLAY[reason];
+        recovery = {
+          text: msg(
+            'Replayed from the output the host kept ({reason}). A full-screen program may look incomplete until it redraws.',
+          ),
+          reason: text ?? reason,
+          reasonKey: text !== undefined,
+        };
       };
       let attach;
       try {
@@ -118,7 +139,7 @@
       try {
         from = await client.commitScreen(session.id, attach.token, drawn);
         if (stopped) return;
-        if (drawn) recovery = '';
+        if (drawn) recovery = null;
         else replay('not_drawn');
       } catch {
         if (stopped) return;
@@ -249,9 +270,9 @@
   let holdInput: () => Promise<void> = async () => undefined;
   let letGo: () => Promise<void> = async () => undefined;
   const KIND: Record<string, string> = {
-    native: 'Agent',
-    shell: 'Shell',
-    managed: 'Managed',
+    native: msg('Agent'),
+    shell: msg('Shell'),
+    managed: msg('Managed'),
   };
 </script>
 
@@ -263,7 +284,7 @@
   <div class="projects-session-bar">
     <span class="projects-session-title">{title}</span>
     <span class="pill compact" data-tone={live ? 'ok' : 'idle'}>
-      <span class="dot" aria-hidden="true"></span>{KIND[session.kind]} ·
+      <span class="dot" aria-hidden="true"></span>{t(KIND[session.kind])} ·
       {session.availability}{session.reason
         ? ` (${session.reason.replace('_', ' ')})`
         : ''}
@@ -271,58 +292,66 @@
     {#if terminal && live}
       {#if holding}
         <button type="button" class="action" onclick={() => void letGo()}>
-          Release input
+          {t('Release input')}
         </button>
       {:else if session.input === 'other'}
-        <span class="projects-note">Another window has input</span>
+        <span class="projects-note">{t('Another window has input')}</span>
       {:else}
         <button type="button" class="action" onclick={() => void holdInput()}>
-          Take input
+          {t('Take input')}
         </button>
       {/if}
     {/if}
-    <button type="button" class="action" onclick={ondetach}>Detach</button>
+    <button type="button" class="action" onclick={ondetach}
+      >{t('Detach')}</button
+    >
   </div>
   {#if terminal}
     <div
       class="projects-terminal"
       bind:this={host}
-      aria-label={`${title} terminal`}
+      aria-label={t('{name} terminal', { name: title })}
     ></div>
-    {#if recovery}<p class="projects-note" role="status">{recovery}</p>{/if}
+    {#if recovery}<p class="projects-note" role="status">
+        {recoveryText()}
+      </p>{/if}
     {#if truncated}<p class="projects-note">
-        Earlier output is no longer held.
+        {t('Earlier output is no longer held.')}
       </p>{/if}
     {#if !holding}<p class="projects-note">
         {live
-          ? 'Read-only view. Input is exclusive; take it to type.'
-          : 'Read-only.'}
+          ? t('Read-only view. Input is exclusive; take it to type.')
+          : t('Read-only.')}
       </p>{/if}
   {:else}
     <dl class="projects-facts">
-      <dt>Authority</dt>
+      <dt>{t('Authority')}</dt>
       <dd>
-        Protocol {session.protocol} · stream
+        {t('Protocol {protocol} · stream', {
+          protocol: String(session.protocol),
+        })}
         <span class="mono">{session.storeStreamId?.slice(0, 8)}</span>
       </dd>
-      <dt>Session</dt>
+      <dt>{t('Session')}</dt>
       <dd class="mono">{session.managedSessionId?.slice(0, 8)}</dd>
-      <dt>Requested profile</dt>
-      <dd>{session.requestedSafetyProfile ?? 'not recorded'}</dd>
-      <dt>Attached profile</dt>
-      <dd>{session.effectiveSafetyProfile ?? 'not attached or unknown'}</dd>
+      <dt>{t('Requested profile')}</dt>
+      <dd>{session.requestedSafetyProfile ?? t('not recorded')}</dd>
+      <dt>{t('Attached profile')}</dt>
+      <dd>{session.effectiveSafetyProfile ?? t('not attached or unknown')}</dd>
     </dl>
     {#if session.profileMismatch}
       <p class="projects-warn" role="alert">
-        The authority attached a different profile than the one requested. The
-        request grants nothing; open the Managed screens to decide.
+        {t(
+          'The authority attached a different profile than the one requested. The request grants nothing; open the Managed screens to decide.',
+        )}
       </p>
     {/if}
     <p class="projects-note">
-      A Managed session is opened and run in Sessions, Agents and Runtimes.
-      Showing it here starts nothing and grants nothing.
+      {t(
+        'A Managed session is opened and run in Sessions, Agents and Runtimes. Showing it here starts nothing and grants nothing.',
+      )}
     </p>
   {/if}
-  {#if note}<p class="projects-note" role="status">{note}</p>{/if}
-  {#if inputNote}<p class="projects-note" role="alert">{inputNote}</p>{/if}
+  {#if note}<p class="projects-note" role="status">{t(note)}</p>{/if}
+  {#if inputNote}<p class="projects-note" role="alert">{t(inputNote)}</p>{/if}
 </div>

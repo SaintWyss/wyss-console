@@ -6,6 +6,7 @@
   } from './session-manager';
   import { failureWords, inputNoticeWords } from './failure-words';
   import { parserNote } from './parser-status';
+  import { t } from '../../i18n/index.svelte';
   let {
     session,
     tabId,
@@ -85,41 +86,48 @@
         <span
           class="pill compact"
           data-tone="idle"
-          title="Started by the Console in your shell. Not mediated, contained or approved by the Console."
-          ><span class="dot" aria-hidden="true"></span>Native</span
+          title={t(
+            'Started by the Console in your shell. Not mediated, contained or approved by the Console.',
+          )}><span class="dot" aria-hidden="true"></span>Native</span
         >
         {session.native.agent}{session.native.profile
           ? ` · ${session.native.profile}`
           : ''} ·
       {/if}
-      {#if session.view.state === 'starting'}Starting {session.native
-          ? 'agent'
-          : 'terminal'}…
+      {#if session.view.state === 'starting'}{session.native
+          ? t('Starting agent…')
+          : t('Starting terminal…')}
       {:else if session.view.state === 'running'}{session.native
-          ? 'Running'
-          : `${session.view.info?.shell} · Running`}
+          ? t('Running')
+          : `${session.view.info?.shell} · ${t('Running')}`}
       {:else if session.view.state === 'exited'}{session.native
-          ? 'Agent'
-          : 'Shell'} exited{session.view.info?.exit
+          ? t('Agent exited')
+          : t('Shell exited')}{session.view.info?.exit
           ? ` (${session.view.info.exit.code})`
           : ''}
-      {:else if session.view.state === 'closing'}Closing terminal…
-      {:else if session.view.state === 'closed'}Terminal closed
+      {:else if session.view.state === 'closing'}{t('Closing terminal…')}
+      {:else if session.view.state === 'closed'}{t('Terminal closed')}
       {:else}<span title={session.view.error ?? 'terminal_error'}
-          >Terminal failed: {failureWords(session.view.error)}</span
+          >{t('Terminal failed: {reason}', {
+            reason: t(failureWords(session.view.error)),
+          })}</span
         >{/if}
       {#if session.view.truncated}
-        · Output truncated{/if}
+        · {t('Output truncated')}{/if}
     </p>
     {#if note}
-      <p class="terminal-parser" data-tone={note.tone} title={note.title}>
-        {note.text}
+      <p
+        class="terminal-parser"
+        data-tone={note.tone}
+        title={t(note.title, note.values)}
+      >
+        {t(note.text, note.values)}
       </p>
     {/if}
   </div>
   {#if session.view.inputNotice}
     <p class="terminal-input-notice" role="alert">
-      {inputNoticeWords(session.view.inputNotice)}
+      {t(inputNoticeWords(session.view.inputNotice))}
     </p>
   {/if}
   {#if searching}
@@ -127,32 +135,41 @@
       <input
         bind:this={field}
         type="text"
-        aria-label="Search this terminal"
-        placeholder="Search…"
+        aria-label={t('Search this terminal')}
+        placeholder={t('Search…')}
         bind:value={query}
         oninput={() => find(0)}
         onkeydown={key}
       />
       <span class="terminal-search-count" role="status">
-        {#if query === ''}{:else if result.total === 0}No matches{:else}{result.current}
-          of {result.total}{result.total >= 5000 ? '+' : ''}{/if}
+        {#if query === ''}{:else if result.total === 0}{t(
+            'No matches',
+          )}{:else}{t('{current} of {total}{suffix}', {
+            current: result.current,
+            total: result.total,
+            suffix: result.total >= 5000 ? '+' : '',
+          })}{/if}
       </span>
-      <button type="button" aria-label="Previous match" onclick={() => find(-1)}
-        >↑</button
+      <button
+        type="button"
+        aria-label={t('Previous match')}
+        onclick={() => find(-1)}>↑</button
       >
-      <button type="button" aria-label="Next match" onclick={() => find(1)}
+      <button type="button" aria-label={t('Next match')} onclick={() => find(1)}
         >↓</button
       >
       <button
         type="button"
         aria-pressed={caseSensitive}
-        title="Match case"
+        title={t('Match case')}
         onclick={() => {
           caseSensitive = !caseSensitive;
           find(0);
         }}>Aa</button
       >
-      <button type="button" aria-label="Close search" onclick={close}>×</button>
+      <button type="button" aria-label={t('Close search')} onclick={close}
+        >×</button
+      >
     </div>
   {/if}
   <div class="terminal-surface">

@@ -12,6 +12,7 @@
     APPROVAL_STATE,
     approvalsReadFailure,
   } from './present';
+  import { t } from '../../i18n/index.svelte';
 
   let {
     approvals,
@@ -31,11 +32,15 @@
 
   const connected = $derived(approvals.link === 'connected');
   const pending = $derived(approvals.pending);
+  function authorityDetail(): string {
+    const summary = summarizeAuthority(authority);
+    return t(summary.detail);
+  }
 </script>
 
 <section
   class="approvals-feature"
-  aria-label="Approvals"
+  aria-label={t('Approvals')}
   hidden={!visible}
   inert={!visible}
 >
@@ -45,12 +50,12 @@
       <p class="sessions-count">
         {#if !connected}
           {approvals.link === 'connecting'
-            ? 'Connecting to the authority'
-            : 'Authority unavailable'}
+            ? t('Connecting to the authority')
+            : t('Authority unavailable')}
         {:else if pending === null}
-          Reading
+          {t('Reading')}
         {:else}
-          {pending.length} waiting for a decision
+          {t('{count} waiting for a decision', { count: pending.length })}
         {/if}
       </p>
     </div>
@@ -58,22 +63,22 @@
       type="button"
       class="action"
       disabled={!connected || approvals.reading}
-      onclick={() => controller.refresh()}>Refresh</button
+      onclick={() => controller.refresh()}>{t('Refresh')}</button
     >
   </div>
 
   {#if approvals.link === 'connecting'}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">Connecting to the authority…</p>
+      <p class="empty-title">{t('Connecting to the authority…')}</p>
     </div>
   {:else if !connected}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">The authority is unavailable</p>
-      <p>{summarizeAuthority(authority).detail}</p>
+      <p class="empty-title">{t('The authority is unavailable')}</p>
+      <p>{authorityDetail()}</p>
       <p>
-        Approvals are read from the authority and cannot be decided until it is
-        connected. Nothing is approved or denied in the meantime. Your local
-        terminals keep working.
+        {t(
+          'Approvals are read from the authority and cannot be decided until it is connected. Nothing is approved or denied in the meantime. Your local terminals keep working.',
+        )}
       </p>
     </div>
   {:else if pending === null && approvals.readFailure}
@@ -82,25 +87,26 @@
         {approvalsReadFailure(approvals.readFailure.code)}
       </p>
       <button type="button" class="action" onclick={() => controller.refresh()}
-        >Try again</button
+        >{t('Try again')}</button
       >
     </div>
   {:else if pending === null}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Reading approvals…</p>
+      <p class="empty-title">{t('Reading approvals…')}</p>
     </div>
   {:else}
     <div class="approvals-body">
       {#if pending.length === 0}
         <div class="approvals-none">
-          <p class="empty-title">Nothing is waiting for a decision.</p>
+          <p class="empty-title">{t('Nothing is waiting for a decision.')}</p>
           <p>
-            In Local Tools, every command and file change Codex proposes stops
-            here until you approve or deny it. Inference sessions propose none.
+            {t(
+              'In Local Tools, every command and file change Codex proposes stops here until you approve or deny it. Inference sessions propose none.',
+            )}
           </p>
         </div>
       {:else}
-        <ul class="approvals-list" aria-label="Pending approvals">
+        <ul class="approvals-list" aria-label={t('Pending approvals')}>
           {#each pending as card (card.approval.id)}
             <li>
               <ApprovalCard
@@ -116,8 +122,8 @@
       {/if}
 
       {#if approvals.recent.length > 0}
-        <h3 class="approvals-heading">Recently ended</h3>
-        <ul class="approvals-recent" aria-label="Ended approvals">
+        <h3 class="approvals-heading">{t('Recently ended')}</h3>
+        <ul class="approvals-recent" aria-label={t('Ended approvals')}>
           {#each approvals.recent as approval (approval.id)}
             <li class="approval-row">
               <span
@@ -125,15 +131,18 @@
                 data-tone={APPROVAL_STATE[approval.state].tone}
               >
                 <span class="dot" aria-hidden="true"></span>
-                {APPROVAL_STATE[approval.state].label}
+                {t(APPROVAL_STATE[approval.state].label)}
               </span>
-              <span class="approval-kind">{APPROVAL_KIND[approval.kind]}</span>
+              <span class="approval-kind"
+                >{t(APPROVAL_KIND[approval.kind])}</span
+              >
               <span class="session-meta">
-                session
+                {t('session')}
                 <span class="mono" title={approval.session}
                   >{approval.session.slice(0, 8)}</span
                 >
-                · turn <span class="mono">{approval.turn.slice(0, 8)}</span>
+                · {t('turn')}
+                <span class="mono">{approval.turn.slice(0, 8)}</span>
                 {#if approval.ended_at}
                   · <time datetime={approval.ended_at}
                     >{localTime(approval.ended_at)}</time
@@ -142,7 +151,7 @@
               </span>
               {#if approval.reason && APPROVAL_REASON[approval.reason]}
                 <span class="session-meta"
-                  >{APPROVAL_REASON[approval.reason]}</span
+                  >{t(APPROVAL_REASON[approval.reason])}</span
                 >
               {/if}
             </li>
@@ -150,7 +159,7 @@
         </ul>
       {/if}
       {#if approvals.partial}
-        <p class="approval-note">Older approvals are not listed.</p>
+        <p class="approval-note">{t('Older approvals are not listed.')}</p>
       {/if}
     </div>
   {/if}

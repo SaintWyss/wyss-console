@@ -7,6 +7,7 @@ import type {
 import type { TerminalPlan } from '../../contracts/arsenal';
 import type { ArsenalStart } from '../../desktop/native-client';
 import type { BeforeOutcome, Launch } from '../../desktop/launch-client';
+import { msg } from '../../i18n/msg';
 
 /** What opening a launch needs; the desktop's functions in the window, fakes in tests. */
 export interface LaunchDeps {
@@ -43,9 +44,14 @@ export interface LaunchDeps {
   openNative(reply: StartReply): void;
 }
 
+export interface LaunchNote {
+  text: string;
+  values?: Record<string, string | number>;
+}
+
 export interface Opened {
   /** Said to the owner after opening: a `before` command that did not succeed, for instance. */
-  notes: string[];
+  notes: LaunchNote[];
 }
 
 /** The profile a session launch names, by its name, for its agent. */
@@ -126,12 +132,14 @@ export async function openLaunch(
       }
     : null;
   const apply = !!plan?.can_apply;
-  const notes = (await deps.runBefore(launch.id))
+  const notes: LaunchNote[] = (await deps.runBefore(launch.id))
     .filter((o) => o.result !== 'ok')
-    .map(
-      (o) =>
-        `A command before the start did not succeed (${o.result}); the agent started anyway.`,
-    );
+    .map((o) => ({
+      text: msg(
+        'A command before the start did not succeed ({result}); the agent started anyway.',
+      ),
+      values: { result: o.result },
+    }));
   const preview = await deps.preview(agent, profileId, apply ? arsenal : null);
   if (apply && !preview.can_start)
     throw new Error(
@@ -154,13 +162,23 @@ export async function openLaunch(
       );
       notes.push(
         binding.state === 'applied'
-          ? `Started with ${binding.selection_name} applied.`
-          : `Started without applying ${binding.selection_name}; the selection is recorded.`,
+          ? {
+              text: msg('Started with {selection} applied.'),
+              values: { selection: binding.selection_name },
+            }
+          : {
+              text: msg(
+                'Started without applying {selection}; the selection is recorded.',
+              ),
+              values: { selection: binding.selection_name },
+            },
       );
     } catch {
-      notes.push(
-        'The terminal started, but Arsenal could not record its selection.',
-      );
+      notes.push({
+        text: msg(
+          'The terminal started, but Arsenal could not record its selection.',
+        ),
+      });
     }
   }
   return { notes };

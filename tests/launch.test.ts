@@ -6,6 +6,13 @@ import {
 } from '../src/lib/features/terminal/launch';
 import type { Launch } from '../src/lib/desktop/launch-client';
 import type { Profile, StartReply } from '../src/lib/contracts/native';
+import { t } from '../src/lib/i18n/index.svelte';
+
+// A note is a sentence and its values; the terminal view draws it through t(), and so do these.
+const shown = (note: {
+  text: string;
+  values?: Record<string, string | number>;
+}) => t(note.text, note.values);
 
 const profile = (
   id: string,
@@ -119,7 +126,7 @@ describe('openLaunch', () => {
     const { d } = deps(session(), [{ command: 'scan', result: 'exit 7' }]);
     const opened = await openLaunch('codex', d);
     expect(opened.notes).toHaveLength(1);
-    expect(opened.notes[0]).toContain('exit 7');
+    expect(shown(opened.notes[0])).toContain('exit 7');
     expect(d.start).toHaveBeenCalled();
   });
 
@@ -168,7 +175,7 @@ describe('a session launch and the Arsenal selection its folder remembers', () =
       start,
     );
     expect(d.bind).toHaveBeenCalledWith(reply.session.id, 'sel-1', 'hash-1');
-    expect(opened.notes).toContain('Started with Work applied.');
+    expect(opened.notes.map(shown)).toContain('Started with Work applied.');
   });
   it('records it without applying when the plan cannot apply', async () => {
     const { d } = deps(session(), undefined, {
@@ -185,7 +192,7 @@ describe('a session launch and the Arsenal selection its folder remembers', () =
       null,
     );
     expect(d.bind).toHaveBeenCalled();
-    expect(opened.notes.join(' ')).toContain('recorded');
+    expect(opened.notes.map(shown).join(' ')).toContain('recorded');
   });
   it('does not start when the applied preview cannot start', async () => {
     const { d } = deps(session(), undefined, {

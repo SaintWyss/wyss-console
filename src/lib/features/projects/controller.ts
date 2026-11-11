@@ -30,6 +30,7 @@ import {
   type ProjectsClient,
 } from '../../desktop/projects-client';
 import { split, remove, resize, type Direction } from '../terminal/layout';
+import { msg } from '../../i18n/msg';
 
 export type Phase = 'idle' | 'loading' | 'ready' | 'failed';
 
@@ -75,38 +76,50 @@ export interface Timings {
 const SAVE_DELAY = 400;
 
 const WORDS: Record<string, string> = {
-  revision_conflict:
+  revision_conflict: msg(
     'Changed somewhere else. The view was refreshed; try again.',
-  context_stale:
+  ),
+  context_stale: msg(
     'That no longer matches what is shown. The view was refreshed; nothing was changed.',
-  leaf_busy: 'This pane is busy with a launch.',
-  root_missing: 'The folder is missing.',
-  root_identity_changed: 'The folder was replaced by another one.',
-  root_ineligible: 'That folder cannot be used.',
-  host_offline: 'No terminal host answers. Nothing was started.',
-  host_changed:
+  ),
+  leaf_busy: msg('This pane is busy with a launch.'),
+  root_missing: msg('The folder is missing.'),
+  root_identity_changed: msg('The folder was replaced by another one.'),
+  root_ineligible: msg('That folder cannot be used.'),
+  host_offline: msg('No terminal host answers. Nothing was started.'),
+  host_changed: msg(
     'The terminal host is not the one this session lived in. Nothing was sent.',
-  unsupported_capability: 'Not available in this version or for this choice.',
-  profile_unavailable: 'That profile is no longer available.',
-  owner_refused: 'The owner of that session refused. Nothing was changed.',
-  effect_ambiguous:
+  ),
+  unsupported_capability: msg(
+    'Not available in this version or for this choice.',
+  ),
+  profile_unavailable: msg('That profile is no longer available.'),
+  owner_refused: msg('The owner of that session refused. Nothing was changed.'),
+  effect_ambiguous: msg(
     'The outcome is unknown. Nothing was started again; resolve it below.',
-  io_failure: 'The store could not be written.',
-  capacity_exceeded: 'A limit was reached. Nothing was changed.',
-  invalid_record: 'That change is not valid.',
-  unsupported_schema: 'The store is from a newer version and is read-only.',
+  ),
+  io_failure: msg('The store could not be written.'),
+  capacity_exceeded: msg('A limit was reached. Nothing was changed.'),
+  invalid_record: msg('That change is not valid.'),
+  unsupported_schema: msg(
+    'The store is from a newer version and is read-only.',
+  ),
 };
 
 /** What a refusal says when the field it names changes its meaning. */
 const FIELD_WORDS: Record<string, string> = {
-  'root_ineligible:foreignAcl':
+  'root_ineligible:foreignAcl': msg(
     'Another account can write in that folder, or that could not be checked. It is not used.',
-  'context_stale:cwd':
+  ),
+  'context_stale:cwd': msg(
     'That shell was not shown to you, or it is not where it was shown. Nothing was moved.',
-  'owner_refused:cwd':
+  ),
+  'owner_refused:cwd': msg(
     'Where that shell is cannot be read, so nothing was moved.',
-  'unsupported_capability:managedSafetyProfile':
+  ),
+  'unsupported_capability:managedSafetyProfile': msg(
     'That Managed authority has not shown it serves that profile. Nothing was started.',
+  ),
 };
 
 export function noticeOf(failure: Failure): Notice {
@@ -115,13 +128,15 @@ export function noticeOf(failure: Failure): Notice {
     // An unknown effect is said as such whatever the code: it is never shown as "not done".
     text =
       failure.code === 'host_changed'
-        ? 'The Managed authority is not the one that was asked first. Nothing was sent to this one; the first attempt is still unknown.'
+        ? msg(
+            'The Managed authority is not the one that was asked first. Nothing was sent to this one; the first attempt is still unknown.',
+          )
         : WORDS['effect_ambiguous']!;
   } else {
     text =
       (failure.field && FIELD_WORDS[`${failure.code}:${failure.field}`]) ||
       WORDS[failure.code] ||
-      'Not done.';
+      msg('Not done.');
   }
   return { kind: 'error', text, failure };
 }
@@ -456,7 +471,7 @@ export class ProjectsController {
       this.set({
         notice: {
           kind: 'info',
-          text: 'Another change is still being sent.',
+          text: msg('Another change is still being sent.'),
           failure: null,
         },
       });

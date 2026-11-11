@@ -5,6 +5,7 @@
   import LaunchPanel, { type NativeProfileOption } from './LaunchPanel.svelte';
   import SessionPane from './SessionPane.svelte';
   import type { ProjectsController } from './controller';
+  import { t } from '../../i18n/index.svelte';
 
   let {
     workspace,
@@ -85,7 +86,10 @@
   }
 </script>
 
-<section class="projects-canvas" aria-label={`Workspace ${workspace.label}`}>
+<section
+  class="projects-canvas"
+  aria-label={t('Workspace {name}', { name: workspace.label })}
+>
   <div class="projects-toolbar">
     <span class="projects-title">{workspace.label}</span>
     {#if workspace.layout === null}
@@ -93,7 +97,8 @@
         type="button"
         class="action"
         disabled={busy}
-        onclick={() => void controller.addPane(null, 'row')}>Add a pane</button
+        onclick={() => void controller.addPane(null, 'row')}
+        >{t('Add a pane')}</button
       >
     {:else}
       <button
@@ -101,14 +106,14 @@
         class="action"
         disabled={busy || !splitTarget}
         onclick={() => void controller.addPane(splitTarget, 'row')}
-        >Split side by side</button
+        >{t('Split side by side')}</button
       >
       <button
         type="button"
         class="action"
         disabled={busy || !splitTarget}
         onclick={() => void controller.addPane(splitTarget, 'col')}
-        >Split top and bottom</button
+        >{t('Split top and bottom')}</button
       >
     {/if}
   </div>
@@ -138,14 +143,14 @@
             <div class="projects-unfinished" role="status">
               <p class="empty-title">
                 {unfinished.state === 'pending'
-                  ? 'A launch is in progress'
-                  : 'A launch has an unknown outcome'}
+                  ? t('A launch is in progress')
+                  : t('A launch has an unknown outcome')}
               </p>
               {#if unfinished.state === 'ambiguous'}
                 <p class="projects-note">
-                  Nothing was started again. If it started something, pick it
-                  from what is running and not shown anywhere; if nothing
-                  started, say so. Nothing here retries.
+                  {t(
+                    'Nothing was started again. If it started something, pick it from what is running and not shown anywhere; if nothing started, say so. Nothing here retries.',
+                  )}
                 </p>
                 {@const found = candidates[unfinished.operationId]}
                 {#if unfinished.mode === 'native'}
@@ -155,22 +160,22 @@
                       class="action"
                       disabled={busy}
                       onclick={() => void look(unfinished.operationId)}
-                      >Look for what it started</button
+                      >{t('Look for what it started')}</button
                     >
                   {:else if found.length === 0}
                     <p class="projects-note">
-                      Nothing is running that is not already shown.
+                      {t('Nothing is running that is not already shown.')}
                     </p>
                   {:else}
                     <ul class="projects-list">
                       {#each found as orphan (orphan.terminalId)}
                         <li class="projects-session-row">
                           <span
-                            >{orphan.nativeSessionId ? 'Agent' : 'Shell'}
+                            >{orphan.nativeSessionId ? t('Agent') : t('Shell')}
                             {orphan.terminalId.slice(0, 8)}</span
                           >
                           <span class="projects-note"
-                            >{orphan.folder ?? 'unknown folder'}</span
+                            >{orphan.folder ?? t('unknown folder')}</span
                           >
                           <button
                             type="button"
@@ -184,7 +189,7 @@
                                   terminalId: orphan.terminalId,
                                   sessionId: orphan.nativeSessionId,
                                 },
-                              )}>This one</button
+                              )}>{t('This one')}</button
                           >
                         </li>
                       {/each}
@@ -199,7 +204,7 @@
                     onclick={() =>
                       void controller.reconcile(unfinished.operationId, {
                         kind: 'absent',
-                      })}>Nothing started</button
+                      })}>{t('Nothing started')}</button
                   >
                   {#if unfinished.mode === 'managed'}
                     <button
@@ -209,7 +214,7 @@
                       onclick={() =>
                         void controller.reconcile(unfinished.operationId, {
                           kind: 'retryManaged',
-                        })}>Ask the Managed owner again</button
+                        })}>{t('Ask the Managed owner again')}</button
                     >
                   {/if}
                 </div>
@@ -229,24 +234,24 @@
             <button
               type="button"
               class="action"
-              onclick={() => (launching = null)}>Cancel</button
+              onclick={() => (launching = null)}>{t('Cancel')}</button
             >
           {:else}
             <div class="projects-empty-pane">
-              <p class="projects-note">Empty pane. Nothing runs here.</p>
+              <p class="projects-note">{t('Empty pane. Nothing runs here.')}</p>
               <div class="projects-row">
                 <button
                   type="button"
                   class="action primary"
                   disabled={busy}
-                  onclick={() => (launching = id)}>Start…</button
+                  onclick={() => (launching = id)}>{t('Start…')}</button
                 >
                 <button
                   type="button"
                   class="action"
                   disabled={busy}
                   onclick={() => void controller.closePane(id)}
-                  >Remove pane</button
+                  >{t('Remove pane')}</button
                 >
               </div>
             </div>
@@ -272,7 +277,7 @@
             ? `${divider.area.h * 100}%`
             : undefined}
           tabindex="0"
-          aria-label="Resize panes"
+          aria-label={t('Resize panes')}
           aria-valuenow={Math.round(divider.ratio * 100)}
           aria-valuemin="10"
           aria-valuemax="90"
@@ -282,7 +287,7 @@
       {/each}
     {:else}
       <div class="terminal-empty">
-        This workspace has no panes. Add one to start something in it.
+        {t('This workspace has no panes. Add one to start something in it.')}
       </div>
     {/if}
   </div>
