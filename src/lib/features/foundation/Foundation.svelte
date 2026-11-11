@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getAppInfo } from '../../desktop/client';
   import type { AppInfo } from '../../contracts/app-info';
+  import { t } from '../../i18n/index.svelte';
 
   let info = $state<AppInfo | null>(null);
   let failed = $state(false);
@@ -24,18 +25,20 @@
 
 {#if failed}
   <p role="alert">
-    Unable to load application information. Restart Wyss Console to try again.
+    {t(
+      'Unable to load application information. Restart Wyss Console to try again.',
+    )}
   </p>
 {:else if info}
-  <p role="status">Foundation ready</p>
-  <dl aria-label="Application information from IPC">
-    <dt>Name</dt>
+  <p role="status">{t('Foundation ready')}</p>
+  <dl aria-label={t('Application information from IPC')}>
+    <dt>{t('Name')}</dt>
     <dd>{info.name}</dd>
-    <dt>Version</dt>
+    <dt>{t('Version')}</dt>
     <dd>{info.version}</dd>
-    <dt>Schema</dt>
+    <dt>{t('Schema')}</dt>
     <dd>{info.schema_version}</dd>
   </dl>
 {:else}
-  <p role="status">Loading application information…</p>
+  <p role="status">{t('Loading application information…')}</p>
 {/if}

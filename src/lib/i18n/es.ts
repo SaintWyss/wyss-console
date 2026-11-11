@@ -218,4 +218,32 @@ export const ES: Readonly<Record<string, string>> = {
   Update: 'Actualización',
   'A newer authority is installed the next time it starts':
     'Se instala una autoridad más nueva la próxima vez que arranque',
+
+  // App shell and diagnostics
+  'Skip to main content': 'Saltar al contenido principal',
+  'Session {id}': 'Sesión {id}',
+  'Foundation ready': 'Foundation lista',
+  'Application information from IPC': 'Información de la aplicación desde IPC',
+  'Unable to load application information. Restart Wyss Console to try again.':
+    'No se pudo cargar la información de la aplicación. Reiniciá Wyss Console para intentar de nuevo.',
+  'Loading application information…': 'Cargando información de la aplicación…',
+  Name: 'Nombre',
+  Version: 'Versión',
+  Schema: 'Esquema',
+  'PTY diagnostic — Sprint 1A': 'Diagnóstico de PTY — Sprint 1A',
+  'Temporary backend smoke test. No terminal renderer. Preview capped at 8,192 characters.':
+    'Prueba de humo temporal del backend. Sin renderer de terminal. La vista previa se limita a 8.192 caracteres.',
+  'Run PTY smoke': 'Ejecutar prueba de PTY',
+  'Running PTY smoke…': 'Ejecutando prueba de PTY…',
+  'PTY smoke failed; backend cleanup requested.':
+    'La prueba de PTY falló; se pidió limpiar el backend.',
+  'PTY smoke PASS — create, input, output, resize, close.':
+    'Prueba de PTY APROBADA — crear, escribir, leer, cambiar tamaño, cerrar.',
+  'No PTY created.': 'No se creó ningún PTY.',
+  'Shell:': 'Shell:',
+  'Cwd:': 'Directorio:',
+  'PID (observed):': 'PID (observado):',
+  'TerminalId:': 'Id de terminal:',
+  'State:': 'Estado:',
+  'bytes received:': 'bytes recibidos:',
 };

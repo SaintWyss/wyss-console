@@ -56,7 +56,7 @@
     type LifecycleObservation,
   } from './lib/shell/lifecycle';
   import Sidebar from './lib/shell/Sidebar.svelte';
-  import { setLanguage } from './lib/i18n/index.svelte';
+  import { setLanguage, t } from './lib/i18n/index.svelte';
   import { loadSidebar, saveSidebar } from './lib/shell/sidebar-prefs';
   import type { NavGroup } from './lib/shell/nav';
   import TopBar from './lib/shell/TopBar.svelte';
@@ -364,7 +364,7 @@
     if (
       agentController.open(
         session,
-        label ?? `Session ${shortId(session)}`,
+        label ?? t('Session {id}', { id: shortId(session) }),
         label === null,
       )
     )
@@ -406,7 +406,7 @@
 </script>
 
 <div class="shell" data-rail={sidebar.rail}>
-  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <a class="skip-link" href="#main-content">{t('Skip to main content')}</a>
   <TopBar
     title={current?.label ?? ''}
     subtitle={current?.subtitle ?? ''}
