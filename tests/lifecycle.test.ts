@@ -17,6 +17,7 @@ import {
   type LifecycleObservation,
 } from '../src/lib/shell/lifecycle';
 import { parseAuthorityView } from '../src/lib/contracts/authority';
+import { tJoin } from '../src/lib/i18n/index.svelte';
 import views from './fixtures/authority-view-v1.json';
 import { lifecycle } from './lifecycle-harness';
 
@@ -283,17 +284,17 @@ it('says connected only when the link is, whatever the lifecycle says', () => {
     connected,
     observed({ phase: 'ready', origin: 'managed', update_pending: true }),
   );
-  expect(managed.note).toBe('update pending');
-  expect(managed.detail).toContain('started by Wyss Console');
-  expect(managed.detail).toContain(
+  expect(tJoin([managed.note!])).toBe('update pending');
+  expect(tJoin(managed.detail)).toContain('started by Wyss Console');
+  expect(tJoin(managed.detail)).toContain(
     'a newer authority is installed the next time it starts',
   );
   const external = summarizeLink(
     connected,
     observed({ phase: 'ready', origin: 'external' }),
   );
-  expect(external.detail).toContain('started outside Wyss Console');
-  expect(external.note).not.toBe('update pending');
+  expect(tJoin(external.detail)).toContain('started outside Wyss Console');
+  expect(external.note?.text).not.toBe('update pending');
 });
 
 it('says why the authority is not available, in words and never in commands', () => {

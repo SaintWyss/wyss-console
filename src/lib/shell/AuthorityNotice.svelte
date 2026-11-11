@@ -22,8 +22,8 @@
   aria-label={t('Authority status')}
 >
   <div class="authority-notice-main" role="status">
-    <p class="authority-notice-title">{notice.title}</p>
-    <p class="authority-notice-text">{notice.text}</p>
+    <p class="authority-notice-title">{t(notice.title)}</p>
+    <p class="authority-notice-text">{t(notice.text)}</p>
   </div>
   {#if notice.retry}
     <button type="button" class="action" disabled={retrying} onclick={onretry}
@@ -34,8 +34,8 @@
     <summary>{t('Details')}</summary>
     <dl>
       {#each notice.details as detail (detail.term)}
-        <dt>{detail.term}</dt>
-        <dd>{detail.value}</dd>
+        <dt>{t(detail.term)}</dt>
+        <dd>{t(detail.value)}</dd>
       {/each}
     </dl>
   </details>

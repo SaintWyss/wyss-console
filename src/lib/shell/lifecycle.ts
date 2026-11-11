@@ -1,4 +1,4 @@
-import { msg } from '../i18n/msg';
+import { msg, type Phrase } from '../i18n/msg';
 import type {
   LifecycleDiagnostics,
   LifecycleFailure,
@@ -76,15 +76,19 @@ const PROGRESS: Partial<
 > = {
   installing: {
     label: msg('Installing'),
-    detail: 'Installing the Wyss authority for this account.',
+    detail: [{ text: msg('Installing the Wyss authority for this account.') }],
   },
   starting: {
     label: msg('Starting'),
-    detail: 'Starting the Wyss authority.',
+    detail: [{ text: msg('Starting the Wyss authority.') }],
   },
   connecting: {
     label: msg('Starting'),
-    detail: 'The Wyss authority is starting. Waiting for it to answer.',
+    detail: [
+      {
+        text: msg('The Wyss authority is starting. Waiting for it to answer.'),
+      },
+    ],
   },
 };
 
@@ -107,20 +111,22 @@ export function summarizeLink(
   if (connected) {
     if (authority.view.connection !== 'connected' || view.phase !== 'ready')
       return link;
-    const notes = [
+    const notes: (Phrase | null)[] = [
       view.origin === 'managed'
-        ? 'started by Wyss Console'
+        ? { text: msg('started by Wyss Console') }
         : view.origin === 'external'
-          ? 'started outside Wyss Console'
+          ? { text: msg('started outside Wyss Console') }
           : null,
       view.update_pending
-        ? 'a newer authority is installed the next time it starts'
+        ? {
+            text: msg('a newer authority is installed the next time it starts'),
+          }
         : null,
-    ].filter((note) => note !== null);
+    ];
     return {
       ...link,
-      detail: [link.detail, ...notes].join(' · '),
-      note: view.update_pending ? 'update pending' : link.note,
+      detail: [...link.detail, ...notes.filter((note) => note !== null)],
+      note: view.update_pending ? { text: msg('update pending') } : link.note,
     };
   }
   const progress = PROGRESS[view.phase];
@@ -130,7 +136,7 @@ export function summarizeLink(
       key: link.key,
       label: msg('Incompatible'),
       tone: 'error',
-      detail: 'An incompatible Wyss authority is running.',
+      detail: [{ text: msg('An incompatible Wyss authority is running.') }],
     };
   if (view.phase === 'failed' && view.failure !== null) {
     const quiet = view.failure === 'stopped' || view.failure === 'not_packaged';
@@ -138,62 +144,77 @@ export function summarizeLink(
       key: link.key,
       label: quiet ? msg('Offline') : msg('Failed to start'),
       tone: quiet ? 'idle' : 'error',
-      detail: FAILURE[view.failure],
+      detail: [{ text: FAILURE[view.failure] }],
     };
   }
   return link;
 }
 
 const FAILURE: Record<LifecycleFailure, string> = {
-  not_packaged:
+  not_packaged: msg(
     'No Wyss authority is running. Automatic authority management is disabled: opening the GUI does not install or start an authority. Start wyss-control yourself and it is used as soon as it answers.',
-  package_invalid:
+  ),
+  package_invalid: msg(
     'The authority packaged with this application could not be trusted: it is missing, it is not the one this application was built with, or it is in a folder others can write to. Nothing was installed.',
-  installation_unsafe:
+  ),
+  installation_unsafe: msg(
     'The authority was not installed: the place it is installed in is not safely yours (a link, another owner, or a folder others can write to). Nothing was changed.',
-  installation_mismatch:
+  ),
+  installation_mismatch: msg(
     'A service definition Wyss Console did not write is in the place of its own. It was left as it is, and the authority was not started.',
-  install_failed:
+  ),
+  install_failed: msg(
     'The authority could not be installed. Nothing is half installed: what was there before is still in place.',
-  manager_unavailable:
+  ),
+  manager_unavailable: msg(
     'No user service manager answered, so the authority could not be started. Wyss Console starts its authority through the service manager of your login session.',
-  start_refused: 'The service manager did not start the authority.',
-  startup_failed: 'The authority was started and ended before it answered.',
-  exited_repeatedly:
+  ),
+  start_refused: msg('The service manager did not start the authority.'),
+  startup_failed: msg(
+    'The authority was started and ended before it answered.',
+  ),
+  exited_repeatedly: msg(
     'The authority ended repeatedly and is no longer being restarted.',
-  stopped:
+  ),
+  stopped: msg(
     'The authority is not running: it was stopped, or it ended and was not restarted.',
-  socket_unavailable: 'The authority is running and did not answer in time.',
-  socket_unsafe:
+  ),
+  socket_unavailable: msg(
+    'The authority is running and did not answer in time.',
+  ),
+  socket_unsafe: msg(
     'The control socket of the authority is not private to you, so it is not used.',
+  ),
 };
 
 const BUILD: Record<LifecycleDiagnostics['build'], string> = {
-  packaged: 'Packaged: carries its own authority',
-  development: 'Development: uses an authority that is already running',
-  invalid: 'Packaged, but its authority cannot be found',
+  packaged: msg('Packaged: carries its own authority'),
+  development: msg('Development: uses an authority that is already running'),
+  invalid: msg('Packaged, but its authority cannot be found'),
 };
 const INSTALLATION: Record<LifecycleDiagnostics['installation'], string> = {
-  unknown: 'Not checked yet',
-  absent: 'Not installed',
-  current: 'Installed',
-  outdated: 'Installed by another version',
-  mismatch: 'A service definition that is not Wyss Console’s',
-  unsafe: 'Not safely yours',
+  unknown: msg('Not checked yet'),
+  absent: msg('Not installed'),
+  current: msg('Installed'),
+  outdated: msg('Installed by another version'),
+  mismatch: msg('A service definition that is not Wyss Console’s'),
+  unsafe: msg('Not safely yours'),
 };
 const SERVICE: Record<LifecycleDiagnostics['service'], string> = {
-  unknown: 'Not checked yet',
-  unavailable: 'No service manager answered',
-  not_installed: 'Not installed',
-  inactive: 'Not running',
-  starting: 'Starting',
-  running: 'Running',
-  failed: 'Failed',
+  unknown: msg('Not checked yet'),
+  unavailable: msg('No service manager answered'),
+  not_installed: msg('Not installed'),
+  inactive: msg('Not running'),
+  starting: msg('Starting'),
+  running: msg('Running'),
+  failed: msg('Failed'),
 };
 
 export interface LifecycleNotice {
   tone: RuntimeTone;
+  /** A sentence to draw with `t()`. */
   title: string;
+  /** A sentence to draw with `t()`. */
   text: string;
   /** Retry is offered. */
   retry: boolean;
@@ -219,21 +240,25 @@ export function lifecycleNotice(
   )
     return null;
   const details = [
-    { term: 'This build', value: BUILD[view.diagnostics.build] },
+    { term: msg('This build'), value: BUILD[view.diagnostics.build] },
     {
-      term: 'Installation',
+      term: msg('Installation'),
       value: INSTALLATION[view.diagnostics.installation],
     },
-    { term: 'Service', value: SERVICE[view.diagnostics.service] },
+    { term: msg('Service'), value: SERVICE[view.diagnostics.service] },
   ];
   if (view.phase === 'incompatible')
     return {
       tone: 'error',
-      title: 'An incompatible Wyss authority is running',
+      title: msg('An incompatible Wyss authority is running'),
       text:
         view.origin === 'managed'
-          ? 'It is this installation’s own, from another version. It is replaced the next time it starts; it is not restarted under work that may be running.'
-          : 'It was not started by this installation, so it is left exactly as it is. Wyss Console cannot work with it.',
+          ? msg(
+              'It is this installation’s own, from another version. It is replaced the next time it starts; it is not restarted under work that may be running.',
+            )
+          : msg(
+              'It was not started by this installation, so it is left exactly as it is. Wyss Console cannot work with it.',
+            ),
       retry: false,
       details,
     };
@@ -242,8 +267,8 @@ export function lifecycleNotice(
   return {
     tone: quiet ? 'idle' : 'error',
     title: quiet
-      ? 'The Wyss authority is not running'
-      : 'The Wyss authority could not start',
+      ? msg('The Wyss authority is not running')
+      : msg('The Wyss authority could not start'),
     text: FAILURE[view.failure],
     retry: view.retry,
     details,

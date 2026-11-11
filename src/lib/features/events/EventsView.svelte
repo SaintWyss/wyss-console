@@ -12,6 +12,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
+  import { tJoin } from '../../i18n/index.svelte';
   import { APPROVAL_REASON, APPROVAL_STATE } from '../approvals/present';
   import { localTime } from '../sessions/present';
   import {
@@ -246,7 +247,7 @@
   {:else if !events.loaded && !connected}
     <div class="sessions-empty" role="status">
       <p class="empty-title">The authority is unavailable</p>
-      <p>{summarizeAuthority(authority).detail}</p>
+      <p>{tJoin(summarizeAuthority(authority).detail)}</p>
       <p>
         Events are the authority's own record and are read from it. Nothing is
         shown until it is connected. Your local terminals keep working.

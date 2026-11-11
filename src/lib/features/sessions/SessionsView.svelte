@@ -3,6 +3,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
+  import { tJoin } from '../../i18n/index.svelte';
   import type { SessionSummary } from '../../contracts/sessions';
   import type { SessionsController, SessionsState } from './controller';
   import { AGENT_MODES } from '../../contracts/sessions';
@@ -244,7 +245,7 @@
   {:else if !connected}
     <div class="sessions-empty" role="status">
       <p class="empty-title">The authority is unavailable</p>
-      <p>{summarizeAuthority(authority).detail}</p>
+      <p>{tJoin(summarizeAuthority(authority).detail)}</p>
       <p>
         Sessions are read from the authority and cannot be created, activated,
         resumed or closed until it is connected. The Console keeps working.

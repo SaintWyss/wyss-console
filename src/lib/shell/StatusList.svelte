@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../i18n/index.svelte';
+  import { t, tJoin } from '../i18n/index.svelte';
   import { summarizeAgent, type AuthorityObservation } from './authority';
   import { summarizeLink, type LifecycleObservation } from './lifecycle';
   import type { RuntimeSummary, RuntimeTone } from './runtime';
@@ -36,7 +36,7 @@
   <span
     class="pill agent"
     data-tone={agent.tone}
-    title={`${t(agent.label)} · ${agent.detail}`}
+    title={`${t(agent.label)} · ${tJoin(agent.detail)}`}
   >
     <span class="pill-key">{agent.key}</span>
     <span class="dot" aria-hidden="true"></span>
@@ -57,12 +57,14 @@
     <span
       class="pill authority"
       data-tone={link.tone}
-      title={`${t('Protocol 1 authority')} · ${t(link.label)} · ${link.detail}`}
+      title={`${t('Protocol 1 authority')} · ${t(link.label)} · ${tJoin(link.detail)}`}
     >
       <span class="pill-key">{t('Authority P1')}</span>
       <span class="dot" aria-hidden="true"></span>
       <span class="pill-value">{t(link.label)}</span>
-      {#if link.note}<span class="pill-note">{link.note}</span>{/if}
+      {#if link.note}<span class="pill-note"
+          >{t(link.note.text, link.note.values)}</span
+        >{/if}
     </span>
   {/if}
 </div>

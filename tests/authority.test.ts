@@ -5,6 +5,7 @@ import {
   type AuthorityView,
 } from '../src/lib/contracts/authority';
 import { readAuthorityState } from '../src/lib/desktop/authority-client';
+import { setLanguage, tJoin } from '../src/lib/i18n/index.svelte';
 import {
   followAuthority,
   summarizeAgent,
@@ -176,8 +177,8 @@ it('maps every link state to one honest authority status', () => {
 
 it('summarizes sessions and the event head only from a connected view', () => {
   const summary = summarizeAuthority(observed(connected));
-  expect(summary.note).toBe('1 session');
-  expect(summary.detail).toBe(
+  expect(tJoin([summary.note!])).toBe('1 session');
+  expect(tJoin(summary.detail)).toBe(
     'Wyss authority 9.9.9-test · protocol 1 · sessions: 1 prepared, 0 closed · event head 1',
   );
   const busy = summarizeAuthority(
@@ -192,11 +193,42 @@ it('summarizes sessions and the event head only from a connected view', () => {
       },
     }),
   );
-  expect(busy.note).toBe('3 sessions');
-  expect(busy.detail).toBe(
+  expect(tJoin([busy.note!])).toBe('3 sessions');
+  expect(tJoin(busy.detail)).toBe(
     'Wyss authority · protocol 1 · sessions: 3 prepared, 2 closed · event head 0',
   );
   expect(summarizeAuthority(observed(absent)).note).toBeUndefined();
+});
+
+it('draws the authority and agent sentences in Spanish, with the same places', () => {
+  setLanguage('es');
+  try {
+    const summary = summarizeAuthority(observed(connected));
+    expect(tJoin([summary.note!])).toBe('1 sesión');
+    expect(tJoin(summary.detail)).toBe(
+      'Autoridad Wyss 9.9.9-test · protocolo 1 · sesiones: 1 preparadas, 0 cerradas · último evento 1',
+    );
+    expect(
+      tJoin(
+        summarizeAgent(
+          observed({
+            ...connected,
+            agent: {
+              adapter: 'codex',
+              desired: 'running',
+              actual: 'ready',
+              runtime_version: '0.159.0',
+              model_count: 7,
+            },
+          }),
+        ).detail,
+      ),
+    ).toBe(
+      'Codex 0.159.0 · deseado running · 7 modelos · administrado por la autoridad',
+    );
+  } finally {
+    setLanguage('en');
+  }
 });
 
 it('reports the managed agent only as the authority reports it', () => {
@@ -213,18 +245,20 @@ it('reports the managed agent only as the authority reports it', () => {
   expect(agent('stopped')).toEqual(['Codex', 'Stopped', 'idle']);
   expect(agent('failed')).toEqual(['Codex', 'Failed', 'error']);
   expect(
-    summarizeAgent(
-      observed({
-        ...connected,
-        agent: {
-          adapter: 'codex',
-          desired: 'running',
-          actual: 'ready',
-          runtime_version: '0.159.0',
-          model_count: 7,
-        },
-      }),
-    ).detail,
+    tJoin(
+      summarizeAgent(
+        observed({
+          ...connected,
+          agent: {
+            adapter: 'codex',
+            desired: 'running',
+            actual: 'ready',
+            runtime_version: '0.159.0',
+            model_count: 7,
+          },
+        }),
+      ).detail,
+    ),
   ).toBe(
     'Codex 0.159.0 · desired running · 7 models · managed by the authority',
   );

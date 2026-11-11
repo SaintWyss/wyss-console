@@ -105,6 +105,101 @@ export const ES: Readonly<Record<string, string>> = {
   Unknown: 'Desconocido',
   Installing: 'Instalando',
   'Failed to start': 'No pudo iniciar',
+  'Not checked yet': 'Todavía no se revisó',
+
+  // Shell: authority and lifecycle
+  'The authority is not running. Local terminals do not depend on it.':
+    'La autoridad no está corriendo. Las terminales locales no dependen de ella.',
+  'The authority stopped answering. Reconnecting.':
+    'La autoridad dejó de responder. Reconectando.',
+  'The authority speaks another protocol or storage version.':
+    'La autoridad habla otro protocolo o versión de almacenamiento.',
+  'The authority broke the control protocol and was disconnected.':
+    'La autoridad rompió el protocolo de control y se desconectó.',
+  'The runtime directory or control socket is not private.':
+    'El directorio de runtime o el socket de control no son privados.',
+  'Looking for the Wyss authority.': 'Buscando la autoridad Wyss.',
+  'The desktop could not read the authority state.':
+    'El escritorio no pudo leer el estado de la autoridad.',
+  'Reading the canonical authority state.':
+    'Leyendo el estado canónico de la autoridad.',
+  'The console is closing its authority link.':
+    'La consola está cerrando su conexión con la autoridad.',
+  '{count} session': '{count} sesión',
+  '{count} sessions': '{count} sesiones',
+  'Wyss authority {version}': 'Autoridad Wyss {version}',
+  'Wyss authority': 'Autoridad Wyss',
+  'protocol {protocol}': 'protocolo {protocol}',
+  'sessions: {prepared} prepared, {closed} closed':
+    'sesiones: {prepared} preparadas, {closed} cerradas',
+  'event head {sequence}': 'último evento {sequence}',
+  'Codex status is known only while the authority is connected.':
+    'El estado de Codex solo se conoce mientras la autoridad está conectada.',
+  '{name} {version}': '{name} {version}',
+  '{name}': '{name}',
+  'desired {state}': 'deseado {state}',
+  '{count} model': '{count} modelo',
+  '{count} models': '{count} modelos',
+  'managed by the authority': 'administrado por la autoridad',
+  'Installing the Wyss authority for this account.':
+    'Instalando la autoridad Wyss para esta cuenta.',
+  'Starting the Wyss authority.': 'Iniciando la autoridad Wyss.',
+  'The Wyss authority is starting. Waiting for it to answer.':
+    'La autoridad Wyss está iniciando. Esperando que responda.',
+  'started by Wyss Console': 'iniciada por Wyss Console',
+  'started outside Wyss Console': 'iniciada fuera de Wyss Console',
+  'a newer authority is installed the next time it starts':
+    'se instala una autoridad más nueva la próxima vez que arranque',
+  'update pending': 'actualización pendiente',
+  'An incompatible Wyss authority is running.':
+    'Hay corriendo una autoridad Wyss incompatible.',
+  'An incompatible Wyss authority is running':
+    'Hay corriendo una autoridad Wyss incompatible',
+  'It is this installation’s own, from another version. It is replaced the next time it starts; it is not restarted under work that may be running.':
+    'Es de esta instalación, de otra versión. Se reemplaza la próxima vez que arranque; no se reinicia mientras puede haber trabajo corriendo.',
+  'It was not started by this installation, so it is left exactly as it is. Wyss Console cannot work with it.':
+    'No la inició esta instalación, así que se deja tal como está. Wyss Console no puede trabajar con ella.',
+  'The Wyss authority is not running': 'La autoridad Wyss no está corriendo',
+  'The Wyss authority could not start': 'La autoridad Wyss no pudo iniciar',
+  'This build': 'Esta compilación',
+  Service: 'Servicio',
+  'No Wyss authority is running. Automatic authority management is disabled: opening the GUI does not install or start an authority. Start wyss-control yourself and it is used as soon as it answers.':
+    'No hay ninguna autoridad Wyss corriendo. La administración automática está desactivada: abrir la GUI no instala ni inicia una autoridad. Iniciá wyss-control vos mismo y se usa en cuanto responda.',
+  'The authority packaged with this application could not be trusted: it is missing, it is not the one this application was built with, or it is in a folder others can write to. Nothing was installed.':
+    'No se pudo confiar en la autoridad empaquetada con esta aplicación: falta, no es la que se compiló con ella, o está en una carpeta en la que otros pueden escribir. No se instaló nada.',
+  'The authority was not installed: the place it is installed in is not safely yours (a link, another owner, or a folder others can write to). Nothing was changed.':
+    'La autoridad no se instaló: el lugar donde se instalaría no es seguro para vos (un enlace, otro dueño o una carpeta en la que otros pueden escribir). No se cambió nada.',
+  'A service definition Wyss Console did not write is in the place of its own. It was left as it is, and the authority was not started.':
+    'Hay una definición de servicio que Wyss Console no escribió en el lugar que le corresponde. Se dejó como está y la autoridad no se inició.',
+  'The authority could not be installed. Nothing is half installed: what was there before is still in place.':
+    'No se pudo instalar la autoridad. No quedó nada a medio instalar: lo que había antes sigue en su lugar.',
+  'No user service manager answered, so the authority could not be started. Wyss Console starts its authority through the service manager of your login session.':
+    'Ningún administrador de servicios de usuario respondió, así que no se pudo iniciar la autoridad. Wyss Console la inicia a través del administrador de servicios de tu sesión.',
+  'The service manager did not start the authority.':
+    'El administrador de servicios no inició la autoridad.',
+  'The authority was started and ended before it answered.':
+    'La autoridad se inició y terminó antes de responder.',
+  'The authority ended repeatedly and is no longer being restarted.':
+    'La autoridad terminó varias veces y ya no se reinicia.',
+  'The authority is not running: it was stopped, or it ended and was not restarted.':
+    'La autoridad no está corriendo: se detuvo, o terminó y no se reinició.',
+  'The authority is running and did not answer in time.':
+    'La autoridad está corriendo y no respondió a tiempo.',
+  'The control socket of the authority is not private to you, so it is not used.':
+    'El socket de control de la autoridad no es privado para vos, así que no se usa.',
+  'Packaged: carries its own authority':
+    'Empaquetado: trae su propia autoridad',
+  'Development: uses an authority that is already running':
+    'Desarrollo: usa una autoridad que ya está corriendo',
+  'Packaged, but its authority cannot be found':
+    'Empaquetado, pero no se encuentra su autoridad',
+  Installed: 'Instalada',
+  'Installed by another version': 'Instalada por otra versión',
+  'A service definition that is not Wyss Console’s':
+    'Una definición de servicio que no es de Wyss Console',
+  'Not safely yours': 'No es de tu propiedad de forma segura',
+  'No service manager answered':
+    'No respondió ningún administrador de servicios',
 
   // Settings
   'Reading preferences': 'Leyendo preferencias',

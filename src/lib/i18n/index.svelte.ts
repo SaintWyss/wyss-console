@@ -1,7 +1,8 @@
 import type { Language } from '../contracts/settings';
 import { ES } from './es';
+import type { Phrase } from './msg';
 
-export { msg } from './msg';
+export { msg, type Phrase } from './msg';
 
 /**
  * The language of the window's own text. English is the source: every sentence is written in
@@ -39,4 +40,9 @@ function fill(template: string, values?: Record<string, string | number>) {
  */
 export function t(text: string, values?: Record<string, string | number>) {
   return fill(DICTIONARIES[language]?.[text] ?? text, values);
+}
+
+/** Several phrases drawn as one sentence, joined the way the window joins its parts. */
+export function tJoin(parts: readonly Phrase[]): string {
+  return parts.map((part) => t(part.text, part.values)).join(' · ');
 }

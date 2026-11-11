@@ -5,6 +5,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
+  import { tJoin } from '../../i18n/index.svelte';
   import { BINDING, localTime } from '../sessions/present';
   import ApprovalCard from '../approvals/ApprovalCard.svelte';
   import type {
@@ -199,7 +200,7 @@
       <p class="sessions-status failed unknown" role="status">
         {agent.link === 'connecting'
           ? 'Connecting to the authority…'
-          : `${summarizeAuthority(authority).detail} What is shown was read before the connection was lost.`}
+          : `${tJoin(summarizeAuthority(authority).detail)} What is shown was read before the connection was lost.`}
       </p>
     {:else if view.readFailure}
       <div class="sessions-status failed" role="alert">

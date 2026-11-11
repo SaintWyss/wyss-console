@@ -1,4 +1,4 @@
-import { msg } from '../i18n/msg';
+import { msg, type Phrase } from '../i18n/msg';
 import type {
   AgentActualState,
   AuthorityFault,
@@ -21,10 +21,10 @@ export interface StatusSummary {
   key: string;
   label: string;
   tone: RuntimeTone;
-  /** One sentence for the tooltip. */
-  detail: string;
+  /** One sentence for the tooltip, in parts that are drawn joined. */
+  detail: Phrase[];
   /** Secondary text shown next to the label when there is room. */
-  note?: string;
+  note?: Phrase;
 }
 
 const RETRY_MS = 1000;
@@ -84,33 +84,53 @@ const FAULTS: Record<
   absent: {
     label: msg('Offline'),
     tone: 'idle',
-    detail:
-      'The authority is not running. Local terminals do not depend on it.',
+    detail: [
+      {
+        text: msg(
+          'The authority is not running. Local terminals do not depend on it.',
+        ),
+      },
+    ],
   },
   lost: {
     label: msg('Reconnecting'),
     tone: 'warn',
-    detail: 'The authority stopped answering. Reconnecting.',
+    detail: [{ text: msg('The authority stopped answering. Reconnecting.') }],
   },
   incompatible: {
     label: msg('Incompatible'),
     tone: 'error',
-    detail: 'The authority speaks another protocol or storage version.',
+    detail: [
+      {
+        text: msg('The authority speaks another protocol or storage version.'),
+      },
+    ],
   },
   malformed: {
     label: msg('Rejected'),
     tone: 'error',
-    detail: 'The authority broke the control protocol and was disconnected.',
+    detail: [
+      {
+        text: msg(
+          'The authority broke the control protocol and was disconnected.',
+        ),
+      },
+    ],
   },
   unsafe_path: {
     label: msg('Unsafe'),
     tone: 'error',
-    detail: 'The runtime directory or control socket is not private.',
+    detail: [
+      {
+        text: msg('The runtime directory or control socket is not private.'),
+      },
+    ],
   },
 };
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+/** A count with the word for it, in the window's one and many forms. */
+function counted(count: number, one: string, many: string): Phrase {
+  return { text: count === 1 ? one : many, values: { count } };
 }
 
 /** Presentation only: the link to the authority as one top-bar status. */
@@ -123,30 +143,52 @@ export function summarizeAuthority(
       key,
       label: msg('Connecting'),
       tone: 'pending',
-      detail: 'Looking for the Wyss authority.',
+      detail: [{ text: msg('Looking for the Wyss authority.') }],
     };
   if (observation.state === 'unavailable')
     return {
       key,
       label: msg('Unavailable'),
       tone: 'error',
-      detail: 'The desktop could not read the authority state.',
+      detail: [
+        { text: msg('The desktop could not read the authority state.') },
+      ],
     };
   const { view } = observation;
   if (view.connection === 'connected' && view.authority) {
     const a = view.authority;
-    const sessions = `${a.prepared_sessions} prepared, ${a.closed_sessions} closed`;
     return {
       key,
       label: msg('Connected'),
       tone: 'ok',
-      note: plural(a.prepared_sessions, 'session'),
+      note: counted(
+        a.prepared_sessions,
+        msg('{count} session'),
+        msg('{count} sessions'),
+      ),
       detail: [
-        `Wyss authority${a.service_version ? ` ${a.service_version}` : ''}`,
-        `protocol ${a.protocol_version}`,
-        `sessions: ${sessions}`,
-        `event head ${a.last_sequence ?? '0'}`,
-      ].join(' · '),
+        a.service_version
+          ? {
+              text: msg('Wyss authority {version}'),
+              values: { version: a.service_version },
+            }
+          : { text: msg('Wyss authority') },
+        {
+          text: msg('protocol {protocol}'),
+          values: { protocol: a.protocol_version },
+        },
+        {
+          text: msg('sessions: {prepared} prepared, {closed} closed'),
+          values: {
+            prepared: a.prepared_sessions,
+            closed: a.closed_sessions,
+          },
+        },
+        {
+          text: msg('event head {sequence}'),
+          values: { sequence: a.last_sequence ?? '0' },
+        },
+      ],
     };
   }
   if (view.connection === 'synchronizing')
@@ -154,21 +196,21 @@ export function summarizeAuthority(
       key,
       label: msg('Syncing'),
       tone: 'pending',
-      detail: 'Reading the canonical authority state.',
+      detail: [{ text: msg('Reading the canonical authority state.') }],
     };
   if (view.connection === 'stopped')
     return {
       key,
       label: msg('Stopped'),
       tone: 'idle',
-      detail: 'The console is closing its authority link.',
+      detail: [{ text: msg('The console is closing its authority link.') }],
     };
   if (view.reason) return { key, ...FAULTS[view.reason] };
   return {
     key,
     label: msg('Connecting'),
     tone: 'pending',
-    detail: 'Looking for the Wyss authority.',
+    detail: [{ text: msg('Looking for the Wyss authority.') }],
   };
 }
 
@@ -194,17 +236,28 @@ export function summarizeAgent(
       key: 'Codex',
       label: msg('Unknown'),
       tone: 'idle',
-      detail: 'Codex status is known only while the authority is connected.',
+      detail: [
+        {
+          text: msg(
+            'Codex status is known only while the authority is connected.',
+          ),
+        },
+      ],
     };
   const name = agent.adapter === 'codex' ? 'Codex' : agent.adapter;
   return {
     key: name,
     ...AGENT[agent.actual],
     detail: [
-      `${name}${agent.runtime_version ? ` ${agent.runtime_version}` : ''}`,
-      `desired ${agent.desired}`,
-      plural(agent.model_count, 'model'),
-      'managed by the authority',
-    ].join(' · '),
+      agent.runtime_version
+        ? {
+            text: msg('{name} {version}'),
+            values: { name, version: agent.runtime_version },
+          }
+        : { text: msg('{name}'), values: { name } },
+      { text: msg('desired {state}'), values: { state: agent.desired } },
+      counted(agent.model_count, msg('{count} model'), msg('{count} models')),
+      { text: msg('managed by the authority') },
+    ],
   };
 }

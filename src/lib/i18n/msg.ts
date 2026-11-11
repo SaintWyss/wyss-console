@@ -5,3 +5,12 @@
  * The dictionary test reads these calls to know every sentence that must have a translation.
  */
 export const msg = <T extends string>(text: T): T => text;
+
+/**
+ * A sentence a presenter hands to a view: a `msg()` sentence and the values its places take.
+ * The view draws it with `t(text, values)`, so every part is translated where it is drawn.
+ */
+export interface Phrase {
+  text: string;
+  values?: Record<string, string | number>;
+}

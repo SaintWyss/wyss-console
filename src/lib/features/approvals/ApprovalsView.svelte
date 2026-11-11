@@ -3,6 +3,7 @@
     summarizeAuthority,
     type AuthorityObservation,
   } from '../../shell/authority';
+  import { tJoin } from '../../i18n/index.svelte';
   import { localTime } from '../sessions/present';
   import ApprovalCard from './ApprovalCard.svelte';
   import type { ApprovalsController, ApprovalsState } from './controller';
@@ -69,7 +70,7 @@
   {:else if !connected}
     <div class="sessions-empty" role="status">
       <p class="empty-title">The authority is unavailable</p>
-      <p>{summarizeAuthority(authority).detail}</p>
+      <p>{tJoin(summarizeAuthority(authority).detail)}</p>
       <p>
         Approvals are read from the authority and cannot be decided until it is
         connected. Nothing is approved or denied in the meantime. Your local
