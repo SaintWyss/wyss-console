@@ -714,7 +714,7 @@ fn architecture(files: &[(String, u64)], techs: &[Technology]) -> Vec<Pattern> {
             evidence: vec!["frontend and backend frameworks".to_owned()],
         });
     }
-    out.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+    out.sort_by_key(|p| std::cmp::Reverse(p.confidence));
     out
 }
 
@@ -883,12 +883,12 @@ fn member(line: &str, lang: &'static str) -> Option<(bool, String)> {
             return Some((false, format!("{name}: {}", ty)));
         }
     }
-    if lang == "Python" {
-        if let Some(rest) = t.strip_prefix("self.") {
-            let n = ident(rest);
-            if !n.is_empty() && rest[n.len()..].trim_start().starts_with('=') {
-                return Some((false, n));
-            }
+    if lang == "Python"
+        && let Some(rest) = t.strip_prefix("self.")
+    {
+        let n = ident(rest);
+        if !n.is_empty() && rest[n.len()..].trim_start().starts_with('=') {
+            return Some((false, n));
         }
     }
     None
@@ -1072,14 +1072,14 @@ fn types_in(text: &str, file: &str, lang: &'static str, out: &mut Vec<TypeDecl>)
                 decl.extends = names(&clause(&header, ":", &["{"]).unwrap_or_default());
             }
             "Rust" => {
-                if kind == "trait" {
-                    if let Some(c) = clause(&header, ":", &["{", " where "]) {
-                        decl.extends = c
-                            .split('+')
-                            .map(|s| ident(s.trim()))
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                    }
+                if kind == "trait"
+                    && let Some(c) = clause(&header, ":", &["{", " where "])
+                {
+                    decl.extends = c
+                        .split('+')
+                        .map(|s| ident(s.trim()))
+                        .filter(|s| !s.is_empty())
+                        .collect();
                 }
             }
             "C#" => {
@@ -1104,10 +1104,10 @@ fn types_in(text: &str, file: &str, lang: &'static str, out: &mut Vec<TypeDecl>)
                 if let Some(c) = clause(&header, " implements ", &["{"]) {
                     decl.implements = names(&c);
                 }
-                if lang == "Dart" {
-                    if let Some(c) = clause(&header, " with ", &["{", " implements "]) {
-                        decl.implements.extend(names(&c));
-                    }
+                if lang == "Dart"
+                    && let Some(c) = clause(&header, " with ", &["{", " implements "])
+                {
+                    decl.implements.extend(names(&c));
                 }
             }
         }
@@ -1162,12 +1162,11 @@ fn types_in(text: &str, file: &str, lang: &'static str, out: &mut Vec<TypeDecl>)
                 if !d.implements.iter().any(|x| x == tr) {
                     d.implements.push(tr.to_owned());
                 }
-            } else if let Some(m) = what.strip_prefix('@') {
-                if d.methods.len() + d.fields.len() < MAX_MEMBERS
-                    && !d.methods.iter().any(|x| x == m)
-                {
-                    d.methods.push(m.to_owned());
-                }
+            } else if let Some(m) = what.strip_prefix('@')
+                && d.methods.len() + d.fields.len() < MAX_MEMBERS
+                && !d.methods.iter().any(|x| x == m)
+            {
+                d.methods.push(m.to_owned());
             }
         }
     }
@@ -1288,7 +1287,7 @@ pub fn inspect(root: &str) -> Result<Insight, Failure> {
             bytes,
         })
         .collect();
-    languages.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    languages.sort_by_key(|l| std::cmp::Reverse(l.bytes));
 
     let mut t = Techs {
         list: Vec::new(),
