@@ -110,7 +110,9 @@ fn spec(executable: PathBuf, dir: PathBuf, deadline: Duration) -> WorkerSpec {
 }
 
 fn wait_finished(manager: &Manager, id: &str) -> Record {
-    for _ in 0..200 {
+    // A generous budget: the whole binary's tests run in parallel, and a worker child can be slow
+    // under that load (it passes alone in well under a second).
+    for _ in 0..1200 {
         let record = manager.get(id, None).unwrap();
         if record.status != "running" && record.ended_at.is_some() {
             return record;

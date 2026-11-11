@@ -508,6 +508,8 @@ mod tests {
             .collect();
         let expected = [
             "allow-get-app-info",
+            // The closed orchestration request bridge (main window only; tests/orchestration-capability.test.ts).
+            "allow-orchestration-call",
             "allow-authority-state",
             // The lifecycle: one read and Retry. Nothing that names a service or a file.
             "allow-authority-lifecycle",
