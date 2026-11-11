@@ -425,6 +425,38 @@ pub async fn projects_project(
     blocking(move || service.get_project(&request.id)).await
 }
 
+/// What the project is made of, read from its folder (technologies, architecture, README, types).
+#[tauri::command]
+pub async fn projects_insight(
+    app: AppHandle,
+    projects: State<'_, Projects>,
+    request: IdRequest,
+) -> Result<super::insight::Insight, Failure> {
+    let service = projects.get(&app);
+    blocking(move || super::insight::inspect(&service.project_root(&request.id)?)).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadmeRequest {
+    id: String,
+    content: String,
+}
+
+/// Writes the project's README and nothing else; answers the file's name.
+#[tauri::command]
+pub async fn projects_readme_save(
+    app: AppHandle,
+    projects: State<'_, Projects>,
+    request: ReadmeRequest,
+) -> Result<String, Failure> {
+    let service = projects.get(&app);
+    blocking(move || {
+        super::insight::save_readme(&service.project_root(&request.id)?, &request.content)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn projects_workspace(
     app: AppHandle,
@@ -843,6 +875,8 @@ const COMMANDS: &[&str] = &[
     "projects_list",
     "projects_project",
     "projects_workspace",
+    "projects_insight",
+    "projects_readme_save",
     "projects_sessions",
     "projects_choose_folder",
     "projects_forget_picks",
@@ -873,6 +907,8 @@ pub fn extension() -> wyss_console::Extension {
             projects_list,
             projects_project,
             projects_workspace,
+            projects_insight,
+            projects_readme_save,
             projects_sessions,
             projects_choose_folder,
             projects_forget_picks,

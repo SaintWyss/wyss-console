@@ -199,6 +199,8 @@ fn main() {
             "projects_list",
             "projects_project",
             "projects_workspace",
+            "projects_insight",
+            "projects_readme_save",
             "projects_sessions",
             "projects_choose_folder",
             "projects_forget_picks",

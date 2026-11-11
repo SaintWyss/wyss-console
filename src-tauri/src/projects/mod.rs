@@ -17,6 +17,7 @@ pub mod apply;
 pub mod claim;
 pub mod command;
 pub mod commands;
+pub mod insight;
 pub mod migration;
 pub mod owner;
 pub mod service;

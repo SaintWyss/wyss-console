@@ -683,6 +683,33 @@ impl ProjectsService {
             .ok_or_else(|| failure(ErrorCode::ContextStale))
     }
 
+    /// The project's folder, only while it is the same folder the binding recorded. The path
+    /// stays on this side: callers read inside it and answer with relative names only.
+    pub fn project_root(&self, id: &str) -> Result<String, Failure> {
+        let store = self.ready()?;
+        let project = store
+            .projects
+            .iter()
+            .find(|p| p.id.as_str() == id)
+            .ok_or_else(|| failure(ErrorCode::ContextStale))?;
+        let binding = project
+            .default_binding_id
+            .as_ref()
+            .and_then(|b| store.bindings.iter().find(|x| &x.id == b))
+            .ok_or_else(|| failure(ErrorCode::RootMissing))?;
+        match self.owner.root(binding.path.as_str()) {
+            Ok(root)
+                if root.device == binding.observation.device.get()
+                    && root.inode == binding.observation.inode.get() =>
+            {
+                Ok(root.path)
+            }
+            Ok(_) => Err(failure(ErrorCode::RootIdentityChanged)),
+            Err(RootError::Missing) => Err(failure(ErrorCode::RootMissing)),
+            Err(_) => Err(failure(ErrorCode::RootIneligible)),
+        }
+    }
+
     fn session_view(
         &self,
         association: &Association,
