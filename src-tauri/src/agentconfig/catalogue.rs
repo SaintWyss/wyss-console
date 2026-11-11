@@ -1094,28 +1094,45 @@ fn verdict(text: &str) -> (bool, bool) {
     )
 }
 
-/// The `description:` of a file's YAML front matter, read from its first kilobytes.
+/// The `description:` of a file's YAML front matter, read from its first kilobytes. A folded (`>`)
+/// or literal (`|`) block is joined onto one line, which is how the list shows it.
 fn description(bytes: &[u8]) -> String {
     let head = &bytes[..bytes.len().min(FRONT_MATTER_BYTES)];
     let Ok(text) = std::str::from_utf8(head) else {
         return String::new();
     };
     let Some(rest) = text.strip_prefix("---\n") else {
-        return String::new();
+        return text
+            .lines()
+            .find(|line| line.trim_start().starts_with("description ="))
+            .and_then(|line| toml::from_str::<toml::Value>(line).ok())
+            .and_then(|value| value.get("description")?.as_str().map(str::to_owned))
+            .unwrap_or_default()
+            .chars()
+            .take(DESCRIPTION_CHARS)
+            .collect();
     };
     let front = rest.split("\n---").next().unwrap_or_default();
-    front
-        .lines()
-        .find_map(|line| line.strip_prefix("description:"))
-        .map(|value| {
-            value
-                .trim()
-                .trim_matches(|c| c == '"' || c == '\'')
-                .chars()
-                .take(DESCRIPTION_CHARS)
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut lines = front.lines();
+    while let Some(line) = lines.next() {
+        if let Some(value) = line.strip_prefix("description:") {
+            let value = value.trim();
+            let result = if matches!(value, ">" | ">-" | ">+" | "|" | "|-" | "|+") {
+                lines
+                    .take_while(|line| {
+                        line.starts_with(' ') || line.starts_with('\t') || line.is_empty()
+                    })
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                value.trim_matches(|c| c == '"' || c == '\'').to_owned()
+            };
+            return result.chars().take(DESCRIPTION_CHARS).collect();
+        }
+    }
+    String::new()
 }
 
 /// Why a file received from another computer may not be stored: the reasons discovery leaves a file
@@ -1690,6 +1707,27 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[test]
+    fn reads_folded_and_literal_yaml_and_toml_agent_descriptions() {
+        assert_eq!(
+            super::description(
+                b"---\nname: test\ndescription: >-\n  First line\n  second line.\nother: x\n---\n"
+            ),
+            "First line second line."
+        );
+        assert_eq!(
+            super::description(b"---\nname: literal\ndescription: |\n  Keeps the\n  lines.\n---\n"),
+            "Keeps the lines."
+        );
+        assert_eq!(
+            super::description(
+                b"name = 'agent'\ndescription = 'Reviews changes'\nprompt = \"\"\"unfinished"
+            ),
+            "Reviews changes"
+        );
+        assert_eq!(super::description(b"---\nname: no-description\n---\n"), "");
+    }
+
     fn credential_value(text: &str) -> bool {
         verdict(text).0
     }
@@ -2022,6 +2060,11 @@ mod tests {
             "---\nname: reviewer\ndescription: Reviews diffs\n---\nbody",
         )
         .unwrap();
+        fs::write(
+            home.join(".claude/agents/folded.md"),
+            "---\nname: folded\ndescription: >-\n  Writes the\n  folded summary.\n---\nbody",
+        )
+        .unwrap();
         fs::create_dir_all(home.join(".claude/rules")).unwrap();
         fs::write(home.join(".claude/rules/style.md"), "Use two spaces.").unwrap();
         fs::create_dir_all(home.join(".codex")).unwrap();
@@ -2038,6 +2081,10 @@ mod tests {
         let scan = scan_home(home.clone(), Some(project));
         let reviewer = find(&scan, "agent", "reviewer");
         assert_eq!(reviewer.description, "Reviews diffs");
+        assert_eq!(
+            find(&scan, "agent", "folded").description,
+            "Writes the folded summary."
+        );
         assert_eq!(reviewer.source, "claude_user_agents");
         assert_eq!(reviewer.blocked, None);
         assert_eq!(find(&scan, "rule", "style").source, "claude_user_rules");

@@ -131,6 +131,27 @@ export const arsenalClient = {
     call('arsenal_selection_delete', { request: { id } }).then(() => undefined),
   preview: (id: string) =>
     answer<Preview>('arsenal_preview', parsePreview, { request: { id } }),
+  planPreset: (
+    provider: ArsenalProvider,
+    items: Item[],
+    composites: string[],
+  ) =>
+    answer<Preview>('arsenal_preset_plan', parsePreview, {
+      request: { provider, items, composites },
+    }),
+  groups: () =>
+    answer<Record<string, string>>('arsenal_groups', (value) => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value))
+        throw new Error('groups');
+      const entries = Object.entries(value);
+      if (entries.some(([, group]) => typeof group !== 'string'))
+        throw new Error('group');
+      return Object.fromEntries(entries) as Record<string, string>;
+    }),
+  moveGroup: (identity: string, group_id: string | null) =>
+    call('arsenal_group_move', { request: { identity, group_id } }).then(
+      () => undefined,
+    ),
   /** The configuration one terminal would start with, computed now by the desktop. */
   terminalPlan: (
     selection: string,
