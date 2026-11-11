@@ -12,11 +12,11 @@ Objetivo: dentro de la ventana de Proyectos, ver de un proyecto:
 
 **Ninguno MCP.** Todo es local y sin red:
 
-| Pieza | Dónde corre | Ya existe |
-|---|---|---|
-| Escaneo de carpeta, detección de tecnologías/arquitectura, extracción de tipos, leer/guardar README | Backend Rust de Tauri (`src-tauri/src/projects/insight.rs`) | ✅ escrito (falta compilar en una máquina con GTK) |
-| Comandos IPC `projects_insight`, `projects_readme_save` | `src-tauri/src/projects/commands.rs` | ✅ registrados + `build.rs` + `capabilities/projects.json` |
-| Render Markdown, diagrama UML SVG, exportes Mermaid/PlantUML | Frontend Svelte (sin dependencias nuevas) | ❌ por hacer (pasos 2–6) |
+| Pieza                                                                                               | Dónde corre                                                 | Ya existe                                                  |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| Escaneo de carpeta, detección de tecnologías/arquitectura, extracción de tipos, leer/guardar README | Backend Rust de Tauri (`src-tauri/src/projects/insight.rs`) | ✅ escrito (falta compilar en una máquina con GTK)         |
+| Comandos IPC `projects_insight`, `projects_readme_save`                                             | `src-tauri/src/projects/commands.rs`                        | ✅ registrados + `build.rs` + `capabilities/projects.json` |
+| Render Markdown, diagrama UML SVG, exportes Mermaid/PlantUML                                        | Frontend Svelte (sin dependencias nuevas)                   | ❌ por hacer (pasos 2–6)                                   |
 
 Requisitos para correr: lo mismo que la app hoy (`npm run desktop:dev`). El proyecto tiene que tener carpeta enlazada y **disponible** (`root.availability === 'available'`); si no, el backend responde `root_missing` / `root_identity_changed` / `root_ineligible`.
 
@@ -38,9 +38,11 @@ Archivos tocados: `src-tauri/src/projects/{insight.rs,mod.rs,service.rs,commands
 ```bash
 npm run rust:fmt
 ```
+
 ```bash
 node scripts/tool.mjs cargo test --locked --manifest-path src-tauri/Cargo.toml --lib insight
 ```
+
 ```bash
 npm run rust:clippy
 ```
@@ -63,6 +65,7 @@ Forma JSON que devuelve `projects_insight` (camelCase):
   types: { name: string; kind: 'class'|'interface'|'struct'|'enum'|'trait'; file: string; language: string; extends: string[]; implements: string[]; fields: string[]; methods: string[] }[];
 }
 ```
+
 `projects_readme_save({ request: { id, content } })` → `string` (nombre del archivo).
 
 ## Paso 1 — Contrato TS: `src/lib/contracts/insight.ts`
@@ -79,6 +82,7 @@ Agregar a la interfaz `ProjectsClient` y a `desktopProjects`:
 insight(projectId: string): Promise<Insight>;
 saveReadme(projectId: string, content: string): Promise<string>;
 ```
+
 ```ts
 async insight(id) {
   return checked(await call('projects_insight', { request: { id } }), parseInsight);
@@ -90,13 +94,15 @@ async saveReadme(id, content) {
   });
 },
 ```
+
 Buscar con `grep -rn "ProjectsClient" tests src` los fakes de test y agregarles estos dos métodos (pueden `throw`), para que `npm run typecheck` pase.
 
 ## Paso 3 — Markdown seguro: `src/lib/features/insight/markdown.ts`
 
 Función pura `renderMarkdown(src: string): string` (sin dependencias):
+
 1. `escape()` de `& < > " '` sobre TODO el texto primero.
-2. Bloques: ```` ``` ```` fences (con lenguaje como clase), `#`…`######`, `>` citas, listas `-`/`*`/`1.`, tareas `- [ ]`/`- [x]`, `---`, tablas GFM (`|a|b|` + `|---|`), párrafos.
+2. Bloques: ` ``` ` fences (con lenguaje como clase), `#`…`######`, `>` citas, listas `-`/`*`/`1.`, tareas `- [ ]`/`- [x]`, `---`, tablas GFM (`|a|b|` + `|---|`), párrafos.
 3. Inline (sobre texto ya escapado): `` `code` ``, `**bold**`, `*em*`/`_em_`, `~~del~~`, `[txt](url)`, `![alt](url)`, autolinks `https://…`.
 4. `safeUrl(url)`: permitir solo `https:`, `http:`, `mailto:`, `#…`, y rutas relativas (estas se muestran como texto/link deshabilitado: no hay acceso a archivos locales desde el webview). Todo lo demás → `#`.
 5. Imágenes: solo `https:`; si no, mostrar `[imagen: alt]`.
@@ -106,22 +112,23 @@ Tests `tests/markdown.test.ts`: encabezados, listas, tabla, code fence, y **XSS*
 ## Paso 4 — UML: `src/lib/features/insight/uml.ts`
 
 Funciones puras:
+
 - `relations(types)`: `{from, to, kind: 'extends'|'implements'}[]` solo cuando `to` existe en `types`.
 - `toMermaid(types)`: `classDiagram` con `class X { <<interface>> +field +method() }`, `Base <|-- X`, `Iface <|.. X`.
 - `toPlantUml(types)`: `@startuml … @enduml` (`class`, `interface`, `enum`, `X --|> Base`, `X ..|> Iface`).
-- `layout(types, rels)`: layout por niveles (los padres arriba): nivel = profundidad en la cadena extends/implements; ancho de caja = max(nombre, miembros)*7px+16; alto = 24 + 16*(miembros); posicionar en grilla por nivel. Devuelve `{ boxes: {name,x,y,w,h}[], width, height }`.
+- `layout(types, rels)`: layout por niveles (los padres arriba): nivel = profundidad en la cadena extends/implements; ancho de caja = max(nombre, miembros)_7px+16; alto = 24 + 16_(miembros); posicionar en grilla por nivel. Devuelve `{ boxes: {name,x,y,w,h}[], width, height }`.
 - Filtrado: por carpeta (prefijo de `file`) y por texto; por defecto mostrar solo tipos con alguna relación si hay más de 60.
 
 Tests `tests/uml.test.ts` para `toMermaid`/`toPlantUml`/`relations`.
 
 ## Paso 5 — Componentes: `src/lib/features/insight/`
 
-- `InsightPanel.svelte` — props `{ client: ProjectsClient; projectId: string; onClose: () => void }`. Carga `client.insight(projectId)` al montar; estados *cargando / error (mostrar `failure.code` con el mismo texto que usa ProjectsView) / listo*. Tabs: **Resumen · Tecnologías · Arquitectura · UML · README**. Botón "Volver a analizar".
-  - *Resumen*: tarjetas (archivos, carpetas, tamaño legible, git, licencia), `structure` como lista, `scripts` en tabla, aviso si `truncated`.
-  - *Tecnologías*: barra apilada de lenguajes por `bytes` (excluir Markdown/JSON/YAML de la barra), chips de tecnologías agrupados por `category` con `version` y `source` en tooltip.
-  - *Arquitectura*: tarjeta por patrón con barra de confianza, descripción y evidencia; si vacío: "No se detectó un patrón claro".
+- `InsightPanel.svelte` — props `{ client: ProjectsClient; projectId: string; onClose: () => void }`. Carga `client.insight(projectId)` al montar; estados _cargando / error (mostrar `failure.code` con el mismo texto que usa ProjectsView) / listo_. Tabs: **Resumen · Tecnologías · Arquitectura · UML · README**. Botón "Volver a analizar".
+  - _Resumen_: tarjetas (archivos, carpetas, tamaño legible, git, licencia), `structure` como lista, `scripts` en tabla, aviso si `truncated`.
+  - _Tecnologías_: barra apilada de lenguajes por `bytes` (excluir Markdown/JSON/YAML de la barra), chips de tecnologías agrupados por `category` con `version` y `source` en tooltip.
+  - _Arquitectura_: tarjeta por patrón con barra de confianza, descripción y evidencia; si vacío: "No se detectó un patrón claro".
 - `UmlDiagram.svelte` — SVG con `layout()`; cajas con estereotipo (`«interface»`, `«enum»`…), separador campos/métodos, flechas: `extends` línea sólida + triángulo hueco, `implements` línea punteada + triángulo hueco (`<marker>`). Zoom con rueda y pan arrastrando (`viewBox`). Click en caja → muestra `file`. Botones: **Copiar Mermaid**, **Copiar PlantUML**, **Descargar SVG** (Blob + `<a download>`).
-- `ReadmeEditor.svelte` — `textarea` (`bind:value`) + `<div class="md">{@html renderMarkdown(text)}</div>` en dos columnas (en pantallas angostas: toggle Editar/Vista). Modos: *Vista*, *Editar*, *Dividido* (default al editar). Indicador "sin guardar"; Guardar → `client.saveReadme`; Ctrl/Cmd+S guarda; si no hay README, botón "Crear README.md". Si `readme.truncated`, deshabilitar guardar (evita perder contenido). Scroll sincronizado opcional (por proporción).
+- `ReadmeEditor.svelte` — `textarea` (`bind:value`) + `<div class="md">{@html renderMarkdown(text)}</div>` en dos columnas (en pantallas angostas: toggle Editar/Vista). Modos: _Vista_, _Editar_, _Dividido_ (default al editar). Indicador "sin guardar"; Guardar → `client.saveReadme`; Ctrl/Cmd+S guarda; si no hay README, botón "Crear README.md". Si `readme.truncated`, deshabilitar guardar (evita perder contenido). Scroll sincronizado opcional (por proporción).
 
 Estilos: usar las variables/clases existentes de `src/app.css` (`.action`, colores) para que encaje con el resto de la UI.
 
@@ -136,12 +143,15 @@ Estilos: usar las variables/clases existentes de `src/app.css` (`.action`, color
 ```bash
 npm run format
 ```
+
 ```bash
 npm run check
 ```
+
 ```bash
 npm run check:rust
 ```
+
 Probar manualmente con `npm run desktop:dev`: abrir un proyecto (p. ej. este repo), ver que detecte Svelte, Vite, Vitest, Tauri, Rust, "Desktop app" y "Feature-based"; abrir UML y README, editar y ver la vista previa en vivo; guardar y confirmar el cambio con `git diff README.md`.
 
 ## Criterios de aceptación
