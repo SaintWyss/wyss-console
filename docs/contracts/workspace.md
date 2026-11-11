@@ -469,35 +469,55 @@ Opening project configuration must make its exact scope explicit; existing draft
 cannot silently switch with another window. Global administration remains separate.
 Define the bounded bridge/DTO and multi-window behavior before implementation (REQ-01).
 
-### Project terminal recovery is presently ring-only
+### Project terminal recovery: attach, draw, commit
 
-`SessionPane.svelte` creates its own renderer, reads from offset zero and handles the
-bounded host-ring tail/gap. It does not call the ordinary terminal snapshot attach/commit
-path. A packaged helper and successful ordinary-terminal attach tests therefore do not
-qualify full-screen recovery inside Projects. The project terminal path must use its checked
-Owner transport, not the generic HostLink that can spawn/retry/fall back.
+`projects_term_attach` resolves the association in the backend to its recorded host epoch
+and terminal and asks the checked Owner for `term_screen`. The Owner never starts,
+reconnects, retries or falls back; a different host is `host_changed` and is asked nothing.
+A usable screen (sides 1..512, bounded repaint, an offset) is staged and answered as
+`mode: screen` with a one-use token. Otherwise the answer is `mode: replay` with a closed
+reason (`host_without_screen`, `helper_missing`, `too_large`, `timeout`, `no_answer`,
+`refused`, `invalid_screen`).
 
-Chosen direction: resolve an association to the current host epoch in the backend; obtain a
-bounded screen snapshot through that checked owner; draw before committing a one-use reader
-cursor. Bind staged state to association, terminal, epoch and reader. A stale token/host or
-failed draw cannot skip bytes. Hosts without the feature retain explicit labeled ring replay.
-Qualify project switch, detach/reattach, helper failure and host replacement (REQ-02).
+The pane draws first and then calls `projects_term_attach_commit {associationId, token,
+drawn}`, which answers `{from}`: the screen's end when drawn, 0 when not, so a screen that
+could not be drawn skips nothing. A token is spent by the commit that names it. It is
+honoured only for the window and association it was staged for, while that association still
+names the same terminal and epoch and that host still answers; a second attach by the same
+reader kills the earlier token. A refused commit is `context_stale` (field `attach_token`)
+or `host_changed`: the pane clears what it drew and replays from 0. Every replay is labelled
+in the pane with its reason; it is never presented as a recovered full screen.
+The read position is the pane's own offset, so no reader cursor is stored in the backend.
 
-### Project terminal input needs a retained-queue bound and truthful outcomes
+Still to qualify on a real host: full-screen and IME behavior, helper failure, host
+replacement, project switch and detach/reattach (REQ-02).
 
-The current project pane serializes 4096-byte writes with a Promise chain. Its chunk limit is
-not a total queue-byte limit. Its generic error text says input was not sent even when earlier
-chunks were accepted; the Owner/service also erase detailed partial/unknown write outcomes.
-Existing project-view tests cover ordering/chunking and refusal of the first chunk, not all
-saturation, partial-prefix or lost-reply cases.
+### Project terminal input: bound and outcomes
 
-Chosen direction: reuse the 64 KiB retained-input budget, including the in-flight chunk, and
-at most one 4096-byte write in flight. Reject a new batch before any of it is enqueued when
-it cannot fit. On blur/detach/claim loss discard unsent work of the old input generation;
-already admitted input can have reached the PTY and is never retracted or replayed. Carry
-known accepted bytes versus no-send/unknown outcomes through Owner, service, DTO and UI.
-Keep known pre-admission busy retry distinct from transport uncertainty. A new claim must not
-revive old queued input (REQ-03).
+The pane holds at most 64 KiB, counting the piece in flight, and has one call of at most
+4096 bytes in flight. A batch that does not fit is refused whole before any of it is queued.
+The service also refuses a second concurrent write to the same terminal before sending it
+(`owner_refused`, field `input_in_flight`). Blur, release, detach and pane disposal end the
+input generation: unsent bytes are dropped and a later hold never sends them. The piece in
+flight may already be in the PTY and is neither retracted nor replayed.
+
+`projects_term_write` answers `{outcome, accepted}`:
+
+| Result                       | Meaning                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `written`, `accepted = len`  | The host said it wrote all of it.                                                         |
+| `partial`, `accepted < len`  | The host said it wrote that prefix. The rest was not written and is not sent.             |
+| `unknown`, `accepted` absent | The request left and no usable answer came. Nothing is assumed and nothing is sent again. |
+| error (`Failure`)            | Nothing was written: refused here, never sent, or refused by the host before writing.     |
+
+`accepted` is only ever the host's own count (its answer, or `bytes_written` of a refusal);
+it is never derived from an error word, and a count that does not fit what was sent is read
+as `unknown`. `busy` with nothing written is offered again inside the Owner's existing bound
+and is the only retry. After `partial`, `unknown` or an error the pane drops what waited and
+says what arrived, what did not, and what is not known.
+
+Still to qualify against a real host and PTY: saturation, mid-paste failure and lost reply
+(REQ-03).
 
 ### Managed preparation and local-host scope
 

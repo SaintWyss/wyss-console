@@ -42,6 +42,29 @@ pub enum OwnerError {
     Refused,
 }
 
+/// What became of one write the owner admitted (workspace contract §7, REQ-03). An error instead
+/// of one of these means nothing was written: the request never left, or the host refused it
+/// before writing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// The host said it wrote this many bytes, and that is all of them.
+    Written(usize),
+    /// The host said it wrote only the first this-many bytes. The rest was not written.
+    Partial(usize),
+    /// The request left and no usable answer came back. All, a prefix or none of it may have
+    /// reached the terminal; no count is guessed and nothing is sent again.
+    Unknown,
+}
+
+/// The screen the host's parser keeps for a terminal, or why there is none (REQ-02).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TermScreen {
+    /// The host's own `term_screen` answer with `available: true`, not yet checked for bounds.
+    Screen(Value),
+    /// No screen can be had; the closed word says why. What the host kept is replayed instead.
+    Replay(String),
+}
+
 /// How a launch failed: before anything could have been dispatched, or after.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchError {
@@ -260,7 +283,17 @@ pub trait Owner: Send + Sync {
         from: u64,
         wait_ms: u64,
     ) -> Result<TermRead, OwnerError>;
-    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError>;
+    /// One write of at most 4096 bytes. `busy` (the host's refusal before writing) is offered
+    /// again within a fixed bound; no other answer is.
+    fn term_write(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        data: &[u8],
+    ) -> Result<WriteOutcome, OwnerError>;
+    /// The parser's screen for a terminal, through the same checked connection. Never starts,
+    /// reconnects, retries or falls back, and never writes to the terminal.
+    fn term_screen(&self, epoch: &str, terminal: &str) -> Result<TermScreen, OwnerError>;
     fn term_resize(
         &self,
         epoch: &str,
@@ -378,7 +411,7 @@ impl HostSocket {
         .map_err(|_| CallFailure::After)?;
         match read_frame::<Answer>(&mut stream).map_err(|_| CallFailure::After)? {
             Answer::Ok(value) => Ok(value),
-            Answer::Err(error) => Err(CallFailure::Refused(error.code)),
+            Answer::Err(error) => Err(CallFailure::Refused(error.code, error.bytes_written)),
         }
     }
 
@@ -442,8 +475,8 @@ impl HostSocket {
 enum CallFailure {
     /// Failed before anything was sent.
     Before(OwnerError),
-    /// The owner answered with a refusal word.
-    Refused(String),
+    /// The owner answered with a refusal word, and for a write how many bytes it had written.
+    Refused(String, usize),
     /// Sent, and the answer was lost or broken: the effect is unknown.
     After,
 }
@@ -452,7 +485,7 @@ impl CallFailure {
     fn before(self) -> OwnerError {
         match self {
             Self::Before(error) => error,
-            Self::Refused(_) => OwnerError::Refused,
+            Self::Refused(..) => OwnerError::Refused,
             Self::After => OwnerError::HostOffline,
         }
     }
@@ -460,7 +493,7 @@ impl CallFailure {
     fn launch(self) -> LaunchError {
         match self {
             Self::Before(error) => LaunchError::NotDispatched(error),
-            Self::Refused(code) => LaunchError::NotDispatched(match code.as_str() {
+            Self::Refused(code, _) => LaunchError::NotDispatched(match code.as_str() {
                 "profile_unavailable" | "profile_missing" | "profile_unknown" => {
                     OwnerError::ProfileUnavailable
                 }
@@ -764,7 +797,12 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
         })
     }
 
-    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError> {
+    fn term_write(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        data: &[u8],
+    ) -> Result<WriteOutcome, OwnerError> {
         let socket = self.socket()?;
         // The host takes one write at a time for a terminal. `busy` is its refusal before anything
         // was written, typically because another window (the older terminal view) was writing at
@@ -776,16 +814,57 @@ impl<M: ManagedPort> Owner for RealOwner<M> {
                 "term_write",
                 json!({"terminal_id": terminal, "data": data}),
             ) {
-                Ok(_) => return Ok(()),
-                Err(CallFailure::Refused(code))
+                // The host answers with the count it wrote. Anything else cannot be read as
+                // one, and an unreadable answer to a request that left is not a success.
+                Ok(answer) => {
+                    return Ok(
+                        match answer.as_u64().and_then(|n| usize::try_from(n).ok()) {
+                            Some(n) if n == data.len() => WriteOutcome::Written(n),
+                            Some(n) if n < data.len() => WriteOutcome::Partial(n),
+                            _ => WriteOutcome::Unknown,
+                        },
+                    );
+                }
+                Err(CallFailure::Refused(code, 0))
                     if code == "busy" && attempt < WRITE_BUSY_RETRIES =>
                 {
                     std::thread::sleep(WRITE_BUSY_DELAY);
                 }
+                // A refusal that says it wrote part: that count is the host's own statement.
+                Err(CallFailure::Refused(_, written)) if written > 0 => {
+                    return Ok(if written < data.len() {
+                        WriteOutcome::Partial(written)
+                    } else {
+                        WriteOutcome::Unknown
+                    });
+                }
+                Err(CallFailure::After) => return Ok(WriteOutcome::Unknown),
                 Err(other) => return Err(other.before()),
             }
         }
         Err(OwnerError::Refused)
+    }
+
+    fn term_screen(&self, epoch: &str, terminal: &str) -> Result<TermScreen, OwnerError> {
+        match self.socket()?.call(
+            Some(epoch),
+            "term_screen",
+            json!({"terminal_id": terminal, "scrollback_lines": 500}),
+        ) {
+            Ok(answer) if answer["available"] == json!(true) => Ok(TermScreen::Screen(answer)),
+            Ok(answer) => Ok(TermScreen::Replay(
+                answer["reason"].as_str().unwrap_or("unknown").to_owned(),
+            )),
+            // A host from before the parser existed: it is asked nothing else for it.
+            Err(CallFailure::Refused(code, _)) if code == "unknown_op" => {
+                Ok(TermScreen::Replay("host_without_screen".to_owned()))
+            }
+            Err(CallFailure::Refused(..)) => Ok(TermScreen::Replay("refused".to_owned())),
+            // The snapshot is a read, but it is still not asked twice: what the host kept is
+            // replayed, which loses nothing.
+            Err(CallFailure::After) => Ok(TermScreen::Replay("no_answer".to_owned())),
+            Err(CallFailure::Before(error)) => Err(error),
+        }
     }
 
     fn term_resize(

@@ -69,9 +69,13 @@ or as the direct terminal's 64 KiB ring. Slow consumers have bounded behavior;
 close/control stays available independently of full output buffers.
 
 Busy may be retried only when the host refused admission and no bytes were
-written. Partial/ambiguous writes must not be resent. The generic HostLink currently retries
-`host_unavailable` without distinguishing a lost reply; this is a known violation of the
-required policy, tracked by [ENG-02](../ROADMAP.md#eng-02). The stricter Projects Owner
+written. Partial/ambiguous writes must not be resent. The generic HostLink distinguishes a
+request that never left (`host_unavailable`, which may go to the host found next) from one
+that left without an answer (`host_outcome_unknown`). The second is never resent, moved to
+another host or run in the window's own host unless the operation is on the closed list of
+pure reads. The terminal controller drops the uncertain chunk and what waited behind it,
+says so, and keeps the terminal; a batch that does not fit the 64 KiB bound is refused whole
+with a notice instead of failing the terminal. The stricter Projects Owner
 transport does not initialize/reconnect/retry that way. Input overload fails visibly,
 never grows an unbounded queue or silently redirects bytes to another terminal.
 EOF can precede reaping: drain bounded final output and obtain the exit state;
@@ -101,11 +105,12 @@ See [screen fidelity](terminal-fidelity.md),
 ## Project-pane coverage limit
 
 The direct terminal controller's input queue bound and the ordinary snapshot attach path
-must not be attributed automatically to the separate Projects SessionPane. Its current
-path replays a bounded ring and chains 4096-byte writes without an aggregate input-queue
-ceiling. It also needs partial/unknown outcome propagation rather than a universal
-"not sent" error. See the [project journey contract](workspace.md#7-journey-semantics-and-implementation-gaps)
-and REQ-02/REQ-03 in the roadmap. Source/test inspection is not an executed acceptance result.
+must not be attributed automatically to the separate Projects SessionPane. That pane has
+its own implementation on the checked Owner: a screen attach with a one-use commit, and a
+64 KiB input queue with one 4096-byte call in flight and `written`/`partial`/`unknown`
+outcomes. See the [project journey contract](workspace.md#7-journey-semantics-and-implementation-gaps);
+its acceptance on a real host is REQ-02/REQ-03 in the roadmap. Source tests are not an
+executed acceptance result.
 
 ## Terminal layout invariants
 

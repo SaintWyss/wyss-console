@@ -10,7 +10,9 @@ use super::{
     claim::{ClaimError, Claims},
     command::{Envelope, ErrorCode, Failure, Receipt},
     migration::{self, IncrementalPlan, Plan, Sources, Summary},
-    owner::{HostView, ManagedRow, Owner, OwnerError, RootError, TermRead},
+    owner::{
+        HostView, ManagedRow, Owner, OwnerError, RootError, TermRead, TermScreen, WriteOutcome,
+    },
     store::{Loaded, Shared, Store, StoreError},
 };
 use serde::Serialize;
@@ -269,6 +271,10 @@ pub struct ProjectsService {
     selections: Selections,
     disclosures: Disclosures,
     claims: Claims,
+    /// Terminals with a write of this process in flight: one at a time each (REQ-03).
+    writing: Mutex<std::collections::HashSet<(String, String)>>,
+    /// Screens handed to a pane that has not yet said whether it drew them (REQ-02).
+    staged: Mutex<Vec<StagedScreen>>,
     held: Mutex<Option<Held>>,
     older_dir: Option<PathBuf>,
     gate: Option<PathBuf>,
@@ -289,6 +295,55 @@ fn ready_status(store: &StoreV1) -> StoreStatus {
             .find(|w| w.project_id.is_none())
             .map(|w| w.id.as_str().to_owned())
             .unwrap_or_default(),
+    }
+}
+
+/// A screen handed to one reader, bound to everything that has to still be true when it is
+/// committed. One use: it is removed by the commit that names it, whatever that commit decides.
+struct StagedScreen {
+    token: String,
+    window: String,
+    association: String,
+    epoch: String,
+    terminal: String,
+    /// Where in the host's output the screen ends: reading goes on from here once it is drawn.
+    at: u64,
+}
+
+/// The most screens kept staged at once, over every window. A pane stages one and commits it
+/// at once; an older one beyond this is dropped, and committing it is then refused.
+const MAX_STAGED: usize = 64;
+/// The most a screen can be on a side, and the most base64 of a repaint a window is given: the
+/// bounds the ordinary terminal's attach uses.
+const MAX_SCREEN_SIDE: u64 = 512;
+const MAX_REPAINT_BASE64: usize = 900 * 1024;
+
+/// What a pane is told to draw has to be something it can draw. Anything else is replayed.
+fn screen_is_sound(answer: &serde_json::Value) -> bool {
+    let side = |key: &str| {
+        answer["size"][key]
+            .as_u64()
+            .is_some_and(|n| (1..=MAX_SCREEN_SIDE).contains(&n))
+    };
+    answer["repaint"]
+        .as_str()
+        .is_some_and(|r| r.len() <= MAX_REPAINT_BASE64)
+        && answer["at"].is_u64()
+        && side("rows")
+        && side("cols")
+}
+
+/// Releases a terminal's write slot when the write returns, however it returns.
+struct WriteSlot<'a> {
+    table: &'a Mutex<std::collections::HashSet<(String, String)>>,
+    key: (String, String),
+}
+impl Drop for WriteSlot<'_> {
+    fn drop(&mut self) {
+        self.table
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.key);
     }
 }
 
@@ -331,6 +386,8 @@ impl ProjectsService {
             selections: Selections::default(),
             disclosures: Disclosures::default(),
             claims,
+            writing: Mutex::new(std::collections::HashSet::new()),
+            staged: Mutex::new(Vec::new()),
             held: Mutex::new(None),
             older_dir,
             gate,
@@ -1151,7 +1208,17 @@ impl ProjectsService {
     }
 
     /// Input and resize need the claim: a mirror view is read-only.
-    pub fn write_input(&self, window: &str, association: &str, data: &[u8]) -> Result<(), Failure> {
+    ///
+    /// An error means nothing was written: the request was refused here, never left, or the
+    /// host refused it before writing. Once the host admitted it the answer is a
+    /// `WriteOutcome`, which says how much is known to have been written and never guesses.
+    /// One write per terminal is in flight at a time; a second is refused before it is sent.
+    pub fn write_input(
+        &self,
+        window: &str,
+        association: &str,
+        data: &[u8],
+    ) -> Result<WriteOutcome, Failure> {
         self.gated()?;
         // A keystroke or a reply of the terminal, or one piece of a paste: the host takes no more.
         if data.is_empty() || data.len() > MAX_WRITE {
@@ -1161,9 +1228,128 @@ impl ProjectsService {
         if !self.claims.holds(window, &epoch, &terminal) {
             return Err(failure(ErrorCode::OwnerRefused).with_field("input_claim"));
         }
+        let key = (epoch.clone(), terminal.clone());
+        if !self
+            .writing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.clone())
+        {
+            return Err(failure(ErrorCode::OwnerRefused).with_field("input_in_flight"));
+        }
+        let _slot = WriteSlot {
+            table: &self.writing,
+            key,
+        };
         self.owner
             .term_write(&epoch, &terminal, data)
             .map_err(|e| failure(owner_code(e)))
+    }
+
+    // ---- screen recovery (REQ-02) ------------------------------------------------------------
+
+    /// The screen a pane draws before it reads on, for a session that was already running.
+    ///
+    /// The association is resolved here to its recorded host epoch and terminal, and the
+    /// snapshot is asked through the checked owner: a different host is `HostChanged` and
+    /// nothing is asked of it. A usable screen is staged for this window and association and
+    /// answered with a one-use token; the read position is the pane's and moves only when it
+    /// commits. Without a usable screen the answer is `replay` with the reason, and the pane
+    /// reads what the host kept from its start, labelled as such.
+    pub fn attach_screen(
+        &self,
+        window: &str,
+        association: &str,
+    ) -> Result<serde_json::Value, Failure> {
+        self.gated()?;
+        let (epoch, terminal) = self.terminal_of(association)?;
+        let screen = self
+            .owner
+            .term_screen(&epoch, &terminal)
+            .map_err(|e| failure(owner_code(e)))?;
+        let mut staged = self.staged.lock().unwrap_or_else(PoisonError::into_inner);
+        // A new attach of the same reader replaces what it had staged: the old token is dead.
+        staged.retain(|s| !(s.window == window && s.association == association));
+        let answer = match screen {
+            TermScreen::Screen(answer) if screen_is_sound(&answer) => answer,
+            TermScreen::Screen(answer) => {
+                return Ok(serde_json::json!({
+                    "mode": "replay", "reason": "invalid_screen", "parser": answer["parser"],
+                }));
+            }
+            TermScreen::Replay(reason) => {
+                return Ok(serde_json::json!({
+                    "mode": "replay", "reason": reason, "parser": null,
+                }));
+            }
+        };
+        let token = uuid::Uuid::new_v4().to_string();
+        if staged.len() >= MAX_STAGED {
+            staged.remove(0);
+        }
+        staged.push(StagedScreen {
+            token: token.clone(),
+            window: window.to_owned(),
+            association: association.to_owned(),
+            epoch,
+            terminal,
+            at: answer["at"].as_u64().unwrap_or(0),
+        });
+        let mut out = answer;
+        out["mode"] = serde_json::json!("screen");
+        out["token"] = serde_json::json!(token);
+        Ok(out)
+    }
+
+    /// The second half: the pane says whether it drew the staged screen, and is told where to
+    /// read from. Drawn: where the screen ends. Not drawn: the start of what the host kept, so
+    /// a screen that could not be drawn loses no output.
+    ///
+    /// The token is used up by this call. It is honoured only for the window and association
+    /// it was staged for, while the association still names the same terminal in the same host
+    /// epoch and that host is still the one answering. Anything else is `context_stale` and
+    /// moves nothing: the pane must not read on over a screen the backend does not vouch for.
+    pub fn commit_screen(
+        &self,
+        window: &str,
+        association: &str,
+        token: Option<&str>,
+        drawn: bool,
+    ) -> Result<u64, Failure> {
+        self.gated()?;
+        let stale = || failure(ErrorCode::ContextStale).with_field("attach_token");
+        let Some(token) = token else {
+            // The answer could not be read at all: whatever was staged for this reader is
+            // dropped, and nothing can have been drawn from it.
+            if drawn {
+                return Err(failure(ErrorCode::InvalidRecord).with_field("attach_token"));
+            }
+            self.staged
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|s| !(s.window == window && s.association == association));
+            return Ok(0);
+        };
+        let staged = {
+            let mut all = self.staged.lock().unwrap_or_else(PoisonError::into_inner);
+            let at = all
+                .iter()
+                .position(|s| s.token == token)
+                .ok_or_else(stale)?;
+            all.remove(at)
+        };
+        if staged.window != window || staged.association != association {
+            return Err(stale());
+        }
+        let (epoch, terminal) = self.terminal_of(association)?;
+        if epoch != staged.epoch || terminal != staged.terminal {
+            return Err(stale());
+        }
+        // The host that made the screen must be the one whose output is read from here on.
+        self.owner
+            .host(Some(&epoch))
+            .map_err(|e| failure(owner_code(e)))?;
+        Ok(if drawn { staged.at } else { 0 })
     }
 
     pub fn resize(

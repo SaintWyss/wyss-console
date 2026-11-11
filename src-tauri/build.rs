@@ -211,6 +211,8 @@ fn main() {
             "projects_term_read",
             "projects_term_write",
             "projects_term_resize",
+            "projects_term_attach",
+            "projects_term_attach_commit",
             "projects_orphans",
             "projects_adoption_preview",
             "projects_rollback_report",

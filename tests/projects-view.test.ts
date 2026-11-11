@@ -482,9 +482,11 @@ describe('a session in a pane', () => {
     const client = withSession();
     const releases: (() => void)[] = [];
     client.writeInput = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          releases.push(resolve);
+      (_id: string, data: Uint8Array) =>
+        new Promise<{ outcome: 'written'; accepted: number }>((resolve) => {
+          releases.push(() =>
+            resolve({ outcome: 'written', accepted: data.length }),
+          );
         }),
     );
     await shown(client);
@@ -532,6 +534,63 @@ describe('a session in a pane', () => {
     renderers.at(-1)!.typing[0]!.text(paste);
     await settle();
     expect(refusing.writeInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels a replay, and reads from where the backend says only after the commit', async () => {
+    // A host that keeps no screen: what it kept is replayed, and the pane says so.
+    const replaying = withSession();
+    await shown(replaying);
+    await click('Alpha');
+    await settle();
+    expect(replaying.commitScreen).toHaveBeenCalledWith(
+      ASSOCIATION_1,
+      null,
+      false,
+    );
+    expect(document.body.textContent).toContain(
+      'Replayed from the output the host kept (this host keeps no screen)',
+    );
+    expect(vi.mocked(replaying.readOutput).mock.calls[0]![1]).toBe(0);
+
+    // A screen this pane cannot draw is committed as not drawn: nothing is skipped.
+    document.body.innerHTML = '';
+    const undrawable = withSession();
+    undrawable.attachScreen = vi.fn(async () => ({
+      mode: 'screen' as const,
+      token: '11111111-1111-4111-8111-111111111111',
+      repaint: new Uint8Array([104, 105]),
+      size: { rows: 24, cols: 80 },
+      parser: null as never,
+      history: { included: 0, omitted: 0, evicted: 0 },
+      refused: {} as never,
+    }));
+    await shown(undrawable);
+    await click('Alpha');
+    await settle();
+    expect(undrawable.commitScreen).toHaveBeenCalledWith(
+      ASSOCIATION_1,
+      '11111111-1111-4111-8111-111111111111',
+      false,
+    );
+    expect(document.body.textContent).toContain(
+      'the screen could not be drawn here',
+    );
+
+    // A commit the backend refuses (host or session changed): the pane replays from the
+    // start instead of reading on from the screen's offset.
+    document.body.innerHTML = '';
+    const refused = withSession();
+    refused.attachScreen = undrawable.attachScreen;
+    refused.commitScreen = vi.fn(async () => {
+      throw failure('context_stale');
+    });
+    await shown(refused);
+    await click('Alpha');
+    await settle();
+    expect(document.body.textContent).toContain(
+      'the host or session changed while it was drawn',
+    );
+    expect(vi.mocked(refused.readOutput).mock.calls[0]![1]).toBe(0);
   });
 
   it('wires the keyboard once when input is taken twice at the same moment', async () => {

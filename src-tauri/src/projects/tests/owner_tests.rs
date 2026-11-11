@@ -356,7 +356,7 @@ fn a_write_the_host_refuses_as_busy_is_offered_again_and_other_refusals_are_not(
                     let answer = if n <= refusals {
                         protocol::Answer::Err(protocol::HostError::new(word))
                     } else {
-                        protocol::Answer::Ok(json!({"written": 3}))
+                        protocol::Answer::Ok(json!(3))
                     };
                     let _ = protocol::write_frame(&mut stream, &answer);
                     if n >= expected_calls {

@@ -241,7 +241,16 @@ export function fakeClient(): Fake {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return { data: new Uint8Array(), next: 0, eof: false, truncated: false };
     }),
-    writeInput: vi.fn(async () => undefined),
+    writeInput: vi.fn(async (_id: string, data: Uint8Array) => ({
+      outcome: 'written' as const,
+      accepted: data.length,
+    })),
+    attachScreen: vi.fn(async () => ({
+      mode: 'replay' as const,
+      reason: 'host_without_screen',
+      parser: null,
+    })),
+    commitScreen: vi.fn(async () => 0),
     resize: vi.fn(async () => undefined),
     orphans: vi.fn(async () => []),
     adoptionPreview: vi.fn(async () => {

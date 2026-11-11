@@ -7,7 +7,7 @@ use super::{
     owner::{
         AuthorityRef, FolderError, HostView, LaunchError, ManagedAdvert, ManagedLaunch,
         ManagedLaunched, ManagedRow, NativeLaunch, NativeLaunched, Owner, OwnerError, RootError,
-        RootInfo, ShellCwd, ShellLaunched, TermRead, TerminalRow,
+        RootInfo, ShellCwd, ShellLaunched, TermRead, TermScreen, TerminalRow, WriteOutcome,
     },
     store::{Faults, Loaded, Point, Store, StoreError},
 };
@@ -141,6 +141,10 @@ pub(super) struct Script {
     pub folders: Vec<(String, String)>,
     pub written: Vec<(String, Vec<u8>)>,
     pub resized: Vec<(String, u16, u16)>,
+    /// What the next writes come to; empty means every write is taken whole.
+    pub write_outcomes: Vec<Result<WriteOutcome, OwnerError>>,
+    /// What the host says of a terminal's screen; none means it has no parser.
+    pub screen: Option<TermScreen>,
 }
 
 pub(super) struct FakeOwner(pub Mutex<Script>);
@@ -171,6 +175,8 @@ impl FakeOwner {
             folders: Vec::new(),
             written: Vec::new(),
             resized: Vec::new(),
+            write_outcomes: Vec::new(),
+            screen: None,
         })))
     }
 
@@ -324,14 +330,38 @@ impl Owner for FakeOwner {
         })
     }
 
-    fn term_write(&self, epoch: &str, terminal: &str, data: &[u8]) -> Result<(), OwnerError> {
+    fn term_write(
+        &self,
+        epoch: &str,
+        terminal: &str,
+        data: &[u8],
+    ) -> Result<WriteOutcome, OwnerError> {
         self.script(|s| {
             s.calls.push(format!("term_write {terminal}"));
             if epoch != s.epoch {
                 return Err(OwnerError::HostChanged);
             }
+            if !s.write_outcomes.is_empty() {
+                let outcome = s.write_outcomes.remove(0);
+                if let Ok(WriteOutcome::Written(n) | WriteOutcome::Partial(n)) = outcome {
+                    s.written.push((terminal.to_owned(), data[..n].to_vec()));
+                }
+                return outcome;
+            }
             s.written.push((terminal.to_owned(), data.to_vec()));
-            Ok(())
+            Ok(WriteOutcome::Written(data.len()))
+        })
+    }
+
+    fn term_screen(&self, epoch: &str, terminal: &str) -> Result<TermScreen, OwnerError> {
+        self.script(|s| {
+            s.calls.push(format!("term_screen {terminal}"));
+            if epoch != s.epoch {
+                return Err(OwnerError::HostChanged);
+            }
+            Ok(s.screen
+                .clone()
+                .unwrap_or_else(|| TermScreen::Replay("host_without_screen".to_owned())))
         })
     }
 

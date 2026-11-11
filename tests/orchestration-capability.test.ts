@@ -12,7 +12,9 @@ const read = (path: string) =>
 
 it('registers, declares and grants the orchestration command consistently', () => {
   const source = read('src/orchestration_commands.rs');
-  expect(source).toMatch(/const COMMANDS: &\[&str\] = &\["orchestration_call"\]/);
+  expect(source).toMatch(
+    /const COMMANDS: &\[&str\] = &\["orchestration_call"\]/,
+  );
   expect(source).toMatch(/generate_handler!\[orchestration_call\]/);
   expect(source).toMatch(/request: DaemonRequest/);
   const declared = [...read('build.rs').matchAll(/"orchestration_call"/g)];

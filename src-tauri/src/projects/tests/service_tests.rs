@@ -1200,3 +1200,203 @@ fn one_write_to_a_terminal_is_bounded() {
         .write_input("w1", &association, &at_the_bound)
         .unwrap();
 }
+
+// ---- REQ-03: what became of a write ---------------------------------------------------------
+
+#[test]
+fn a_write_answers_what_the_host_said_and_never_invents_a_count() {
+    use crate::projects::owner::{OwnerError, WriteOutcome};
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let association = f.shell(&project, &workspace, TERMINAL_1);
+    f.owner
+        .script(|s| s.host = Some(Ok(vec![native_row(TERMINAL_1, None)])));
+    f.service.claim_input("w1", &association).unwrap();
+    f.owner.script(|s| {
+        s.write_outcomes = vec![
+            Ok(WriteOutcome::Partial(2)),
+            Ok(WriteOutcome::Unknown),
+            Err(OwnerError::Refused),
+        ]
+    });
+    assert_eq!(
+        f.service.write_input("w1", &association, b"abcd").unwrap(),
+        WriteOutcome::Partial(2)
+    );
+    // Sent, answer lost: an outcome, not an error that would read as "not sent".
+    assert_eq!(
+        f.service.write_input("w1", &association, b"efgh").unwrap(),
+        WriteOutcome::Unknown
+    );
+    // Refused before writing: an error, and nothing reached the terminal.
+    assert_eq!(
+        f.service
+            .write_input("w1", &association, b"ijkl")
+            .unwrap_err()
+            .code,
+        ErrorCode::OwnerRefused
+    );
+    assert_eq!(
+        f.service.write_input("w1", &association, b"mn").unwrap(),
+        WriteOutcome::Written(2)
+    );
+    // Each write reached the owner exactly once: none was offered again by the service.
+    assert_eq!(
+        f.owner
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("term_write"))
+            .count(),
+        4
+    );
+    assert_eq!(
+        f.owner.script(|s| s.written.clone()),
+        vec![
+            (TERMINAL_1.to_owned(), b"ab".to_vec()),
+            (TERMINAL_1.to_owned(), b"mn".to_vec())
+        ]
+    );
+}
+
+// ---- REQ-02: the screen is drawn before the read position moves ------------------------------
+
+fn kept_screen(at: u64) -> crate::projects::owner::TermScreen {
+    crate::projects::owner::TermScreen::Screen(serde_json::json!({
+        "available": true, "at": at, "size": {"rows": 24, "cols": 80},
+        "repaint": "aGk=", "parser": null,
+    }))
+}
+
+#[test]
+fn a_screen_is_committed_once_by_the_reader_it_was_staged_for() {
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let association = f.shell(&project, &workspace, TERMINAL_1);
+    let other = f.shell(&project, &workspace, TERMINAL_2);
+    f.owner.script(|s| s.screen = Some(kept_screen(4096)));
+    let token = |window: &str, association: &str| {
+        let answer = f.service.attach_screen(window, association).unwrap();
+        assert_eq!(answer["mode"], "screen");
+        answer["token"].as_str().unwrap().to_owned()
+    };
+    let stale = |result: Result<u64, Failure>| {
+        let failure = result.unwrap_err();
+        assert_eq!(
+            (failure.code, failure.field),
+            (ErrorCode::ContextStale, Some("attach_token"))
+        );
+    };
+    // Drawn: reading goes on where the screen ends. The token is then spent.
+    let first = token("w1", &association);
+    assert_eq!(
+        f.service
+            .commit_screen("w1", &association, Some(&first), true)
+            .unwrap(),
+        4096
+    );
+    stale(
+        f.service
+            .commit_screen("w1", &association, Some(&first), true),
+    );
+    // Not drawn: what the host kept is read from its start, so nothing is skipped.
+    let undrawn = token("w1", &association);
+    assert_eq!(
+        f.service
+            .commit_screen("w1", &association, Some(&undrawn), false)
+            .unwrap(),
+        0
+    );
+    // Another window, or another session, cannot commit it; trying spends it all the same.
+    let mine = token("w1", &association);
+    stale(
+        f.service
+            .commit_screen("w2", &association, Some(&mine), true),
+    );
+    stale(
+        f.service
+            .commit_screen("w1", &association, Some(&mine), true),
+    );
+    let mine = token("w1", &association);
+    stale(f.service.commit_screen("w1", &other, Some(&mine), true));
+    // A second attach by the same reader makes the first token dead.
+    let old = token("w1", &association);
+    let new = token("w1", &association);
+    stale(
+        f.service
+            .commit_screen("w1", &association, Some(&old), true),
+    );
+    assert_eq!(
+        f.service
+            .commit_screen("w1", &association, Some(&new), true)
+            .unwrap(),
+        4096
+    );
+    // An answer the pane could not read: nothing can have been drawn from it.
+    assert_eq!(
+        f.service
+            .commit_screen("w1", &association, None, false)
+            .unwrap(),
+        0
+    );
+    assert!(
+        f.service
+            .commit_screen("w1", &association, None, true)
+            .is_err()
+    );
+    stale(
+        f.service
+            .commit_screen("w1", &association, Some("made-up"), true),
+    );
+}
+
+#[test]
+fn a_replaced_host_gets_no_screen_request_and_cannot_have_a_staged_screen_committed() {
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let association = f.shell(&project, &workspace, TERMINAL_1);
+    f.owner.script(|s| s.screen = Some(kept_screen(10)));
+    let answer = f.service.attach_screen("w1", &association).unwrap();
+    let token = answer["token"].as_str().unwrap().to_owned();
+    f.owner.script(|s| s.epoch = "h1:9:9:2:2".into());
+    // The screen was drawn from the old host; the new one's output must not be read from 10.
+    assert_eq!(
+        f.service
+            .commit_screen("w1", &association, Some(&token), true)
+            .unwrap_err()
+            .code,
+        ErrorCode::HostChanged
+    );
+    assert_eq!(
+        f.service
+            .attach_screen("w1", &association)
+            .unwrap_err()
+            .code,
+        ErrorCode::HostChanged
+    );
+}
+
+#[test]
+fn a_host_without_a_usable_screen_is_answered_as_a_labelled_replay() {
+    let f = fixture().enabled();
+    let (project, workspace) = f.register(ROOT_A);
+    let association = f.shell(&project, &workspace, TERMINAL_1);
+    // No parser at all.
+    let answer = f.service.attach_screen("w1", &association).unwrap();
+    assert_eq!(
+        (answer["mode"].as_str(), answer["reason"].as_str()),
+        (Some("replay"), Some("host_without_screen"))
+    );
+    assert!(answer.get("token").is_none());
+    // A screen outside what a pane can draw is not handed on.
+    f.owner.script(|s| {
+        s.screen = Some(crate::projects::owner::TermScreen::Screen(
+            serde_json::json!({
+                "available": true, "at": 1, "size": {"rows": 0, "cols": 80}, "repaint": "",
+            }),
+        ))
+    });
+    let answer = f.service.attach_screen("w1", &association).unwrap();
+    assert_eq!(answer["reason"], "invalid_screen");
+    // A Managed session has no terminal: there is no screen to ask for.
+    f.owner.script(|s| s.screen = Some(kept_screen(1)));
+}
