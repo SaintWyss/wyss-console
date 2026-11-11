@@ -1,8 +1,11 @@
-# Wyss Console
+<h1 align="center">wyss-console</h1>
+
+<p align="center"><strong>Entorno de desarrollo nativo para Linux.</strong><br/>Rust · Tauri · Svelte</p>
+
 
 Personal native development workspace for CachyOS/KDE: persistent terminals,
 provider configuration, Arsenal, Native agents and supervised Managed workflows.
-Private repository; Tauri 2, Svelte 5, TypeScript and Rust.
+Tauri 2, Svelte 5, TypeScript and Rust.
 
 | Question                                         | Read                                 |
 | ------------------------------------------------ | ------------------------------------ |
