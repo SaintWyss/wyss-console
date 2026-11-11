@@ -1,0 +1,208 @@
+# Arsenal: presets por provider y lanzamientos — contrato de diseño y de datos
+
+Estado: **PROPUESTO**, pendiente de aprobación del dueño. Nada de esto está construido. Hereda
+sin excepciones el [contrato de interfaz](interface.md) (tokens, componentes compartidos, idioma).
+
+Decisiones del dueño (2026-11-11), que este contrato no reabre:
+
+1. **Preset + Lanzamiento.** Un preset es un kit de un provider. Un lanzamiento es agente + carpeta + permisos + un preset, se guarda desde Workspace y aparece en **Launch ▾**.
+2. **Clasificación por reglas** deterministas sobre nombre y descripción, con corrección manual guardada.
+3. **Panel de composición** fijo que muestra cómo queda armado el preset y cómo arranca la terminal.
+4. En Arsenal **todo se elige por provider**.
+
+## Flujo del dueño
+
+1. Arsenal → elige provider → **New preset** → marca capacidades por grupo mientras el panel de composición muestra el resultado → **Save preset**.
+2. Workspace → elige agente, carpeta, permisos y **Preset** → **Start** (inicio suelto) o **Save as launch…**.
+3. Launch ▾ → el lanzamiento guardado → arranca con ese preset aplicado.
+
+## Modelo de datos
+
+| Concepto                 | Qué es                                                                                                             | Dónde vive                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Preset                   | Nombre, provider, capacidades (con revisión fija o actual), composites que se mantienen.                           | El registro `selection` que ya existe (tabla y cuerpo de sync **sin cambios**). |
+| Preset sin provider (v1) | La lista `preset` actual. Deja de mostrarse y de poder crearse.                                                    | Tabla `preset`: se conserva sin tocar; no se borra ni se deja de sincronizar.   |
+| Grupo de una capacidad   | Uno de los grupos de la tabla de abajo. Regla, o corrección del dueño si existe.                                   | Reglas: código (`groups.ts`). Corrección: tabla nueva `capability_group`.       |
+| Lanzamiento              | `name`, `directory`, `[session] agent`, `profile`, `preset`. Sin `commands` ni `before` cuando lo crea la ventana. | Un archivo `~/.config/wyss-console/launch/<slug>.toml` (ADR 0059).              |
+
+Reglas de datos:
+
+- **El vocabulario cambia, el registro no.** `selection` pasa a llamarse _preset_ en la ventana, en los comandos nuevos y en los docs. El nombre de tabla, el cuerpo de sync y `arsenal_selection_*` no se renombran: la otra PC puede seguir en la versión anterior y sincronizar igual.
+- **Migración de los presets v1** (una vez, al abrir el store, en una transacción, idempotente): por cada `preset` y por cada provider que aparezca entre sus capacidades, si no existe una `selection` con ese nombre y ese provider, se crea una con esas capacidades de ese provider. Nunca modifica ni borra una `selection` existente ni un `preset`. Se prueba con base vacía, con los datos actuales (2 presets, 5 selections) y repetida dos veces.
+- **Corrección de grupo**: `capability_group(identity TEXT PRIMARY KEY, group_id TEXT NOT NULL, updated_at INTEGER NOT NULL)`, por migración de esquema del store. `identity` es la de `capability`. Un `group_id` que esta versión no conoce se muestra en **Other** y se conserva.
+- **Sync de la corrección**: registro de journal nuevo `capability_group`. **DISCOVERY antes de activarlo**: comprobar con un test qué hace la versión anterior al recibir un tipo de registro que no conoce. Si lo rechaza o marca conflicto, la corrección queda local hasta que las dos PC tengan esta versión, y la ventana lo dice ("Saved on this computer").
+- **Plan de un borrador**: comando nuevo `arsenal_preset_plan` (provider, capacidades, composites) que responde lo mismo que `arsenal_preview` sin guardar nada. El panel de composición solo afirma lo que ese comando responde.
+- **Guardar un lanzamiento**: comando nuevo `launch_save { name, directory, agent, profile, preset }`. El escritorio valida todo de nuevo (nombre ≤ 60, sin caracteres de control; carpeta absoluta existente; `agent` ∈ `claude_code | codex`; perfil y preset existentes para ese agente), deriva el nombre de archivo del nombre (minúsculas, `[a-z0-9-]`, ≤ 40), no sigue enlaces, escribe con archivo temporal + rename y permisos `0600`. Si el archivo existe responde `exists` y solo lo reemplaza con `replace: true`. La ventana **nunca** envía `commands` ni `before`. `launch_delete { id }` borra solo archivos que no tienen `commands` ni `before`.
+- `SessionSpec` acepta `preset` (nombre del preset). Al lanzar, el preset nombrado gana sobre el recordado para la carpeta; si no existe para ese agente, el lanzamiento se rechaza con el motivo y no arranca nada. Una versión anterior de Wyss Console lista ese archivo como rechazado (campo desconocido): es el comportamiento aceptado mientras la otra PC no se actualice.
+
+## Grupos
+
+Cada capacidad pertenece a un solo grupo. Primera regla que coincide gana; se evalúa sobre `name` en minúsculas y, donde se indica, sobre la descripción. La corrección del dueño gana sobre toda regla.
+
+| Orden | `group_id` | Etiqueta (en)        | Etiqueta (es)             | Regla                                                                                                                                                                               |
+| ----- | ---------- | -------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `models`   | Models and rules     | Modelos y reglas          | `kind = rule`; o agente llamado `astra_*`, `luna_*`, `sol_*`.                                                                                                                       |
+| 2     | `security` | Security             | Seguridad                 | nombre contiene `security`, `cso`, `guard`, `careful`, `freeze`.                                                                                                                    |
+| 3     | `debug`    | Debugging            | Depuración                | nombre contiene `debug`, `investigate`.                                                                                                                                             |
+| 4     | `content`  | Content and SEO      | Contenido y SEO           | nombre empieza con `seo-`; o contiene `content-strategy`, `social-media`.                                                                                                           |
+| 5     | `motion`   | Animation and video  | Animación y video         | nombre contiene `gsap`, `anime`, `animation`, `lottie`, `three`, `typegpu`, `waapi`, `hyperframes`, `remotion`, `contribute-catalog`.                                               |
+| 6     | `design`   | Design and interface | Diseño e interfaz         | nombre contiene `design`, `-ui`, `ui-`, `ux`, `frontend`, `tailwind`, `shadcn`, `accessibility`, `image-to-code`, `taste`, `dashboard`.                                             |
+| 7     | `study`    | Study and knowledge  | Estudio y conocimiento    | nombre contiene `tutor`, `quiz`, `cursos`, `second-brain`, `inbox`, `learn`.                                                                                                        |
+| 8     | `decide`   | Decisions            | Decisiones                | nombre contiene `devils-advocate`, `fool`, `junta`, `council`, `ceo-review`, `advisor`.                                                                                             |
+| 9     | `research` | Research             | Investigación             | nombre contiene `research`, `mapper`, `graphify`, `scrape`, `discovery`, `analyzer`, `intel`, `profiler`.                                                                           |
+| 10    | `review`   | Review and testing   | Revisión y pruebas        | nombre contiene `review`, `verif`, `checker`, `auditor`, `qa`, `test`, `eval`, `health`, `benchmark`, `canary`, `playwright`.                                                       |
+| 11    | `docs`     | Docs and writing     | Documentación y escritura | nombre contiene `doc-`, `document`, `markdown`, `humanizer`, `pdf`, `prompt`, `skill-creator`, `skillify`, `retro`, `report`.                                                       |
+| 12    | `planning` | Planning and method  | Planificación y método    | nombre contiene `plan`, `roadmap`, `spec`, `office-hours`, `framework-selector`, `synthesizer`, `curator`; o es `arsenal`, `combo`, `loops`, `orient`.                              |
+| 13    | `build`    | Building             | Construcción              | nombre contiene `executor`, `fixer`, `ship`, `deploy`, `fastapi`, `solid`, `typescript`, `react`, `vite`, `pair-agent`; o la descripción contiene `implement`, `build`, `scaffold`. |
+| 14    | `system`   | System and setup     | Sistema y entorno         | nombre contiene `cachyos`, `workstation`, `doctor`, `setup`, `upgrade`, `ios-`, `context-`, `sync-`, `browser`.                                                                     |
+| 15    | `other`    | Other                | Otros                     | lo que no coincide con nada.                                                                                                                                                        |
+
+**Familia** es un segundo dato, independiente del grupo, tomado del prefijo del nombre: `gsd-` → GSD, `gstack-` → gstack, `seo-` → SEO, `hyperframes` → HyperFrames; sin prefijo conocido, ninguna. Se muestra como etiqueta y sirve de filtro.
+
+**Para qué sirve** (una línea por capacidad): la primera oración de su descripción, hasta 110 caracteres. Hoy 30 capacidades llegan con descripción vacía o `>` / `>-` (escalar plegado de YAML mal leído) y los 59 agentes llegan sin ninguna. La fase de datos corrige la lectura del escalar plegado y lee `description` de los agentes; si aun así no hay texto, la fila muestra **No description in its file** y nada inventado.
+
+Medido el 2026-11-11 sobre la biblioteca real (207 entradas, 173 nombres distintos): 1 nombre en Other (0,6 %) y ningún grupo vacío.
+
+Aceptación de las reglas (test con los 207 nombres reales de la biblioteca del 2026-11-11 como fixture): toda capacidad recibe exactamente un grupo; **Other ≤ 10 %**; ningún grupo vacío; mismo resultado en dos corridas.
+
+## Design System
+
+Tokens y componentes de `interface.md`, sin tokens nuevos, sin hex, sin degradados, sin sombras salvo `--shadow-pop` en menús. Componentes nuevos, locales a Arsenal y hechos solo con esos tokens:
+
+| Componente        | Qué es                                                                                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider-switch` | Control segmentado de dos opciones (`role="radiogroup"`): Claude Code, Codex. Arriba de la vista, vale para las tres pestañas.                        |
+| `group`           | Sección plegable (`button[aria-expanded]`): casilla de tres estados, etiqueta del grupo, `elegidas/total` en mono, flecha.                            |
+| `capability-row`  | Casilla + nombre (600) + para qué sirve (`--muted`, una línea) + etiquetas: tipo, familia, compatibilidad (símbolo + texto). Menú **Move to group…**. |
+| `composition`     | Panel fijo: nombre, provider, medidor por grupo, totales, composites, conflictos, cómo arranca, Guardar.                                              |
+| `meter`           | Cinco celdas de 8×8 px por grupo: llenas con `--accent`, vacías con borde `--line-strong`. Siempre con el número al lado; nunca es la única señal.    |
+
+La firma visual es el panel de composición: una ficha de equipo en mono, con un medidor por grupo, que cambia en el acto al marcar. Todo lo demás se mantiene callado.
+
+## Referencia visual
+
+Qué domina: el panel de composición (derecha). Qué se lee después: los grupos con su cuenta. Qué hace reconocible la pantalla: los medidores de cinco celdas y los totales en mono.
+
+```
+Arsenal                                    [ Claude Code | Codex ]            [Refresh]
+ Presets   Library   Activity
+┌ Presets ──────────┐ ┌ Choose ───────────────────────────────┐ ┌ How it is put together ──┐
+│ + New preset      │ │ [Search…]  (All)(Skills)(Agents)(Rules)│ │ Name [Estudio          ] │
+│ ▌Estudio      6   │ │ Family: (All)(GSD)(gstack)             │ │ Claude Code              │
+│  frontend     1   │ │ ▾ [–] Design and interface       3/12  │ │ ■■■□□ Design          3  │
+│  gsap-react   2   │ │    [x] frontend-design                 │ │ ■□□□□ Docs            1  │
+│                   │ │        Visual direction for new UI     │ │ ■■□□□ Study           2  │
+│                   │ │        Skill · ✓ Supported             │ │ ──────────────────────── │
+│                   │ │    [ ] image-to-code                   │ │ 6 on · 37 off            │
+│                   │ │ ▸ [ ] Debugging                  0/5   │ │ [x] Keep GSD Core (41)   │
+│                   │ │ ▸ [x] Study and knowledge        4/4   │ │ ! 1 conflict             │
+│                   │ │ ▸ [ ] Other                      0/9   │ │ How it starts            │
+│                   │ │                                        │ │ Claude Code starts with… │
+│                   │ │                                        │ │ [Save preset] [Discard]  │
+└───────────────────┘ └────────────────────────────────────────┘ └──────────────────────────┘
+```
+
+Workspace, tarjeta de inicio (cambia solo la fila de skills y el pie):
+
+```
+Agent   (Claude Code) (Codex) (OpenCode) (Hermes)
+Folder  [~/Data/20_Knowledge/UTN_FRRe ▾] [Choose…]     Permissions [Estudio ▾]
+Preset  [Estudio ▾]   6 on · 37 off · GSD Core kept     [Edit in Arsenal]
+                                              [Save as launch…]  [Start]
+Saved launches
+  Estudiar   Claude Code · UTN_FRRe · Estudio · preset Estudio      [Start] [Delete]
+```
+
+## Spacing
+
+Escala de 4 px de `interface.md`. Columnas a ≥ 1280 px: lista de presets 220 px, selector `minmax(0, 1fr)`, composición 320 px, separación 16 px. Filas de capacidad: `min-height: 44px`, padding 8×12 px, separación 6 px. Cabecera de grupo: `min-height: 40px`. Celdas del medidor: 8 px con 2 px entre ellas. `box-sizing: border-box` en todo; ninguna altura fija.
+
+## Typography
+
+La de `interface.md`. Nombre de capacidad `--text-md` 600; para qué sirve `--text-sm` 400 `--muted`, una línea con elipsis y `title` con el texto completo; cuentas, totales y revisiones en `--font-mono` `--text-xs` con cifras tabulares; título del panel `--text-lg` 600. Nada bajo 12 px.
+
+## Color
+
+Solo tokens. El acento aparece en tres lugares: la opción activa de `provider-switch`, la fila de preset seleccionada (`--accent-soft` + barra de 3 px) y las celdas llenas del medidor. Compatibilidad y conflictos usan `.badge[data-tone]` con símbolo y texto. Contrastes: los cubre `tests/appearance.test.ts`; la fase de pantalla agrega al test el par celda llena / superficie (≥ 3:1) en los tres temas.
+
+## Copywriting
+
+Inglés como fuente, sentence case, a través de `t()`; español en `src/lib/i18n/es.ts`. Una acción conserva su nombre en todo el flujo (**Save preset** → "Preset saved"). Los textos dicen lo que el escritorio respondió, no lo que se supone.
+
+## Contenido
+
+| Elemento                          | Valor (en)                                                                                                                  | Valor (es)                                                                                                              | Fuente                                     | Aprobado  |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------- |
+| Pestañas                          | Presets · Library · Activity                                                                                                | Presets · Biblioteca · Actividad                                                                                        | este contrato                              | PENDIENTE |
+| Providers                         | Claude Code · Codex                                                                                                         | igual                                                                                                                   | `PROVIDERS` en `contracts/arsenal.ts`      | sí        |
+| Etiquetas de grupo                | tabla de Grupos                                                                                                             | tabla de Grupos                                                                                                         | este contrato                              | PENDIENTE |
+| Para qué sirve                    | primera oración de la descripción                                                                                           | no se traduce (texto del archivo)                                                                                       | `revision.description`                     | sí        |
+| Sin descripción                   | No description in its file                                                                                                  | Su archivo no trae descripción                                                                                          | este contrato                              | PENDIENTE |
+| Cuenta de grupo                   | `{chosen}/{total}`                                                                                                          | igual                                                                                                                   | biblioteca + borrador                      | sí        |
+| Totales                           | `{on} on · {off} off`                                                                                                       | `{on} activas · {off} apagadas`                                                                                         | `arsenal_preset_plan`                      | PENDIENTE |
+| Composite mantenido               | Keep {name} ({count} skills)                                                                                                | Mantener {name} ({count} skills)                                                                                        | `discover.composites`                      | PENDIENTE |
+| Cómo arranca                      | {agent} starts with {on} capabilities from this preset. The other {off} installed skills are switched off in that terminal. | {agent} arranca con {on} capacidades de este preset. Las otras {off} skills instaladas quedan apagadas en esa terminal. | `arsenal_preset_plan`                      | PENDIENTE |
+| Cómo arranca, sin poder aplicarse | This preset is recorded but cannot be applied: {reason}                                                                     | Este preset queda registrado pero no se puede aplicar: {reason}                                                         | `plan.enforcement` + motivo del escritorio | PENDIENTE |
+| Conflictos                        | `{count} conflict` / `{count} conflicts` + lista                                                                            | `{count} conflicto` / `{count} conflictos`                                                                              | `plan.conflicts`                           | sí        |
+| Acciones del preset               | New preset · Save preset · Discard changes · Duplicate · Delete                                                             | Nuevo preset · Guardar preset · Descartar cambios · Duplicar · Borrar                                                   | este contrato                              | PENDIENTE |
+| Corrección de grupo               | Move to group… · Back to automatic group                                                                                    | Mover a grupo… · Volver al grupo automático                                                                             | este contrato                              | PENDIENTE |
+| Workspace                         | Preset · None — all installed skills · Edit in Arsenal · Save as launch… · Saved launches                                   | Preset · Ninguno — todas las skills instaladas · Editar en Arsenal · Guardar como lanzamiento… · Lanzamientos guardados | este contrato                              | PENDIENTE |
+| Nombre de lanzamiento sugerido    | `{agent} · {folder}`                                                                                                        | igual                                                                                                                   | agente y carpeta elegidos                  | sí        |
+
+Ningún valor de esta pantalla es inventado: nombres, descripciones, versiones, cuentas y motivos salen del escritorio. Lo marcado PENDIENTE no se construye hasta que el dueño lo apruebe.
+
+## Estados
+
+| Componente               | default                                   | hover              | focus visible    | active / seleccionado                                                     | disabled                                                              | loading                                                         | vacío                                                                        | error                                                                                |
+| ------------------------ | ----------------------------------------- | ------------------ | ---------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `provider-switch`        | dos opciones, una marcada                 | `--surface-hover`  | anillo `--focus` | `--accent-soft` + texto 600; cambia las tres pestañas                     | un provider no instalado: deshabilitado con "Not installed"           | —                                                               | —                                                                            | —                                                                                    |
+| Lista de presets         | filas con nombre y cantidad               | `--surface-hover`  | anillo           | fila elegida: `--accent-soft` + barra 3 px                                | mientras se guarda                                                    | "Reading presets…"                                              | "No presets for {provider} yet." + **New preset**                            | `.notice[data-tone=error]` con el motivo y **Try again**                             |
+| `group`                  | plegado, casilla según lo elegido, cuenta | `--surface-hover`  | anillo           | abierto: `aria-expanded=true`; casilla mixta si es parcial                | grupo sin capacidades del provider: no se dibuja                      | —                                                               | con búsqueda sin resultados: "No capabilities match."                        | —                                                                                    |
+| `capability-row`         | sin marcar                                | `--surface-hover`  | anillo           | marcada: casilla + franja `ok`                                            | `unsupported` o de otro provider: no se puede marcar, dice por qué    | —                                                               | —                                                                            | compatibilidad `missing_dependency`/`conflicting`: franja `warn` + texto             |
+| Mover a grupo            | menú con los 15 grupos, el actual marcado | `--surface-hover`  | anillo           | el elegido se aplica y la fila cambia de grupo                            | —                                                                     | "Saving…" en la fila                                            | —                                                                            | la fila vuelve a su grupo y muestra "Could not be saved. Nothing changed."           |
+| `composition`            | medidores y totales del borrador          | —                  | —                | borrador con cambios: **Save preset** habilitado + "Unsaved changes"      | sin nombre: **Save preset** deshabilitado con ayuda "Name the preset" | "Checking…" en totales hasta que responde `arsenal_preset_plan` | sin capacidades: "Nothing chosen yet. Tick a group or a capability."         | el plan no respondió: totales ocultos + "Could not be checked." + **Try again**      |
+| Guardar preset           | `.action.primary`                         | un paso más fuerte | anillo           | —                                                                         | sin nombre o sin cambios                                              | "Saving…"                                                       | —                                                                            | motivo del escritorio debajo del botón; el borrador se conserva                      |
+| Borrar preset            | `.action` → pide confirmar en línea       | —                  | anillo           | "Delete {name}?" con **Delete** (`.danger`) y **Cancel** (foco inicial)   | —                                                                     | "Deleting…"                                                     | —                                                                            | motivo; el preset sigue en la lista                                                  |
+| Preset en Workspace      | select con "None — all installed skills"  | borde `--muted`    | anillo           | elegido: resumen `{on} on · {off} off` al lado                            | agente sin Arsenal (OpenCode, Hermes): oculto                         | "Checking…"                                                     | sin presets para ese agente: "No presets for {agent}." + **Edit in Arsenal** | preset que no se puede aplicar: **Start** deshabilitado + motivo                     |
+| Guardar como lanzamiento | `.action`                                 | `--surface-hover`  | anillo           | abre formulario en línea: nombre + resumen + **Save launch** / **Cancel** | sin agente o carpeta                                                  | "Saving…"                                                       | —                                                                            | `exists`: "A launch with that name exists." + **Replace** / **Cancel**; otro: motivo |
+| Lanzamiento guardado     | fila con resumen                          | `--surface-hover`  | anillo           | **Start** lo arranca; **Delete** pide confirmar                           | preset o perfil que ya no existe: **Start** deshabilitado + motivo    | "Starting…"                                                     | "No saved launches yet."                                                     | motivo del escritorio en la fila                                                     |
+
+Ningún estado se comunica solo por color. Todo cambio de totales se anuncia con `aria-live="polite"`. Cerrar la pestaña o cambiar de provider con cambios sin guardar pide confirmar (**Discard changes** / **Keep editing**).
+
+## Breakpoints
+
+| Ancho        | Cambio                                                                                                                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ≥ 1280 px    | tres columnas: presets 220 px · selector · composición 320 px (fija, `position: sticky`).                                                                                                                   |
+| 1024 px      | dos columnas: selector · composición 300 px; la lista de presets pasa a un select arriba del selector.                                                                                                      |
+| 768 px       | una columna; la composición es una barra fija abajo con nombre, `{on} on · {off} off` y **Save preset**, que se despliega hacia arriba con los medidores.                                                   |
+| 375 / 320 px | igual que 768; filtros de tipo y familia envuelven; etiquetas de la fila pasan debajo del nombre; sin scroll horizontal; la barra de composición no tapa la última fila (`padding-bottom` igual a su alto). |
+
+Texto al 200 %: las filas crecen en alto; el para qué sirve pasa a dos líneas; las cuentas no se cortan. Nombres largos: `overflow-wrap: anywhere`. Objetivos táctiles ≥ 44 px. Los tres temas en cada ancho. `prefers-reduced-motion`: sin transición al plegar grupos ni al llenar celdas.
+
+## Motion
+
+Solo CSS (la app es Svelte, no aplica la capa de motion para React): plegar grupo 150 ms, llenado de celda 120 ms, `transform`/`opacity` únicamente. Nada más se anima.
+
+## Fases de construcción
+
+| Fase | Entrega                                                                                                                                    | Verificación                                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| A    | Datos: migración de presets v1, `capability_group`, `arsenal_preset_plan`, descripción de escalar plegado y de agentes, DISCOVERY de sync. | tests de Rust: base vacía, datos actuales, repetida; plan de borrador = preview del guardado.                 |
+| B    | Reglas de grupo y familia (`groups.ts`) con el fixture de 207 nombres.                                                                     | test del criterio de aceptación de Grupos.                                                                    |
+| C    | Pantalla de Arsenal (este contrato), con `t()` desde el inicio.                                                                            | tests de vista por estado; capturas a 1280 / 1024 / 768 / 375 en los tres temas contra la referencia.         |
+| D    | Workspace: selector de preset, **Save as launch…**, lanzamientos guardados; `launch_save`, `launch_delete`, `preset` en el TOML.           | tests de Rust de validación y de no escribir `commands`; test de vista; un lanzamiento real de punta a punta. |
+
+Cierre: una revisión externa del conjunto, con foco en `launch_save` (escritura de archivos nombrados por la ventana) y en la migración.
+
+## Skills consultadas
+
+Clave de lectura: `UXP-3c8a6f`.
+
+| Skill             | Ruta                                        | Qué decisión informó                                                                                                                                                                                                               | Qué falta validar                                            |
+| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `frontend-design` | `~/.claude/skills/frontend-design/SKILL.md` | Una sola firma (el panel de composición con medidores) y el resto callado; nombres desde el lado del dueño (preset, lanzamiento); vacíos y errores que dicen qué hacer.                                                            | Que el medidor de cinco celdas se lea bien con 15 grupos.    |
+| `ui-ux-pro-max`   | `~/.claude/skills/ui-ux-pro-max/SKILL.md`   | Divulgación progresiva (grupos plegados), una acción primaria por pantalla, confirmación antes de borrar, error junto al control, `aria-live` en totales, objetivos ≥ 44 px, sin color como única señal.                           | Lista de 100+ filas sin virtualizar: medir antes de decidir. |
+| `minimalist-ui`   | `~/.claude/skills/minimalist-ui/SKILL.md`   | Superficies planas con borde de 1 px, color como recurso escaso, sin degradados ni sombras. Se descartó lo que es de página de marketing: serif, macro-espaciado, animaciones de scroll, paleta crema (chocan con `interface.md`). | Nada: el estilo ya es el de la app.                          |
+
+Capas omitidas: referencia robada (no hay sitio ni mockup externo; la referencia es el esquema de arriba) y motion con librería (stack Svelte, motion en CSS).
