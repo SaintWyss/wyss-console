@@ -11,6 +11,8 @@
     Summary,
   } from '../../contracts/arsenal';
   import { PROVIDERS } from '../../contracts/arsenal';
+  import { t } from '../../i18n/index.svelte';
+  import { msg } from '../../i18n/msg';
   import { blockedText } from './messages';
   import PresetsTab from './PresetsTab.svelte';
   import SyncLine from './SyncLine.svelte';
@@ -42,103 +44,109 @@
   } = $props();
 
   const TABS: { id: ArsenalTab; label: string }[] = [
-    { id: 'presets', label: 'Presets' },
-    { id: 'library', label: 'Library' },
-    { id: 'activity', label: 'Activity' },
+    { id: 'presets', label: msg('Presets') },
+    { id: 'library', label: msg('Library') },
+    { id: 'activity', label: msg('Activity') },
   ];
   /** The sections of the Library tab. Discover and Composites are also controller tabs. */
   const LIBRARY_SECTIONS: { id: ArsenalTab; label: string }[] = [
-    { id: 'library', label: 'Imported' },
-    { id: 'discover', label: 'Discover' },
-    { id: 'composites', label: 'Composites' },
+    { id: 'library', label: msg('Imported') },
+    { id: 'discover', label: msg('Discover') },
+    { id: 'composites', label: msg('Composites') },
   ];
   const PROVIDER_OPTIONS = PROVIDERS;
   const PROVIDER_LABEL: Record<ArsenalProvider, string> = {
     claude_code: 'Claude Code',
     codex: 'Codex',
   };
-  /** The provider every tab works on. Chosen above the tabs; the presets draft is kept per provider. */
+  /** The provider every tab works on. Chosen above the tabs; the presets draft belongs to one provider. */
   let provider = $state<ArsenalProvider>('claude_code');
+  /** The presets tab, when it is shown: a provider switch asks it first, since it holds the draft. */
+  let presetsTab = $state<{ requestLeave: (action: () => void) => void }>();
   const KIND_LABEL: Record<CandidateKind, string> = {
-    skill: 'Skill',
-    agent: 'Agent',
-    rule: 'Rule',
-    hook: 'Hook',
-    mcp_server: 'MCP server',
-    plugin: 'Plugin',
+    skill: msg('Skill'),
+    agent: msg('Agent'),
+    rule: msg('Rule'),
+    hook: msg('Hook'),
+    mcp_server: msg('MCP server'),
+    plugin: msg('Plugin'),
   };
   const SCOPE_LABEL: Record<CandidateScope, string> = {
-    user: 'Account',
-    project: 'Project',
+    user: msg('Account'),
+    project: msg('Project'),
   };
   const STATUS_LABEL: Record<CandidateStatus, string> = {
-    not_imported: 'Not imported',
-    imported: 'Imported',
-    source_changed: 'Source changed',
-    read_only: 'Read only',
+    not_imported: msg('Not imported'),
+    imported: msg('Imported'),
+    source_changed: msg('Source changed'),
+    read_only: msg('Read only'),
   };
   const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
-    supported: 'Supported',
-    unsupported: 'Unsupported',
-    unverified: 'Unverified',
-    requires_qualification: 'Needs provider qualification',
-    conflicting: 'Conflicting',
-    missing_dependency: 'Missing dependency',
+    supported: msg('Supported'),
+    unsupported: msg('Unsupported'),
+    unverified: msg('Unverified'),
+    requires_qualification: msg('Needs provider qualification'),
+    conflicting: msg('Conflicting'),
+    missing_dependency: msg('Missing dependency'),
   };
   const DEPENDENCY_KIND: Record<Dependency['kind'], string> = {
-    tool: 'Tool',
-    mcp_server: 'MCP server',
-    file: 'File',
+    tool: msg('Tool'),
+    mcp_server: msg('MCP server'),
+    file: msg('File'),
   };
   const DEPENDENCY_STATE: Record<Dependency['state'], string> = {
-    declared: 'declared, not checked offline',
-    present: 'present',
-    missing: 'missing',
-    unknown: 'unknown',
+    declared: msg('declared, not checked offline'),
+    present: msg('present'),
+    missing: msg('missing'),
+    unknown: msg('unknown'),
   };
   /** Why a read-only kind is listed and never copied. Said once, next to the entry. */
   const READ_ONLY_NOTE: Record<string, string> = {
-    hook: 'A hook runs code. Arsenal lists it and never copies or runs it.',
-    mcp_server:
+    hook: msg(
+      'A hook runs code. Arsenal lists it and never copies or runs it.',
+    ),
+    mcp_server: msg(
       'An MCP definition can hold credentials. Arsenal lists it and never copies it.',
-    plugin:
+    ),
+    plugin: msg(
       'A plugin brings code and hooks. Arsenal lists it; importing plugins is not available yet.',
+    ),
   };
   const COMPOSITE_KIND_LABEL: Record<CompositeKind, string> = {
-    gsd_core: 'GSD Core payload',
-    claude_plugin: 'Claude Code plugin',
-    codex_plugin: 'Codex plugin',
+    gsd_core: msg('GSD Core payload'),
+    claude_plugin: msg('Claude Code plugin'),
+    codex_plugin: msg('Codex plugin'),
   };
   const SOURCE_LABEL: Record<string, string> = {
-    claude_user_skills: 'Claude user skills',
-    codex_user_skills: 'Codex user skills',
-    codex_home_skills: 'Codex home skills',
-    codex_system_skills: 'Codex system skills',
-    claude_project_skills: 'Claude project skills',
-    codex_project_skills: 'Codex project skills',
-    claude_user_agents: 'Claude user agents',
-    codex_user_agents: 'Codex user agents',
-    claude_project_agents: 'Claude project agents',
-    codex_project_agents: 'Codex project agents',
-    claude_user_rules: 'Claude user rules',
-    codex_user_rules: 'Codex user rules',
-    claude_project_rules: 'Claude project rules',
-    codex_project_rules: 'Codex project rules',
+    claude_user_skills: msg('Claude user skills'),
+    codex_user_skills: msg('Codex user skills'),
+    codex_home_skills: msg('Codex home skills'),
+    codex_system_skills: msg('Codex system skills'),
+    claude_project_skills: msg('Claude project skills'),
+    codex_project_skills: msg('Codex project skills'),
+    claude_user_agents: msg('Claude user agents'),
+    codex_user_agents: msg('Codex user agents'),
+    claude_project_agents: msg('Claude project agents'),
+    codex_project_agents: msg('Codex project agents'),
+    claude_user_rules: msg('Claude user rules'),
+    codex_user_rules: msg('Codex user rules'),
+    claude_project_rules: msg('Claude project rules'),
+    codex_project_rules: msg('Codex project rules'),
   };
   const EXCLUDED_LABEL: Record<string, string> = {
-    credential_name: 'Credential file, not copied',
-    hidden_entry: 'Hidden, not copied',
-    symbolic_link: 'Link, not followed',
-    binary_file: 'Binary, not copied',
-    may_hold_secret: 'May hold a secret',
-    special_file: 'Special file, not copied',
-    too_deep: 'Nested too deep, not copied',
-    non_utf8_name: 'Name is not UTF-8, not copied',
+    credential_name: msg('Credential file, not copied'),
+    hidden_entry: msg('Hidden, not copied'),
+    symbolic_link: msg('Link, not followed'),
+    binary_file: msg('Binary, not copied'),
+    may_hold_secret: msg('May hold a secret'),
+    special_file: msg('Special file, not copied'),
+    too_deep: msg('Nested too deep, not copied'),
+    non_utf8_name: msg('Name is not UTF-8, not copied'),
   };
   const SOURCE_STATE_LABEL: Record<string, string> = {
-    read: 'read',
-    absent: 'not present',
-    unreadable: 'could not be read',
+    read: msg('read'),
+    absent: msg('not present'),
+    unreadable: msg('could not be read'),
   };
 
   // Library filters
@@ -229,17 +237,24 @@
       timeStyle: 'short',
     });
   }
-  function revisionOf(detail: { summary: Summary }): string {
-    return `${detail.summary.revision} of ${detail.summary.revisions}`;
-  }
   function excludedText(reason: string): string {
     return EXCLUDED_LABEL[reason] ?? reason;
   }
   function importLabel(candidate: Candidate): string {
-    if (arsenal.busy === 'import') return 'Importing…';
-    if (candidate.status === 'imported') return 'Already imported';
-    if (candidate.status === 'source_changed') return 'Import as new revision';
-    return 'Import';
+    if (arsenal.busy === 'import') return msg('Importing…');
+    if (candidate.status === 'imported') return msg('Already imported');
+    if (candidate.status === 'source_changed')
+      return msg('Import as new revision');
+    return msg('Import');
+  }
+  /** Switches the provider. With unsaved changes in the presets draft, the switch waits for Discard changes. */
+  function chooseProvider(option: ArsenalProvider) {
+    if (option === provider) return;
+    const change = () => {
+      provider = option;
+    };
+    if (presetsTab) presetsTab.requestLeave(change);
+    else change();
   }
   function onTab(event: KeyboardEvent, index: number) {
     const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
@@ -266,21 +281,24 @@
   <div class="sessions-toolbar arsenal-head">
     <div class="sessions-heading">
       <h2>Arsenal</h2>
-      <p class="sessions-count">Capabilities installed on this machine</p>
+      <p class="sessions-count">
+        {t('Capabilities installed on this machine')}
+      </p>
     </div>
     <button
       class="action"
       type="button"
       disabled={arsenal.phase === 'loading' || busy}
-      onclick={() => controller.refresh()}>Refresh</button
+      onclick={() => controller.refresh()}>{t('Refresh')}</button
     >
   </div>
   <p class="configuration-note">
-    Installed does not mean imported. A selection reaches a terminal only when
-    you start one with it from Workspace.
+    {t(
+      'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.',
+    )}
   </p>
 
-  <div class="arsenal-provider" role="radiogroup" aria-label="Provider">
+  <div class="arsenal-provider" role="radiogroup" aria-label={t('Provider')}>
     {#each PROVIDER_OPTIONS as option (option)}
       <button
         class="action arsenal-provider-option"
@@ -289,13 +307,14 @@
         aria-checked={provider === option}
         tabindex={provider === option ? 0 : -1}
         disabled={installed(option) === false}
-        onclick={() => (provider = option)}
+        onclick={() => chooseProvider(option)}
         >{PROVIDER_LABEL[option]}{#if installed(option) === false}
-          <span class="arsenal-provider-note">Not installed</span>{/if}</button
+          <span class="arsenal-provider-note">{t('Not installed')}</span
+          >{/if}</button
       >
     {/each}
   </div>
-  <div class="arsenal-tabs" role="tablist" aria-label="Arsenal sections">
+  <div class="arsenal-tabs" role="tablist" aria-label={t('Arsenal sections')}>
     {#each TABS as tab, index (tab.id)}
       <button
         id="arsenal-tab-{tab.id}"
@@ -306,7 +325,7 @@
         aria-controls="arsenal-panel-{tab.id}"
         tabindex={activeTop === tab.id ? 0 : -1}
         onclick={() => controller.setTab(tab.id)}
-        onkeydown={(event) => onTab(event, index)}>{tab.label}</button
+        onkeydown={(event) => onTab(event, index)}>{t(tab.label)}</button
       >
     {/each}
   </div>
@@ -318,23 +337,30 @@
         role={arsenal.notice.tone === 'error' ? 'alert' : 'status'}
         aria-live={arsenal.notice.tone === 'error' ? 'assertive' : 'polite'}
       >
-        {arsenal.notice.text}
+        {t(arsenal.notice.text)}
       </p>
     {/if}
 
     {#if arsenal.phase === 'loading' || arsenal.phase === 'idle'}
-      <p role="status">Reading the Arsenal library…</p>
+      <p role="status">{t('Reading the Arsenal library…')}</p>
     {:else if arsenal.phase === 'unavailable'}
       <p role="alert">
-        The Arsenal library could not be opened. Refresh after the Wyss data
-        folder is writable.
+        {t(
+          'The Arsenal library could not be opened. Refresh after the Wyss data folder is writable.',
+        )}
       </p>
     {:else if arsenal.phase === 'failed'}
-      <p role="alert">The library did not load completely. Try Refresh.</p>
+      <p role="alert">
+        {t('The library did not load completely. Try Refresh.')}
+      </p>
     {/if}
 
     {#if inLibrary}
-      <div class="arsenal-subtabs" role="group" aria-label="Library sections">
+      <div
+        class="arsenal-subtabs"
+        role="group"
+        aria-label={t('Library sections')}
+      >
         {#each LIBRARY_SECTIONS as section (section.id)}
           <button
             id="arsenal-section-{section.id}"
@@ -342,7 +368,7 @@
             type="button"
             aria-current={arsenal.tab === section.id ? 'true' : undefined}
             onclick={() => controller.setTab(section.id)}
-            >{section.label}</button
+            >{t(section.label)}</button
           >
         {/each}
       </div>
@@ -357,57 +383,66 @@
       >
         <div class="arsenal-filters">
           <label
-            >Search <input
+            >{t('Search')}
+            <input
               type="search"
               bind:value={libraryQuery}
-              placeholder="Name, description or origin"
+              placeholder={t('Name, description or origin')}
             /></label
           >
           <label
-            >Provider
+            >{t('Provider')}
             <select bind:value={libraryProvider}>
-              <option value="all">All</option>
+              <option value="all">{t('All')}</option>
               <option value="claude_code">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
           </label>
           <label
-            >Source
+            >{t('Source')}
             <select bind:value={librarySource}>
-              <option value="all">All</option>
+              <option value="all">{t('All')}</option>
               {#each sources as source (source)}
                 <option value={source}>{SOURCE_LABEL[source] ?? source}</option>
               {/each}
             </select>
           </label>
           <label
-            >Compatibility
+            >{t('Compatibility')}
             <select bind:value={libraryCompat}>
-              <option value="all">All</option>
-              <option value="supported">Supported</option>
-              <option value="unverified">Unverified</option>
-              <option value="missing_dependency">Missing dependency</option>
-              <option value="unsupported">Unsupported</option>
+              <option value="all">{t('All')}</option>
+              <option value="supported">{t('Supported')}</option>
+              <option value="unverified">{t('Unverified')}</option>
+              <option value="missing_dependency"
+                >{t('Missing dependency')}</option
+              >
+              <option value="unsupported">{t('Unsupported')}</option>
             </select>
           </label>
         </div>
 
         {#if arsenal.library.length === 0 && arsenal.phase === 'ready'}
           <p class="arsenal-empty">
-            Nothing is imported yet. Open Discover to import a capability you
-            already have.
+            {t(
+              'Nothing is imported yet. Open Discover to import a capability you already have.',
+            )}
           </p>
         {:else if visibleLibrary.length === 0 && arsenal.library.length > 0}
-          <p class="arsenal-empty">No capabilities match these filters.</p>
+          <p class="arsenal-empty">
+            {t('No capabilities match these filters.')}
+          </p>
         {:else if arsenal.library.length > 0}
           <p class="arsenal-count" aria-live="polite">
             {visibleLibrary.length === arsenal.library.length
-              ? `${arsenal.library.length} imported`
-              : `${visibleLibrary.length} of ${arsenal.library.length} imported`}
+              ? t('{count} imported', { count: arsenal.library.length })
+              : t('{shown} of {total} imported', {
+                  shown: visibleLibrary.length,
+                  total: arsenal.library.length,
+                })}
           </p>
         {/if}
 
-        <ul class="arsenal-list" aria-label="Imported capabilities">
+        <ul class="arsenal-list" aria-label={t('Imported capabilities')}>
           {#each visibleLibrary as item (item.id)}
             {@const mark = compatibilityMark(libraryCompatibility(item))}
             <li class="arsenal-row-item">
@@ -422,16 +457,18 @@
                   <span class="arsenal-row-name">{item.name}</span>
                   <span class="badge" data-tone={mark.tone}
                     ><span aria-hidden="true">{mark.symbol}</span>
-                    {COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
+                    {t(COMPATIBILITY_LABEL[libraryCompatibility(item)])}</span
                   >
                 </span>
                 {#if item.description}
                   <span class="arsenal-row-desc">{item.description}</span>
                 {/if}
                 <span class="arsenal-row-meta"
-                  >{kindOf(item)} · {PROVIDER_LABEL[item.provider]} · {SOURCE_LABEL[
-                    item.source
-                  ] ?? item.source} · Revision {item.revision}</span
+                  >{t(kindOf(item))} · {PROVIDER_LABEL[item.provider]} · {t(
+                    SOURCE_LABEL[item.source] ?? item.source,
+                  )} · {t('Revision {revision}', {
+                    revision: item.revision,
+                  })}</span
                 >
               </button>
             </li>
@@ -440,23 +477,28 @@
 
         {#if arsenal.opened}
           {@const opened = arsenal.opened}
-          <section class="arsenal-detail" aria-label="Capability details">
+          <section class="arsenal-detail" aria-label={t('Capability details')}>
             <h3>{opened.summary.name}</h3>
             <p class="arsenal-muted">
-              {KIND_LABEL[opened.summary.kind as CandidateKind] ??
-                opened.summary.kind} · {PROVIDER_LABEL[opened.summary.provider]} ·
-              {SOURCE_LABEL[opened.summary.source] ?? opened.summary.source} · Revision
-              {revisionOf(opened)}
+              {t(
+                KIND_LABEL[opened.summary.kind as CandidateKind] ??
+                  opened.summary.kind,
+              )} · {PROVIDER_LABEL[opened.summary.provider]} ·
+              {t(SOURCE_LABEL[opened.summary.source] ?? opened.summary.source)} ·
+              {t('Revision {current} of {total}', {
+                current: opened.summary.revision,
+                total: opened.summary.revisions,
+              })}
             </p>
             {#if opened.summary.description}<p>
                 {opened.summary.description}
               </p>{/if}
             <dl class="arsenal-facts">
-              <dt>Imported from</dt>
+              <dt>{t('Imported from')}</dt>
               <dd><code>{opened.summary.origin}</code></dd>
-              <dt>Content</dt>
+              <dt>{t('Content')}</dt>
               <dd><code>{opened.summary.tree_hash.slice(0, 16)}</code></dd>
-              <dt>Compatibility</dt>
+              <dt>{t('Compatibility')}</dt>
               <dd>
                 <span
                   class="badge"
@@ -466,42 +508,46 @@
                     >{compatibilityMark(opened.compatibility.status)
                       .symbol}</span
                   >
-                  {COMPATIBILITY_LABEL[opened.compatibility.status]}</span
+                  {t(COMPATIBILITY_LABEL[opened.compatibility.status])}</span
                 >
                 {opened.compatibility.reason}
               </dd>
-              <dt>Use in a session</dt>
+              <dt>{t('Use in a session')}</dt>
               <dd>
-                Only through a terminal plan: Workspace shows, per terminal,
-                whether this revision is installed and whether it can be
-                applied.
+                {t(
+                  'Only through a terminal plan: Workspace shows, per terminal, whether this revision is installed and whether it can be applied.',
+                )}
               </dd>
             </dl>
-            <h4>Dependencies</h4>
-            <h4>Dependencies</h4>
+            <h4>{t('Dependencies')}</h4>
             {#if opened.dependencies.length === 0}
               <p class="arsenal-muted">
-                Its files declare and point at nothing Arsenal can check.
+                {t('Its files declare and point at nothing Arsenal can check.')}
               </p>
             {:else}
-              <ul class="arsenal-files" aria-label="Dependencies">
+              <ul class="arsenal-files" aria-label={t('Dependencies')}>
                 {#each opened.dependencies as dep (dep.kind + dep.name)}
                   <li>
                     <span
-                      >{DEPENDENCY_KIND[dep.kind]}:
+                      >{t(DEPENDENCY_KIND[dep.kind])}:
                       <code>{dep.name}</code></span
                     >
                     <span
                       class={dep.state === 'missing'
                         ? 'arsenal-warn'
-                        : 'arsenal-muted'}>{DEPENDENCY_STATE[dep.state]}</span
+                        : 'arsenal-muted'}
+                      >{t(DEPENDENCY_STATE[dep.state])}</span
                     >
                   </li>
                 {/each}
               </ul>
             {/if}
 
-            <h4>Files in revision {opened.revision}</h4>
+            <h4>
+              {t('Files in revision {revision}', {
+                revision: opened.revision,
+              })}
+            </h4>
             <ul class="arsenal-files">
               {#each opened.files as file (file.path)}
                 <li>
@@ -520,16 +566,23 @@
               <pre class="arsenal-preview">{arsenal.file.text}</pre>
             {/if}
 
-            <h4>Revisions</h4>
+            <h4>{t('Revisions')}</h4>
             <ul class="arsenal-revisions">
               {#each opened.revisions as revision (revision.number)}
                 <li>
-                  <span>Revision {revision.number}</span>
+                  <span
+                    >{t('Revision {revision}', {
+                      revision: revision.number,
+                    })}</span
+                  >
                   <span class="arsenal-muted"
-                    >{revision.files} files · {revision.bytes} B</span
+                    >{t('{files} files · {bytes} B', {
+                      files: revision.files,
+                      bytes: revision.bytes,
+                    })}</span
                   >
                   {#if revision.current}
-                    <span class="pill">Current</span>
+                    <span class="pill">{t('Current')}</span>
                   {:else}
                     <button
                       class="action"
@@ -538,8 +591,10 @@
                       onclick={() => controller.restore(revision.number)}
                     >
                       {arsenal.busy === 'restore'
-                        ? 'Restoring…'
-                        : `Restore revision ${revision.number}`}
+                        ? t('Restoring…')
+                        : t('Restore revision {revision}', {
+                            revision: revision.number,
+                          })}
                     </button>
                   {/if}
                   <button
@@ -548,7 +603,9 @@
                     onclick={() =>
                       controller.open(opened.summary.id, revision.number)}
                   >
-                    Show files of revision {revision.number}
+                    {t('Show files of revision {revision}', {
+                      revision: revision.number,
+                    })}
                   </button>
                 </li>
               {/each}
@@ -567,48 +624,49 @@
       >
         <div class="arsenal-filters">
           <label
-            >Search <input
+            >{t('Search')}
+            <input
               type="search"
               bind:value={discoverQuery}
-              placeholder="Name, description or origin"
+              placeholder={t('Name, description or origin')}
             /></label
           >
           <label
-            >Provider
+            >{t('Provider')}
             <select bind:value={discoverProvider}>
-              <option value="all">All</option>
+              <option value="all">{t('All')}</option>
               <option value="claude_code">Claude Code</option>
               <option value="codex">Codex</option>
             </select>
           </label>
           <label
-            >Kind
+            >{t('Kind')}
             <select bind:value={discoverKind}>
-              <option value="all">All</option>
-              <option value="skill">Skills</option>
-              <option value="agent">Agents</option>
-              <option value="rule">Rules</option>
-              <option value="mcp_server">MCP servers</option>
-              <option value="hook">Hooks</option>
-              <option value="plugin">Plugins</option>
+              <option value="all">{t('All')}</option>
+              <option value="skill">{t('Skills')}</option>
+              <option value="agent">{t('Agents')}</option>
+              <option value="rule">{t('Rules')}</option>
+              <option value="mcp_server">{t('MCP servers')}</option>
+              <option value="hook">{t('Hooks')}</option>
+              <option value="plugin">{t('Plugins')}</option>
             </select>
           </label>
           <label
-            >Where
+            >{t('Where')}
             <select bind:value={discoverScope}>
-              <option value="all">Account and project</option>
-              <option value="user">Account</option>
-              <option value="project">Project</option>
+              <option value="all">{t('Account and project')}</option>
+              <option value="user">{t('Account')}</option>
+              <option value="project">{t('Project')}</option>
             </select>
           </label>
           <label
-            >Status
+            >{t('Status')}
             <select bind:value={discoverStatus}>
-              <option value="all">All</option>
-              <option value="not_imported">Not imported</option>
-              <option value="imported">Imported</option>
-              <option value="source_changed">Source changed</option>
-              <option value="read_only">Read only</option>
+              <option value="all">{t('All')}</option>
+              <option value="not_imported">{t('Not imported')}</option>
+              <option value="imported">{t('Imported')}</option>
+              <option value="source_changed">{t('Source changed')}</option>
+              <option value="read_only">{t('Read only')}</option>
             </select>
           </label>
           <button
@@ -617,7 +675,7 @@
             disabled={arsenal.discovering || busy}
             onclick={() => controller.discover()}
           >
-            {arsenal.discovering ? 'Reading…' : 'Scan again'}
+            {arsenal.discovering ? t('Reading…') : t('Scan again')}
           </button>
           <button
             class="action"
@@ -626,8 +684,11 @@
             onclick={() => controller.importEligible()}
           >
             {busy && arsenal.bulk && !arsenal.bulk.finished
-              ? `Importing ${arsenal.bulk.done} of ${arsenal.bulk.total}…`
-              : `Import ${eligibleCount} eligible`}
+              ? t('Importing {done} of {total}…', {
+                  done: arsenal.bulk.done,
+                  total: arsenal.bulk.total,
+                })
+              : t('Import {count} eligible', { count: eligibleCount })}
           </button>
         </div>
 
@@ -635,58 +696,66 @@
           <progress
             max={arsenal.bulk.total}
             value={arsenal.bulk.done}
-            aria-label="Bulk import progress"
+            aria-label={t('Bulk import progress')}
           ></progress>
         {/if}
 
         {#if arsenal.discovering && arsenal.discover === null}
-          <p role="status">Reading installed capabilities…</p>
+          <p role="status">{t('Reading installed capabilities…')}</p>
         {:else if arsenal.discover}
           <p class="arsenal-muted">
             {#if arsenal.discover.project}
-              Project: {arsenal.discover.project}
+              {t('Project: {project}', { project: arsenal.discover.project })}
             {:else}
-              No project selected. Project capabilities are not listed; select a
-              project in Configuration.
+              {t(
+                'No project selected. Project capabilities are not listed; select a project in Configuration.',
+              )}
             {/if}
           </p>
-          <ul class="arsenal-sources" aria-label="Capability folders">
+          <ul class="arsenal-sources" aria-label={t('Capability folders')}>
             {#each arsenal.discover.sources as source (source.source)}
               <li>
-                {SOURCE_LABEL[source.source] ?? source.source}: {SOURCE_STATE_LABEL[
-                  source.state
-                ] ?? source.state}
+                {t(SOURCE_LABEL[source.source] ?? source.source)}: {t(
+                  SOURCE_STATE_LABEL[source.state] ?? source.state,
+                )}
               </li>
             {/each}
           </ul>
           {#if arsenal.discover.truncated}
             <p role="alert">
-              The folders have more entries than the scan shows. Some are not
-              listed.
+              {t(
+                'The folders have more entries than the scan shows. Some are not listed.',
+              )}
             </p>
           {/if}
 
           {#if arsenal.discover.composites.length > 0}
             <p class="arsenal-muted">
-              {arsenal.discover.composites.length} composite collection(s) installed.
+              {t('{count} composite collection(s) installed.', {
+                count: arsenal.discover.composites.length,
+              })}
               <button
                 class="action"
                 type="button"
                 onclick={() => controller.setTab('composites')}
-                >Open Composites</button
+                >{t('Open Composites')}</button
               >
             </p>
           {/if}
 
           {#if arsenal.discover.candidates.length === 0}
             <p class="arsenal-empty">
-              No capabilities found in your Claude, Codex or project folders.
+              {t(
+                'No capabilities found in your Claude, Codex or project folders.',
+              )}
             </p>
           {:else if candidates.length === 0}
-            <p class="arsenal-empty">No capabilities match these filters.</p>
+            <p class="arsenal-empty">
+              {t('No capabilities match these filters.')}
+            </p>
           {/if}
 
-          <ul class="arsenal-list" aria-label="Discovered capabilities">
+          <ul class="arsenal-list" aria-label={t('Discovered capabilities')}>
             {#each candidates as candidate (candidate.id)}
               {@const mark = candidateMark(candidate.status)}
               {@const blocked =
@@ -706,20 +775,23 @@
                     <span class="arsenal-badges">
                       <span class="badge" data-tone={mark.tone}
                         ><span aria-hidden="true">{mark.symbol}</span>
-                        {STATUS_LABEL[candidate.status]}</span
+                        {t(STATUS_LABEL[candidate.status])}</span
                       >
                       {#if blocked}<span class="badge" data-tone="error"
-                          ><span aria-hidden="true">✕</span> Blocked</span
+                          ><span aria-hidden="true">✕</span>
+                          {t('Blocked')}</span
                         >{/if}
                       {#if candidate.duplicates.length > 0}<span
                           class="badge"
                           data-tone="warn"
-                          ><span aria-hidden="true">!</span> Duplicate content</span
+                          ><span aria-hidden="true">!</span>
+                          {t('Duplicate content')}</span
                         >{/if}
                       {#if candidate.name_collisions.length > 0}<span
                           class="badge"
                           data-tone="warn"
-                          ><span aria-hidden="true">!</span> Name collision</span
+                          ><span aria-hidden="true">!</span>
+                          {t('Name collision')}</span
                         >{/if}
                     </span>
                   </span>
@@ -728,11 +800,11 @@
                     >
                   {/if}
                   <span class="arsenal-row-meta"
-                    >{KIND_LABEL[candidate.kind]} · {PROVIDER_LABEL[
+                    >{t(KIND_LABEL[candidate.kind])} · {PROVIDER_LABEL[
                       candidate.provider
-                    ]} · {SCOPE_LABEL[
-                      candidate.scope
-                    ]}{#if candidate.managed_by}
+                    ]} · {t(
+                      SCOPE_LABEL[candidate.scope],
+                    )}{#if candidate.managed_by}
                       · {candidate.managed_by.composite}
                       {candidate.managed_by.version}{/if}</span
                   >
@@ -742,56 +814,63 @@
           </ul>
 
           {#if chosen}
-            <section class="arsenal-detail" aria-label="Capability to import">
+            <section
+              class="arsenal-detail"
+              aria-label={t('Capability to import')}
+            >
               <h3>{chosen.name}</h3>
               <p class="arsenal-muted">
-                {KIND_LABEL[chosen.kind]} · {PROVIDER_LABEL[chosen.provider]} · {SOURCE_LABEL[
-                  chosen.source
-                ] ?? chosen.source} · {SCOPE_LABEL[chosen.scope]} · {STATUS_LABEL[
-                  chosen.status
-                ]}
+                {t(KIND_LABEL[chosen.kind])} · {PROVIDER_LABEL[chosen.provider]} ·
+                {t(SOURCE_LABEL[chosen.source] ?? chosen.source)} · {t(
+                  SCOPE_LABEL[chosen.scope],
+                )} · {t(STATUS_LABEL[chosen.status])}
               </p>
               {#if chosen.description}<p>{chosen.description}</p>{/if}
               <dl class="arsenal-facts">
-                <dt>Read from</dt>
+                <dt>{t('Read from')}</dt>
                 <dd><code>{chosen.origin}</code></dd>
                 {#if chosen.tree_hash}
-                  <dt>Content</dt>
+                  <dt>{t('Content')}</dt>
                   <dd><code>{chosen.tree_hash.slice(0, 16)}</code></dd>
                 {/if}
-                <dt>Compatibility</dt>
-                <dd>{COMPATIBILITY_LABEL[chosen.compatibility]}</dd>
+                <dt>{t('Compatibility')}</dt>
+                <dd>{t(COMPATIBILITY_LABEL[chosen.compatibility])}</dd>
               </dl>
 
               {#if chosen.status === 'read_only'}
                 <p class="arsenal-muted">
-                  {READ_ONLY_NOTE[chosen.kind] ??
-                    'Listed only. Arsenal does not copy it.'}
+                  {t(
+                    READ_ONLY_NOTE[chosen.kind] ??
+                      'Listed only. Arsenal does not copy it.',
+                  )}
                 </p>
               {:else}
                 {#if chosen.executes_code}
                   <p class="arsenal-warn">
-                    Contains scripts. Arsenal copies them and never runs them.
+                    {t(
+                      'Contains scripts. Arsenal copies them and never runs them.',
+                    )}
                   </p>
                 {/if}
                 {#if chosen.duplicates.length > 0}
                   <p>
-                    Same content as {chosen.duplicates
-                      .map(nameOfCandidate)
-                      .join(', ')}.
+                    {t('Same content as {names}.', {
+                      names: chosen.duplicates.map(nameOfCandidate).join(', '),
+                    })}
                   </p>
                 {/if}
                 {#if chosen.name_collisions.length > 0}
                   <p>
-                    Another capability here has the same name. Both can be
-                    imported; they stay separate.
+                    {t(
+                      'Another capability here has the same name. Both can be imported; they stay separate.',
+                    )}
                   </p>
                 {/if}
 
                 <h4>
                   {chosen.importable
-                    ? 'Files that will be copied'
-                    : 'Files in this capability'}
+                    ? t('Files that will be copied')
+                    : t('Files in this capability')}
                 </h4>
                 <ul class="arsenal-files">
                   {#each detail?.files ?? [] as file (file.path)}
@@ -802,30 +881,31 @@
                   {/each}
                 </ul>
                 {#if (detail?.excluded.length ?? 0) > 0}
-                  <h4>Not copied</h4>
+                  <h4>{t('Not copied')}</h4>
                   <ul class="arsenal-files">
                     {#each detail?.excluded ?? [] as entry (entry.path)}
                       <li>
                         <span>{entry.path}</span>
                         <span class="arsenal-muted"
-                          >{excludedText(entry.reason)}</span
+                          >{t(excludedText(entry.reason))}</span
                         >
                       </li>
                     {/each}
                   </ul>
                 {/if}
                 {#if (detail?.review.length ?? 0) > 0}
-                  <h4>Review before importing</h4>
+                  <h4>{t('Review before importing')}</h4>
                   <p class="arsenal-muted">
-                    These files use a credential word. They are copied; check
-                    that none holds a real value.
+                    {t(
+                      'These files use a credential word. They are copied; check that none holds a real value.',
+                    )}
                   </p>
                   <ul class="arsenal-files">
                     {#each detail?.review ?? [] as entry (entry.path)}
                       <li>
                         <span>{entry.path}</span>
                         <span class="arsenal-muted"
-                          >Mentions a credential word</span
+                          >{t('Mentions a credential word')}</span
                         >
                       </li>
                     {/each}
@@ -834,12 +914,16 @@
 
                 {#if chosen.managed_by}
                   <p role="alert">
-                    This is a link into {chosen.managed_by.composite}
-                    {chosen.managed_by.version}. It is read only: GSD Core
-                    installs it, so Arsenal does not copy it.
+                    {t(
+                      'This is a link into {composite} {version}. It is read only: GSD Core installs it, so Arsenal does not copy it.',
+                      {
+                        composite: chosen.managed_by.composite,
+                        version: chosen.managed_by.version,
+                      },
+                    )}
                   </p>
                 {:else if chosen.blocked}
-                  <p role="alert">{blockedText(chosen.blocked)}</p>
+                  <p role="alert">{t(blockedText(chosen.blocked))}</p>
                 {/if}
                 <button
                   class="action"
@@ -849,7 +933,7 @@
                     chosen.status === 'imported'}
                   onclick={() => controller.importCandidate(chosen.id)}
                 >
-                  {importLabel(chosen)}
+                  {t(importLabel(chosen))}
                 </button>
               {/if}
             </section>
@@ -866,56 +950,70 @@
         class="arsenal-panel"
       >
         <p class="configuration-note">
-          A composite is installed by its own tool: GSD Core by its installer, a
-          plugin by Claude Code or Codex. Arsenal describes it and never copies
-          it.
+          {t(
+            'A composite is installed by its own tool: GSD Core by its installer, a plugin by Claude Code or Codex. Arsenal describes it and never copies it.',
+          )}
         </p>
         {#if arsenal.discovering && arsenal.discover === null}
-          <p role="status">Reading installed composites…</p>
+          <p role="status">{t('Reading installed composites…')}</p>
         {:else if arsenal.discover && arsenal.discover.composites.length === 0}
           <p class="arsenal-empty">
-            No composite collection is installed in your Claude or Codex
-            folders.
+            {t(
+              'No composite collection is installed in your Claude or Codex folders.',
+            )}
           </p>
         {/if}
         {#each arsenal.discover?.composites ?? [] as composite (composite.key)}
           <section class="arsenal-detail" aria-label={composite.name}>
             <h3>{composite.name}</h3>
             <p class="arsenal-badges">
-              <span class="pill">{COMPOSITE_KIND_LABEL[composite.kind]}</span>
+              <span class="pill">{t(COMPOSITE_KIND_LABEL[composite.kind])}</span
+              >
               {#if composite.version}<span class="pill"
-                  >Version {composite.version}</span
+                  >{t('Version {version}', {
+                    version: composite.version,
+                  })}</span
                 >{/if}
               {#if composite.enabled !== null}<span class="pill"
-                  >{composite.enabled ? 'Enabled' : 'Disabled'} in your settings</span
+                  >{composite.enabled
+                    ? t('Enabled in your settings')
+                    : t('Disabled in your settings')}</span
                 >{/if}
-              {#if composite.methodology}<span class="pill">Methodology</span
+              {#if composite.methodology}<span class="pill"
+                  >{t('Methodology')}</span
                 >{/if}
-              <span class="pill">Not importable</span>
+              <span class="pill">{t('Not importable')}</span>
             </p>
             {#if composite.description}<p>{composite.description}</p>{/if}
             <dl class="arsenal-facts">
-              <dt>Source</dt>
+              <dt>{t('Source')}</dt>
               <dd><code>{composite.origin}</code></dd>
-              <dt>Members</dt>
+              <dt>{t('Members')}</dt>
               <dd>
-                {composite.skills.length} skills · {composite.agents.length} agents
-                {#if composite.commands > 0}· {composite.commands} commands{/if}
-                {#if composite.artifacts > 0}· {composite.artifacts} artifacts in
-                  its manifest{/if}
+                {t('{skills} skills · {agents} agents', {
+                  skills: composite.skills.length,
+                  agents: composite.agents.length,
+                })}
+                {#if composite.commands > 0}· {t('{count} commands', {
+                    count: composite.commands,
+                  })}{/if}
+                {#if composite.artifacts > 0}· {t(
+                    '{count} artifacts in its manifest',
+                    { count: composite.artifacts },
+                  )}{/if}
               </dd>
-              <dt>Runs code</dt>
+              <dt>{t('Runs code')}</dt>
               <dd>
                 {composite.hooks
-                  ? 'Yes: it registers hooks.'
+                  ? t('Yes: it registers hooks.')
                   : composite.kind === 'gsd_core'
-                    ? 'Its hooks and engine belong to the GSD Core install.'
-                    : 'No hooks declared.'}
-                {composite.mcp ? ' It declares MCP servers.' : ''}
+                    ? t('Its hooks and engine belong to the GSD Core install.')
+                    : t('No hooks declared.')}
+                {composite.mcp ? ` ${t('It declares MCP servers.')}` : ''}
               </dd>
             </dl>
             {#if composite.categories.length > 0}
-              <h4>Manifest</h4>
+              <h4>{t('Manifest')}</h4>
               <ul class="arsenal-files">
                 {#each composite.categories as [category, count] (category)}
                   <li>
@@ -926,19 +1024,27 @@
                 {/each}
               </ul>
             {/if}
-            <h4>Limits</h4>
+            <h4>{t('Limits')}</h4>
             <ul class="arsenal-files">
               {#each composite.limitations as line (line)}<li>{line}</li>{/each}
             </ul>
             {#if composite.skills.length > 0}
               <details>
-                <summary>Skills ({composite.skills.length})</summary>
+                <summary
+                  >{t('Skills ({count})', {
+                    count: composite.skills.length,
+                  })}</summary
+                >
                 <p class="arsenal-member-list">{composite.skills.join(', ')}</p>
               </details>
             {/if}
             {#if composite.agents.length > 0}
               <details>
-                <summary>Agents ({composite.agents.length})</summary>
+                <summary
+                  >{t('Agents ({count})', {
+                    count: composite.agents.length,
+                  })}</summary
+                >
                 <p class="arsenal-member-list">{composite.agents.join(', ')}</p>
               </details>
             {/if}
@@ -961,23 +1067,23 @@
           />
         {/if}
         <p class="configuration-note">
-          What each terminal started with, recorded right after its start from
-          the host's own session record. Applied means the host launched it with
-          that exact exclusion; whether the provider then used each skill is not
-          observed.
+          {t(
+            "What each terminal started with, recorded right after its start from the host's own session record. Applied means the host launched it with that exact exclusion; whether the provider then used each skill is not observed.",
+          )}
         </p>
         <button
           class="action"
           type="button"
-          onclick={() => controller.loadBindings()}>Refresh</button
+          onclick={() => controller.loadBindings()}>{t('Refresh')}</button
         >
         {#if arsenal.bindings.length === 0}
           <p class="arsenal-empty">
-            No terminal has started with a selection yet. Choose one in
-            Workspace when starting Claude Code or Codex.
+            {t(
+              'No terminal has started with a selection yet. Choose one in Workspace when starting Claude Code or Codex.',
+            )}
           </p>
         {/if}
-        <ul class="arsenal-list" aria-label="Terminal configurations">
+        <ul class="arsenal-list" aria-label={t('Terminal configurations')}>
           {#each arsenal.bindings as binding (binding.session_id)}
             <li class="arsenal-detail">
               <h3>{binding.selection_name}</h3>
@@ -989,11 +1095,12 @@
                     >{binding.state === 'applied' ? '✓' : '!'}</span
                   >
                   {binding.state === 'applied'
-                    ? 'APPLIED'
-                    : 'NOT APPLIED'}</span
+                    ? t('APPLIED')
+                    : t('NOT APPLIED')}</span
                 >
                 <span class="badge" data-tone="pending"
-                  ><span aria-hidden="true">?</span> Use not observed</span
+                  ><span aria-hidden="true">?</span>
+                  {t('Use not observed')}</span
                 >
                 <span class="pill">{PROVIDER_LABEL[binding.provider]}</span>
                 {#if binding.provider_version}<span class="pill"
@@ -1002,18 +1109,34 @@
               </p>
               <p>{binding.reason}</p>
               <p class="arsenal-muted">
-                <code>{binding.project}</code> · {when(binding.created_at)} · session
+                <code>{binding.project}</code> · {when(binding.created_at)} · {t(
+                  'session',
+                )}
                 <code>{binding.session_id.slice(0, 8)}</code>
               </p>
               {#if binding.plan}
                 <p class="arsenal-muted">
-                  {binding.plan.items.filter((i) => i.state === 'prepared')
-                    .length} prepared · {binding.plan.excluded.length} installed skills
                   {binding.state === 'applied'
-                    ? 'switched off'
-                    : 'would have been switched off'} · {binding.plan.kept
-                    .length}
-                  kept
+                    ? t(
+                        '{prepared} prepared · {excluded} installed skills switched off · {kept} kept',
+                        {
+                          prepared: binding.plan.items.filter(
+                            (i) => i.state === 'prepared',
+                          ).length,
+                          excluded: binding.plan.excluded.length,
+                          kept: binding.plan.kept.length,
+                        },
+                      )
+                    : t(
+                        '{prepared} prepared · {excluded} installed skills would have been switched off · {kept} kept',
+                        {
+                          prepared: binding.plan.items.filter(
+                            (i) => i.state === 'prepared',
+                          ).length,
+                          excluded: binding.plan.excluded.length,
+                          kept: binding.plan.kept.length,
+                        },
+                      )}
                 </p>
               {/if}
             </li>
@@ -1029,7 +1152,14 @@
         aria-labelledby="arsenal-tab-presets"
         class="arsenal-panel"
       >
-        <PresetsTab {provider} {arsenal} {controller} />
+        {#key provider}
+          <PresetsTab
+            bind:this={presetsTab}
+            {provider}
+            {arsenal}
+            {controller}
+          />
+        {/key}
       </div>
     {/if}
   </div>
