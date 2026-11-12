@@ -1,29 +1,33 @@
-<h1 align="center">wyss-console</h1>
+# Wyss Console
 
-<p align="center"><strong>Entorno de desarrollo nativo para Linux.</strong><br/>Rust · Tauri · Svelte</p>
+**Espacio de desarrollo nativo para Linux**, orientado a CachyOS y KDE.
 
+Wyss Console reúne terminales persistentes, configuración de proveedores y herramientas para trabajar con agentes. El proyecto utiliza Tauri 2, Svelte 5, TypeScript y Rust.
 
-Personal native development workspace for CachyOS/KDE: persistent terminals,
-provider configuration, Arsenal, Native agents and supervised Managed workflows.
-Tauri 2, Svelte 5, TypeScript and Rust.
+## Estado
 
-| Question                                         | Read                                 |
-| ------------------------------------------------ | ------------------------------------ |
-| What is the project and its scope?               | [Product](docs/PRODUCT.md)           |
-| What exists and what is still unverified?        | [Current state](docs/STATUS.md)      |
-| What remains, and in what order?                 | [Remaining roadmap](docs/ROADMAP.md) |
-| Which decisions and restrictions apply?          | [Decisions](docs/DECISIONS.md)       |
-| How are components and state divided?            | [Architecture](docs/ARCHITECTURE.md) |
-| How do I develop, check, install and recover it? | [Development](docs/DEVELOPMENT.md)   |
+El proyecto está en desarrollo. El código disponible, las pruebas registradas y la aceptación en un sistema instalado son cosas distintas. Consultá el [estado actual](docs/STATUS.md) para conocer qué está implementado y qué falta verificar.
 
-Detailed target behavior and acceptance criteria live in [Requirements](docs/REQUIREMENTS.md).
-Specialized contracts are linked from the architecture and decisions pages.
-For source review and implementation by models, follow [Engineering execution](docs/EXECUTION.md).
+## Empezar
 
-Start a development window with `npm ci` followed by `npm run desktop:dev` after
-installing the [prerequisites](docs/DEVELOPMENT.md#prerequisites-and-commands).
-For installation and session-preserving updates, use the
-[package procedure](docs/DEVELOPMENT.md#ordinary-package-installation-and-launch).
+Después de instalar los [requisitos de desarrollo](docs/DEVELOPMENT.md#prerequisites-and-commands), ejecutá:
 
-Source availability, recorded tests and acceptance on an installed system are
-separate. The [status page](docs/STATUS.md) states the current limits.
+```bash
+npm ci
+npm run desktop:dev
+```
+
+Para instalar la aplicación o actualizarla conservando las sesiones, seguí el [procedimiento de instalación](docs/DEVELOPMENT.md#ordinary-package-installation-and-launch).
+
+## Documentación
+
+| Tema | Guía |
+|---|---|
+| Objetivo y alcance | [Producto](docs/PRODUCT.md) |
+| Capacidades y verificaciones pendientes | [Estado actual](docs/STATUS.md) |
+| Trabajo pendiente | [Hoja de ruta](docs/ROADMAP.md) |
+| Decisiones y restricciones | [Decisiones](docs/DECISIONS.md) |
+| Componentes y estado | [Arquitectura](docs/ARCHITECTURE.md) |
+| Desarrollo, comprobaciones e instalación | [Desarrollo](docs/DEVELOPMENT.md) |
+| Comportamiento esperado y criterios de aceptación | [Requisitos](docs/REQUIREMENTS.md) |
+| Ejecución de tareas de ingeniería | [Guía de ejecución](docs/EXECUTION.md) |
