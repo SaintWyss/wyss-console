@@ -8,6 +8,7 @@
     FILE_KIND,
     shownOf,
   } from '../approvals/present';
+  import { t } from '../../i18n/index.svelte';
   import type { ApprovalView, F8Controller } from './controller';
   import { failureText, outcomeUnknown, visible } from './present';
 
@@ -106,8 +107,9 @@
         </p>
         <pre class="approval-code">{visible(file.text)}</pre>
         {#if file.next !== null}
+          {@const preview = shownOf(file.text, file.bytes)}
           <p class="approval-note">
-            Preview truncated: {shownOf(file.text, file.bytes)}.
+            {t(preview.text, preview.values)}
             <button
               type="button"
               class="action"

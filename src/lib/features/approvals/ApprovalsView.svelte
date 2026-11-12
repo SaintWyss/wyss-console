@@ -46,7 +46,7 @@
 >
   <div class="sessions-toolbar">
     <div class="sessions-heading">
-      <h2>Approvals</h2>
+      <h2>{t('Approvals')}</h2>
       <p class="sessions-count">
         {#if !connected}
           {approvals.link === 'connecting'
@@ -84,7 +84,7 @@
   {:else if pending === null && approvals.readFailure}
     <div class="sessions-empty" role="alert">
       <p class="empty-title">
-        {approvalsReadFailure(approvals.readFailure.code)}
+        {t(approvalsReadFailure(approvals.readFailure.code))}
       </p>
       <button type="button" class="action" onclick={() => controller.refresh()}
         >{t('Try again')}</button

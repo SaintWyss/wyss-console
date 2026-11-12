@@ -173,13 +173,13 @@ export function approvalsReadFailure(code: SessionFailureCode): string {
         );
 }
 
-/** How much of a diff is shown, when it is not all of it. */
-export function shownOf(
-  text: string,
-  bytes: number,
-): { shown: string; total: string } {
+/** How much of a diff is shown, when it is not all of it: "N of M bytes shown". */
+export function shownOf(text: string, bytes: number): MessageFact {
   return {
-    shown: new TextEncoder().encode(text).length.toLocaleString(),
-    total: bytes.toLocaleString(),
+    text: msg('Preview truncated: {shown} of {total} bytes shown.'),
+    values: {
+      shown: new TextEncoder().encode(text).length.toLocaleString(),
+      total: bytes.toLocaleString(),
+    },
   };
 }
