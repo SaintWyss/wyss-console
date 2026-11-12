@@ -29,6 +29,13 @@ import {
 } from '../src/lib/features/sessions/present';
 import { catalogueFailure, entryRow } from '../src/lib/features/models/present';
 import {
+  BYPASS_WARNING,
+  FAILURE_TEXT,
+  PERMISSION_LABEL,
+  START_UNRECORDED,
+  switchHint,
+} from '../src/lib/features/native/present';
+import {
   detailLines,
   failureText,
   outcomeText,
@@ -268,6 +275,31 @@ it('draws the managed-runtime row and lease sentences in Spanish, with their pla
   setLanguage('en');
   expect(tPhrase(row)).toBe('Ready · generation 2 · Local Tools');
   expect(tPhrase(lease)).toBe('Expires in 5 min');
+});
+
+it('draws the native profile and session sentences in Spanish', () => {
+  setLanguage('es');
+  expect(t(FAILURE_TEXT.profile_unknown)).toBe('Ese perfil ya no existe.');
+  expect(t(FAILURE_TEXT.internal)).toBe('Algo salió mal en el escritorio.');
+  expect(t(PERMISSION_LABEL.bypass)).toBe(
+    'Acceso total: sin preguntas, sin sandbox (bypass)',
+  );
+  expect(t(BYPASS_WARNING)).toBe(
+    'Acceso total: el agente no pregunta nada y ejecuta cada comando y cada edición sin sandbox, con los permisos de tu cuenta.',
+  );
+  expect(t(switchHint('claude_code'))).toBe(
+    'Para cambiar el modelo en esta sesión, escribí /model en ella. Claude Code también guarda tu elección como predeterminada.',
+  );
+  expect(t(START_UNRECORDED)).toMatch(
+    /^La consola no pudo registrar este inicio/,
+  );
+  setLanguage('en');
+  expect(t(FAILURE_TEXT.profile_unknown)).toBe(
+    'That profile no longer exists.',
+  );
+  expect(t(switchHint('claude_code'))).toBe(
+    'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.',
+  );
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {
