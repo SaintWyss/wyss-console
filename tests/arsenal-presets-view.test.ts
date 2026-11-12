@@ -221,6 +221,15 @@ describe('Presets screen', () => {
         (node) => text(node),
       ),
     ).toEqual(['All', 'Rules', 'Skills', 'Agents']);
+    const chips = [
+      ...root.querySelectorAll('.filters .chips:first-of-type .chip'),
+    ];
+    expect(chips[0].getAttribute('title')).toContain(
+      'rules, skills and agents',
+    );
+    expect(chips[1].getAttribute('title')).toContain('Always on');
+    expect(chips[2].getAttribute('title')).toContain('On demand');
+    expect(chips[3].getAttribute('title')).toContain('hands it a subtask');
   });
 
   it('explains what each type does, marks the chosen one, and what Move to group does', () => {

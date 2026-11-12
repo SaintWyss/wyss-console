@@ -2275,6 +2275,8 @@ export const ES: Readonly<Record<string, string>> = {
   Family: 'Familia',
   'No capabilities match.': 'Ninguna capacidad coincide.',
   'Move to group…': 'Mover a grupo…',
+  'Everything installed for this provider: rules, skills and agents.':
+    'Todo lo instalado para este proveedor: reglas, skills y agentes.',
   'Always on. Standing instructions the agent reads when the session starts, such as invariantes.md. They set how it works; nothing runs.':
     'Siempre activas. Instrucciones fijas que el agente lee al arrancar la sesión, como invariantes.md. Marcan cómo trabaja; no ejecutan nada.',
   'On demand. A guide for one kind of task; the agent loads it only when the task calls for it.':

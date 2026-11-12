@@ -123,6 +123,15 @@
       ),
     },
   ];
+  /** Hover text for each type filter: what that type does. */
+  const KIND_TITLE: Record<'all' | 'skill' | 'agent' | 'rule', string> = {
+    all: msg(
+      'Everything installed for this provider: rules, skills and agents.',
+    ),
+    rule: KIND_HELP[0].text,
+    skill: KIND_HELP[1].text,
+    agent: KIND_HELP[2].text,
+  };
   const CELLS = Array.from({ length: METER_CELLS }, (_, index) => index);
 
   /** The preset on screen: what it is now, and the saved version it came from (`null` for a new one). */
@@ -430,6 +439,7 @@
             type="button"
             class="chip"
             aria-pressed={kind === option.value}
+            title={t(KIND_TITLE[option.value])}
             onclick={() => (kindChoice = option.value)}
             >{t(option.label)}</button
           >
