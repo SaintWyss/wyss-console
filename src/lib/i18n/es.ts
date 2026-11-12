@@ -1722,4 +1722,54 @@ export const ES: Readonly<Record<string, string>> = {
   'Model and effort': 'Modelo y esfuerzo',
   'Usage and limits': 'Uso y límites',
   'Usage history': 'Historial de uso',
+
+  // The model facts: what is offered, configured, requested and reported, and the reroute and effort lines
+  'No Claude runtime is running, so there are no model facts to show. A listed model is offered, not entitled, and a request is not proof of use: when a runtime runs, this view keeps what is offered, configured, requested and reported in use apart.':
+    'No hay ningún runtime de Claude corriendo, así que no hay datos del modelo para mostrar. Un modelo listado se ofrece, no está habilitado, y un pedido no prueba que se use: cuando un runtime corre, esta vista mantiene separados lo ofrecido, lo configurado, lo pedido y lo informado en uso.',
+  Offered: 'Ofrecidos',
+  Configured: 'Configurado',
+  Requested: 'Pedido',
+  'The provider’s own list · revision {revision} · {freshness} · taken {time}':
+    'Lista propia del proveedor · revisión {revision} · {freshness} · tomada {time}',
+  fresh: 'fresca',
+  stale: 'vieja',
+  incomplete: 'incompleta',
+  'Models offered': 'Modelos ofrecidos',
+  Default: 'Predeterminado',
+  'Efforts it lists: {efforts}': 'Esfuerzos que lista: {efforts}',
+  'Offered is not entitled: nothing here says this account may use a model.':
+    'Lo ofrecido no es habilitación: nada de acá dice que esta cuenta pueda usar un modelo.',
+  'Not listed yet.': 'Todavía no hay lista.',
+  'Effort: {effort}': 'Esfuerzo: {effort}',
+  'the provider default': 'el predeterminado del proveedor',
+  'Nothing was pinned when the runtime started: the provider’s default.':
+    'No se fijó nada al arrancar el runtime: el predeterminado del proveedor.',
+  'For turn {turn} · generation {generation}':
+    'Para el turno {turn} · generación {generation}',
+  'No model was requested for the latest turn.':
+    'No se pidió ningún modelo para el último turno.',
+  'The provider has not named a model yet.':
+    'El proveedor todavía no nombró ningún modelo.',
+  'Model for the next turn': 'Modelo para el próximo turno',
+  'The provider’s default': 'El predeterminado del proveedor',
+  'Reasoning effort': 'Esfuerzo de razonamiento',
+  'Fixed when the runtime starts': 'Fijo al arrancar el runtime',
+  'Why model selection is off':
+    'Por qué la selección de modelo está desactivada',
+  'Claude’s SDK can change the model for a turn, but reads the effort once, when its runtime starts. A request that cannot be honored is refused; it is never replaced by another model.':
+    'El SDK de Claude puede cambiar el modelo de un turno, pero lee el esfuerzo una sola vez, al arrancar su runtime. Un pedido que no se puede cumplir se rechaza; nunca se reemplaza por otro modelo.',
+  'No model was requested for this turn.':
+    'No se pidió ningún modelo para este turno.',
+  'The provider has not named the model that answered.':
+    'El proveedor no nombró el modelo que respondió.',
+  'The provider named the model that was requested.':
+    'El proveedor nombró el modelo que se pidió.',
+  'Requested {requested}; the provider named {reported}.':
+    'Se pidió {requested}; el proveedor nombró {reported}.',
+  'No effort was requested.': 'No se pidió ningún esfuerzo.',
+  'Requested {value}. Nothing shows the provider received it.':
+    'Se pidió {value}. Nada muestra que el proveedor lo haya recibido.',
+  '{value} was in the request the provider received. That is not proof it took effect.':
+    '{value} estaba en el pedido que recibió el proveedor. Eso no prueba que haya tenido efecto.',
+  'The provider reported {value}.': 'El proveedor informó {value}.',
 };

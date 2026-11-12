@@ -5,7 +5,7 @@ import type {
   RerouteInfo,
   Tokens,
 } from '../../contracts/m3';
-import { msg } from '../../i18n/msg';
+import { msg, type Phrase } from '../../i18n/msg';
 
 /** Presentation only: nothing here is read back as state. */
 
@@ -122,29 +122,47 @@ export const COMPLETENESS_LABEL: Record<string, string> = {
   running: msg('running'),
 };
 
-export function rerouteLine(r: RerouteInfo): string {
+export function rerouteLine(r: RerouteInfo): Phrase {
   switch (r.state) {
     case 'not_requested':
-      return 'No model was requested for this turn.';
+      return { text: msg('No model was requested for this turn.') };
     case 'not_reported':
-      return 'The provider has not named the model that answered.';
+      return {
+        text: msg('The provider has not named the model that answered.'),
+      };
     case 'honored':
-      return 'The provider named the model that was requested.';
+      return {
+        text: msg('The provider named the model that was requested.'),
+      };
     case 'rerouted':
-      return `Requested ${r.requested}; the provider named ${r.reported.join(', ')}.`;
+      return {
+        text: msg('Requested {requested}; the provider named {reported}.'),
+        values: { requested: r.requested, reported: r.reported.join(', ') },
+      };
   }
 }
 
-export function effortLine(e: EffortInfo): string {
+export function effortLine(e: EffortInfo): Phrase {
   switch (e.state) {
     case 'not_requested':
-      return 'No effort was requested.';
+      return { text: msg('No effort was requested.') };
     case 'requested':
-      return `Requested ${e.value}. Nothing shows the provider received it.`;
+      return {
+        text: msg('Requested {value}. Nothing shows the provider received it.'),
+        values: { value: e.value },
+      };
     case 'observed_in_provider_request':
-      return `${e.value} was in the request the provider received. That is not proof it took effect.`;
+      return {
+        text: msg(
+          '{value} was in the request the provider received. That is not proof it took effect.',
+        ),
+        values: { value: e.value },
+      };
     case 'provider_reported':
-      return `The provider reported ${e.value}.`;
+      return {
+        text: msg('The provider reported {value}.'),
+        values: { value: e.value },
+      };
   }
 }
 

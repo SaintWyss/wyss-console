@@ -33,6 +33,7 @@ import {
   failureText,
   outcomeText,
 } from '../src/lib/features/configuration/present';
+import { effortLine, rerouteLine } from '../src/lib/features/m3/present';
 import { parseModelCatalogue } from '../src/lib/contracts/models';
 import catalogues from './fixtures/model-catalogue-v1.json';
 
@@ -268,6 +269,25 @@ it('draws the managed-runtime row and lease sentences in Spanish, with their pla
   setLanguage('en');
   expect(tPhrase(row)).toBe('Ready · generation 2 · Local Tools');
   expect(tPhrase(lease)).toBe('Expires in 5 min');
+});
+
+it('draws the model reroute and effort sentences in Spanish, with their places', () => {
+  const rerouted = rerouteLine({
+    state: 'rerouted',
+    requested: 'claude-sonnet-5-5',
+    reported: ['claude-haiku-5-5'],
+  });
+  const effort = effortLine({ state: 'provider_reported', value: 'high' });
+  setLanguage('es');
+  expect(tPhrase(rerouted)).toBe(
+    'Se pidió claude-sonnet-5-5; el proveedor nombró claude-haiku-5-5.',
+  );
+  expect(tPhrase(effort)).toBe('El proveedor informó high.');
+  setLanguage('en');
+  expect(tPhrase(rerouted)).toBe(
+    'Requested claude-sonnet-5-5; the provider named claude-haiku-5-5.',
+  );
+  expect(tPhrase(effort)).toBe('The provider reported high.');
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {
