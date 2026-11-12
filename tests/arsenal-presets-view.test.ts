@@ -237,6 +237,12 @@ describe('Presets screen', () => {
     const { root } = render(stateWith({ library: [frontend, rule] }));
     flushSync();
     expect(root.querySelector('.kind-help')).toBeNull();
+    const models = [...root.querySelectorAll('.group-toggle')].find((node) =>
+      text(node).includes('Models and rules'),
+    )!;
+    expect(models.getAttribute('title')).toContain(
+      'Rules the agent always follows',
+    );
     const move = [...root.querySelectorAll('button')].find(
       (node) => text(node) === 'Move to group…',
     )!;

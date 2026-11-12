@@ -63,6 +63,52 @@
     system: msg('System and setup'),
     other: msg('Other'),
   };
+  /** Hover text for each group header: what kind of capability lives there. */
+  const GROUP_HELP: Record<Group, string> = {
+    models: msg(
+      'Rules the agent always follows, and the Codex model profiles (astra, luna, sol) that choose which model and effort a task runs with.',
+    ),
+    security: msg(
+      'Checks for security problems: audits, threat reviews and guards against dangerous commands.',
+    ),
+    debug: msg(
+      'Finding why something fails: method to chase a bug down to its cause.',
+    ),
+    content: msg(
+      'Writing for the web and social media, and search ranking (SEO).',
+    ),
+    motion: msg('Animation, 3D and video.'),
+    design: msg(
+      'Designing screens: visual direction, components, accessibility and turning a mockup into code.',
+    ),
+    study: msg(
+      'Learning and notes: tutors, quizzes, second brain and saved links.',
+    ),
+    decide: msg(
+      'Making a decision: arguing against an idea before you commit to it.',
+    ),
+    research: msg(
+      'Looking things up: documentation, the web and mapping a codebase.',
+    ),
+    review: msg(
+      'Checking work: code review, tests, verification and quality checks.',
+    ),
+    docs: msg(
+      'Writing and converting documents: docs, reports, prompts and PDFs.',
+    ),
+    planning: msg(
+      'Planning the work: specs, roadmaps, plans and the method that orders them.',
+    ),
+    build: msg(
+      'Writing the code: executing plans, fixing findings and shipping.',
+    ),
+    system: msg(
+      'This computer and the tools themselves: setup, health checks and upgrades.',
+    ),
+    other: msg(
+      'What no rule placed. Use Move to group… to put it where it belongs.',
+    ),
+  };
   const KIND_LABEL: Record<string, string> = {
     skill: msg('Skill'),
     agent: msg('Agent'),
@@ -468,6 +514,7 @@
             <button
               type="button"
               class="group-toggle"
+              title={t(GROUP_HELP[row.group])}
               aria-expanded={isOpen(row.group)}
               onclick={() => toggleOpen(row.group)}
             >

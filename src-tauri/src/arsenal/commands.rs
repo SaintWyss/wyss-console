@@ -459,7 +459,12 @@ fn discover_reply(
             if IMPORTABLE.contains(&candidate.kind) || candidate.blocked.is_none() {
                 match store.current(&ids[index])? {
                     None => ("not_imported", None),
-                    Some(current) if current.tree_hash == trees[index] => {
+                    // A blank stored description the scan can now read is worth importing again.
+                    Some(current)
+                        if current.tree_hash == trees[index]
+                            && (!current.description.is_empty()
+                                || candidate.description.is_empty()) =>
+                    {
                         ("imported", Some(current.id))
                     }
                     Some(current) => ("source_changed", Some(current.id)),
@@ -1583,6 +1588,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(changed.candidates[0].status, "source_changed");
+    }
+
+    #[test]
+    fn a_blank_stored_description_the_scan_can_now_read_is_worth_importing_again() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let mut blank = candidate("agent", "reviewer", b"same");
+        blank.description = String::new();
+        import(&mut store, &mut blank);
+        let mut read = candidate("agent", "reviewer", b"same");
+        read.description = "Reviews code".into();
+        let (reply, _) = discover_reply(&store, scan(vec![read.clone()]), None).unwrap();
+        assert_eq!(reply.candidates[0].status, "source_changed");
+        let rescan = read.clone();
+        import(&mut store, &mut read);
+        let (again, _) = discover_reply(&store, scan(vec![rescan]), None).unwrap();
+        assert_eq!(again.candidates[0].status, "imported");
     }
 
     #[test]

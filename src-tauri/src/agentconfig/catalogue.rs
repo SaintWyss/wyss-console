@@ -1102,12 +1102,13 @@ fn description(bytes: &[u8]) -> String {
         return String::new();
     };
     let Some(rest) = text.strip_prefix("---\n") else {
-        return text
+        let toml = text
             .lines()
             .find(|line| line.trim_start().starts_with("description ="))
             .and_then(|line| toml::from_str::<toml::Value>(line).ok())
-            .and_then(|value| value.get("description")?.as_str().map(str::to_owned))
-            .unwrap_or_default()
+            .and_then(|value| value.get("description")?.as_str().map(str::to_owned));
+        return toml
+            .unwrap_or_else(|| first_heading(text))
             .chars()
             .take(DESCRIPTION_CHARS)
             .collect();
@@ -1132,7 +1133,20 @@ fn description(bytes: &[u8]) -> String {
             return result.chars().take(DESCRIPTION_CHARS).collect();
         }
     }
-    String::new()
+    let body = rest.split_once("\n---").map_or("", |(_, body)| body);
+    first_heading(body)
+        .chars()
+        .take(DESCRIPTION_CHARS)
+        .collect()
+}
+
+/// The title of a Markdown file without a `description`, such as a rule: its first `# ` heading.
+/// It is what the file says it is about, so the list can show something instead of nothing.
+fn first_heading(text: &str) -> String {
+    text.lines()
+        .find_map(|line| line.strip_prefix("# "))
+        .map(|title| title.trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// Why a file received from another computer may not be stored: the reasons discovery leaves a file
@@ -1726,6 +1740,19 @@ mod tests {
             "Reviews changes"
         );
         assert_eq!(super::description(b"---\nname: no-description\n---\n"), "");
+        // A rule has no description: its first heading says what it is about.
+        assert_eq!(
+            super::description(b"# Shared core\n\nBody with # not a heading.\n"),
+            "Shared core"
+        );
+        assert_eq!(
+            super::description(b"---\npaths:\n  - \"*.tsx\"\n---\n\n# UI pipeline\n"),
+            "UI pipeline"
+        );
+        assert_eq!(
+            super::description(b"name = \"a\"\ndescription = \"From TOML\"\n"),
+            "From TOML"
+        );
     }
 
     fn credential_value(text: &str) -> bool {

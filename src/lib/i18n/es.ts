@@ -2295,6 +2295,35 @@ export const ES: Readonly<Record<string, string>> = {
   Conflicting: 'En conflicto',
   Unsupported: 'No compatible',
   'Models and rules': 'Modelos y reglas',
+  'Rules the agent always follows, and the Codex model profiles (astra, luna, sol) that choose which model and effort a task runs with.':
+    'Reglas que el agente cumple siempre, y los perfiles de modelo de Codex (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.',
+  'Checks for security problems: audits, threat reviews and guards against dangerous commands.':
+    'Controles de seguridad: auditorías, revisión de amenazas y frenos ante comandos peligrosos.',
+  'Finding why something fails: method to chase a bug down to its cause.':
+    'Encontrar por qué algo falla: método para rastrear un error hasta su causa.',
+  'Writing for the web and social media, and search ranking (SEO).':
+    'Escribir para la web y redes, y posicionamiento en buscadores (SEO).',
+  'Animation, 3D and video.': 'Animación, 3D y video.',
+  'Designing screens: visual direction, components, accessibility and turning a mockup into code.':
+    'Diseñar pantallas: dirección visual, componentes, accesibilidad y pasar un mockup a código.',
+  'Learning and notes: tutors, quizzes, second brain and saved links.':
+    'Estudio y notas: tutores, cuestionarios, segundo cerebro y links guardados.',
+  'Making a decision: arguing against an idea before you commit to it.':
+    'Tomar decisiones: atacar una idea antes de comprometerte con ella.',
+  'Looking things up: documentation, the web and mapping a codebase.':
+    'Investigar: documentación, la web y mapear un código.',
+  'Checking work: code review, tests, verification and quality checks.':
+    'Revisar trabajo: revisión de código, tests, verificación y controles de calidad.',
+  'Writing and converting documents: docs, reports, prompts and PDFs.':
+    'Escribir y convertir documentos: docs, informes, prompts y PDF.',
+  'Planning the work: specs, roadmaps, plans and the method that orders them.':
+    'Planificar el trabajo: specs, roadmaps, planes y el método que los ordena.',
+  'Writing the code: executing plans, fixing findings and shipping.':
+    'Escribir el código: ejecutar planes, aplicar arreglos y publicar.',
+  'This computer and the tools themselves: setup, health checks and upgrades.':
+    'Esta computadora y las propias herramientas: configuración, chequeos de salud y actualizaciones.',
+  'What no rule placed. Use Move to group… to put it where it belongs.':
+    'Lo que ninguna regla ubicó. Usá Mover a grupo… para ponerlo donde va.',
   Debugging: 'Depuración',
   'Content and SEO': 'Contenido y SEO',
   'Animation and video': 'Animación y video',

@@ -249,6 +249,7 @@ pub struct Current {
     pub id: String,
     pub revision: i64,
     pub tree_hash: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -413,22 +414,29 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: Option<(String, i64, String)> = tx
+        let current: Option<(String, i64, String, String)> = tx
             .query_row(
-                "SELECT c.id, c.current_revision, r.tree_hash FROM capability c \
+                "SELECT c.id, c.current_revision, r.tree_hash, r.description FROM capability c \
                  JOIN revision r ON r.capability_id = c.id AND r.number = c.current_revision \
                  WHERE c.identity = ?1",
                 [&new.identity],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
         let imported = match current {
-            Some((id, number, tree_hash)) if tree_hash == tree => Imported {
-                capability: id,
-                revision: number,
-                outcome: Outcome::Unchanged,
-            },
-            Some((id, number, _)) => {
+            // Same files and nothing new to say about them. A blank description that the scan can
+            // now read (a Codex agent's TOML before 2026-11-11) is a new revision, since stored
+            // revisions never change.
+            Some((id, number, tree_hash, description))
+                if tree_hash == tree && (!description.is_empty() || new.description.is_empty()) =>
+            {
+                Imported {
+                    capability: id,
+                    revision: number,
+                    outcome: Outcome::Unchanged,
+                }
+            }
+            Some((id, number, _, _)) => {
                 let next = number.checked_add(1).ok_or(Error::Invalid)?;
                 insert_revision(&tx, &id, next, &tree, new, now)?;
                 tx.execute(
@@ -532,7 +540,7 @@ impl Store {
         let current = self
             .db
             .query_row(
-                "SELECT c.id, c.current_revision, r.tree_hash FROM capability c \
+                "SELECT c.id, c.current_revision, r.tree_hash, r.description FROM capability c \
                  JOIN revision r ON r.capability_id = c.id AND r.number = c.current_revision \
                  WHERE c.identity = ?1",
                 [identity],
@@ -541,6 +549,7 @@ impl Store {
                         id: row.get(0)?,
                         revision: row.get(1)?,
                         tree_hash: row.get(2)?,
+                        description: row.get(3)?,
                     })
                 },
             )
@@ -1480,6 +1489,23 @@ mod tests {
             "arsenal-{tag}-{}.sqlite",
             uuid::Uuid::new_v4().simple()
         ))
+    }
+
+    #[test]
+    fn a_description_read_after_the_files_were_stored_becomes_a_revision() {
+        let mut store = memory();
+        let mut blank = skill("agent", b"same");
+        blank.description = String::new();
+        let first = store.import(&blank).unwrap();
+        let read = skill("agent", b"same");
+        let again = store.import(&read).unwrap();
+        assert_eq!(again.outcome, Outcome::NewRevision);
+        assert_eq!(again.revision, 2);
+        let detail = store.detail(&first.capability, None).unwrap();
+        assert_eq!(detail.summary.description, "test");
+        // Once it has one, the same files are unchanged again, and a blank read never erases it.
+        assert_eq!(store.import(&read).unwrap().outcome, Outcome::Unchanged);
+        assert_eq!(store.import(&blank).unwrap().outcome, Outcome::Unchanged);
     }
 
     #[test]
