@@ -95,6 +95,19 @@
     { value: 'agent', label: msg('Agents') },
     { value: 'rule', label: msg('Rules') },
   ];
+  /** What each type is, shown under the type filter. */
+  const KIND_HELP: Record<'all' | 'skill' | 'agent' | 'rule', string> = {
+    all: msg(
+      'Everything installed for this provider, grouped by what it solves.',
+    ),
+    skill: msg(
+      'Skills are instructions the agent loads when a task needs them.',
+    ),
+    agent: msg('Agents are helpers the main agent can hand a task to.'),
+    rule: msg(
+      'Rules are files the agent reads as standing instructions, such as invariantes.md. They are not run.',
+    ),
+  };
   const CELLS = Array.from({ length: METER_CELLS }, (_, index) => index);
 
   /** The preset on screen: what it is now, and the saved version it came from (`null` for a new one). */
@@ -407,6 +420,7 @@
           >
         {/each}
       </div>
+      <p class="help">{t(KIND_HELP[kind])}</p>
       {#if families.length > 0}
         <div class="chips">
           <span class="chip-label">{t('Family')}</span>
@@ -528,6 +542,11 @@
                       </p>
                     {/if}
                     {#if menuFor === item.id}
+                      <p class="help">
+                        {t(
+                          'Only changes where it is listed on this screen, not what it does. Saved on this computer.',
+                        )}
+                      </p>
                       <div class="menu" role="menu">
                         {#each GROUPS as group (group)}
                           <button
@@ -1053,6 +1072,11 @@
     border: 1px solid var(--line-strong);
   }
   .help {
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .help {
+    margin: 0;
     color: var(--muted);
     font-size: var(--text-xs);
   }

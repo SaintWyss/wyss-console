@@ -213,6 +213,23 @@ describe('Presets screen', () => {
     expect(withRules.root.textContent).not.toContain('frontend-design');
   });
 
+  it('explains the selected type under the filters, and what Move to group does', () => {
+    const rule = item('invariantes', { kind: 'rule' });
+    const { root } = render(stateWith({ library: [frontend, rule] }));
+    flushSync();
+    expect(text(root.querySelector('.filters .help'))).toContain(
+      'Rules are files the agent reads',
+    );
+    const move = [...root.querySelectorAll('button')].find(
+      (node) => text(node) === 'Move to group…',
+    )!;
+    move.click();
+    flushSync();
+    expect(text(root.querySelector('.capability-tools ~ .help'))).toContain(
+      'not what it does',
+    );
+  });
+
   it('fills the group meter when a capability is ticked, checks the draft, and never saves it', () => {
     const { controller, root } = render(stateWith());
     flushSync();
