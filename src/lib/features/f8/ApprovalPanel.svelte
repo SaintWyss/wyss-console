@@ -9,7 +9,7 @@
     shownOf,
   } from '../approvals/present';
   import type { ApprovalView, F8Controller } from './controller';
-  import { t } from '../../i18n/index.svelte';
+  import { msg, t } from '../../i18n/index.svelte';
   import { failureText, outcomeUnknown, visible } from './present';
 
   let {
@@ -53,27 +53,28 @@
   const reason = $derived(record.reason ? APPROVAL_REASON[record.reason] : '');
   const title = $derived(
     record.kind === 'command_execution'
-      ? 'Codex wants to run a command'
+      ? t('Codex wants to run a command')
       : files === 1
-        ? 'Codex wants to change a file'
+        ? t('Codex wants to change a file')
         : files !== null
-          ? `Codex wants to change ${files} files`
-          : 'Codex wants to change files',
+          ? t('Codex wants to change {count} files', { count: files })
+          : t('Codex wants to change files'),
   );
   const DOING = {
-    accept:
+    accept: msg(
       'Waiting for your Allow in the confirmation window, then asking the authority…',
-    decline: 'Asking the authority to decline it…',
-    cancel: 'Asking the authority to cancel it…',
+    ),
+    decline: msg('Asking the authority to decline it…'),
+    cancel: msg('Asking the authority to cancel it…'),
   } as const;
   const NOT = {
-    accept: 'It was not accepted.',
-    decline: 'It was not declined.',
-    cancel: 'It was not cancelled.',
+    accept: msg('It was not accepted.'),
+    decline: msg('It was not declined.'),
+    cancel: msg('It was not cancelled.'),
   } as const;
 </script>
 
-<div class="approval-card" role="group" aria-label="Approval">
+<div class="approval-card" role="group" aria-label={t('Approval')}>
   <p class="approval-title">
     {title}
     <span class="pill compact" data-tone={tone.tone}>
@@ -82,23 +83,24 @@
     </span>
   </p>
   <p class="approval-context">
-    {APPROVAL_KIND[record.kind]} · turn
+    {t(APPROVAL_KIND[record.kind])}
+    {t('· turn')}
     <span class="mono">{record.turn.slice(0, 8)}</span>
   </p>
 
   {#if command}
     <dl class="approval-fields">
-      <dt>Command</dt>
+      <dt>{t('Command')}</dt>
       <!-- Plain text, as the authority presents it. It is never run or interpreted here. -->
       <dd><pre class="approval-code">{visible(command.command)}</pre></dd>
-      <dt>Directory</dt>
+      <dt>{t('Directory')}</dt>
       <dd class="mono" dir="ltr">{visible(command.cwd)}</dd>
     </dl>
   {:else if files !== null}
     {#each approval.files as file (file.index)}
       <div class="approval-file">
         <p class="file-head">
-          <span class="file-kind">{FILE_KIND[file.kind]}</span>
+          <span class="file-kind">{t(FILE_KIND[file.kind])}</span>
           <span class="mono" dir="ltr">{visible(file.path)}</span>
           {#if file.move_path}
             <span aria-hidden="true">→</span>
@@ -108,63 +110,69 @@
         <pre class="approval-code">{visible(file.text)}</pre>
         {#if file.next !== null}
           <p class="approval-note">
-            Preview truncated: {shownOf(file.text, file.bytes)}.
+            {t('Preview truncated:')}
+            {shownOf(file.text, file.bytes)}.
             <button
               type="button"
               class="action"
               disabled={!connected || file.reading}
               onclick={() => controller.moreOfFile(file.index)}
-              >{file.reading ? 'Reading…' : 'Show the rest'}</button
+              >{file.reading ? t('Reading…') : t('Show the rest')}</button
             >
           </p>
         {/if}
         {#if file.failure}
           <p class="approval-note failed" role="alert">
-            The rest of this change could not be read.
+            {t('The rest of this change could not be read.')}
           </p>
         {/if}
       </div>
     {/each}
     {#if approval.files.length < files}
       <p class="approval-note">
-        {approval.files.length} of {files} files shown.
+        {t('{shown} of {total} files shown.', {
+          shown: approval.files.length,
+          total: files,
+        })}
         <button
           type="button"
           class="action"
           disabled={!connected || approval.listing}
           onclick={() => controller.moreFiles()}
-          >{approval.listing ? 'Reading…' : 'Show more files'}</button
+          >{approval.listing ? t('Reading…') : t('Show more files')}</button
         >
       </p>
     {/if}
   {:else if pending}
     <p class="approval-note">
-      The authority no longer holds what this approval was about. It cannot be
-      accepted.
+      {t(
+        'The authority no longer holds what this approval was about. It cannot be accepted.',
+      )}
     </p>
   {/if}
 
   {#if pending}
     <p class="approval-deadline">
-      {expired ? 'Its time ran out at' : 'Waits until'}
+      {expired ? t('Its time ran out at') : t('Waits until')}
       <time datetime={record.expires_at}>{localClock(record.expires_at)}</time>
-      — the authority checks the action again before anything runs.
+      {t('— the authority checks the action again before anything runs.')}
     </p>
   {:else if reason}
-    <p class="approval-note">{reason}</p>
+    <p class="approval-note">{t(reason)}</p>
   {/if}
 
   {#if !attested && pending}
     <p class="approval-note" role="note">
-      The runtime this approval was asked on is no longer the live one, so it
-      cannot be decided.
+      {t(
+        'The runtime this approval was asked on is no longer the live one, so it cannot be decided.',
+      )}
     </p>
   {/if}
 
   {#if approval.decision?.status === 'pending'}
     <p class="turn-activity live" role="status">
       <span class="dot" aria-hidden="true"></span>
-      {DOING[approval.decision.kind]}
+      {t(DOING[approval.decision.kind])}
     </p>
   {:else if approval.decision?.failure}
     <div
@@ -174,21 +182,23 @@
     >
       <p>
         {approval.decision.failure.code === 'unavailable'
-          ? 'The authority did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.'
-          : `${NOT[approval.decision.kind]} ${t(failureText(approval.decision.failure.code))}`}
+          ? t(
+              'The authority did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.',
+            )
+          : `${t(NOT[approval.decision.kind])} ${t(failureText(approval.decision.failure.code))}`}
       </p>
       {#if approval.decision.failure.retry}
         <button
           type="button"
           class="action"
           disabled={!connected}
-          onclick={() => controller.retryDecision()}>Retry</button
+          onclick={() => controller.retryDecision()}>{t('Retry')}</button
         >
       {/if}
       <button
         type="button"
         class="action"
-        onclick={() => controller.dismissDecision()}>Dismiss</button
+        onclick={() => controller.dismissDecision()}>{t('Dismiss')}</button
       >
     </div>
   {/if}
@@ -200,7 +210,7 @@
           type="button"
           class="action primary"
           disabled={!decidable || !whole}
-          onclick={() => controller.decide('accept')}>Accept</button
+          onclick={() => controller.decide('accept')}>{t('Accept')}</button
         >
       {/if}
       {#if approval.detail.decisions.includes('decline')}
@@ -208,7 +218,7 @@
           type="button"
           class="action danger"
           disabled={!decidable}
-          onclick={() => controller.decide('decline')}>Decline</button
+          onclick={() => controller.decide('decline')}>{t('Decline')}</button
         >
       {/if}
       {#if approval.detail.decisions.includes('cancel')}
@@ -216,11 +226,12 @@
           type="button"
           class="action"
           disabled={!decidable}
-          onclick={() => controller.decide('cancel')}>Cancel action</button
+          onclick={() => controller.decide('cancel')}
+          >{t('Cancel action')}</button
         >
       {/if}
       {#if decidable && !whole}
-        <p class="approval-note">Read the whole change to accept it.</p>
+        <p class="approval-note">{t('Read the whole change to accept it.')}</p>
       {/if}
     </div>
   {/if}

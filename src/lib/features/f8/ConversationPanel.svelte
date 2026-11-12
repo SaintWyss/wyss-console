@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import type { SessionDetail } from '../../contracts/f8';
   import { PROMPT_MAX_BYTES, turnEnded } from '../../contracts/turns';
-  import { t } from '../../i18n/index.svelte';
+  import { t, tJoin } from '../../i18n/index.svelte';
   import {
     activityLabel,
     localClock,
@@ -37,11 +37,11 @@
     f8.draft.trim().length > 0 && bytes <= PROMPT_MAX_BYTES,
   );
   const hint = $derived.by(() => {
-    if (!connected) return 'The authority is not connected.';
-    if (detail.session.state === 'closed') return 'This session is closed.';
-    if (running) return 'A turn is running. Cancel it to start another.';
+    if (!connected) return t('The authority is not connected.');
+    if (detail.session.state === 'closed') return t('This session is closed.');
+    if (running) return t('A turn is running. Cancel it to start another.');
     if (gate && gate.reason !== 'allowed') return t(gateText(gate.reason));
-    if (bytes > PROMPT_MAX_BYTES) return 'The objective is too long.';
+    if (bytes > PROMPT_MAX_BYTES) return t('The objective is too long.');
     return null;
   });
   const runnable = $derived(connected && !pending && hint === null && fits);
@@ -84,7 +84,7 @@
 
 <div class="rt-conversation">
   {#if detail.turns.length > 0}
-    <div class="rt-turns" role="group" aria-label="Recent turns">
+    <div class="rt-turns" role="group" aria-label={t('Recent turns')}>
       {#each detail.turns as entry (entry.turn.id)}
         <button
           type="button"
@@ -93,13 +93,16 @@
           title={entry.turn.id}
           onclick={() => controller.openTurn(entry.turn.id)}
         >
-          {localClock(entry.turn.started_at)} · {TURN_STATE[entry.turn.state]
-            .label}
-          {#if entry.generation !== null}· gen {entry.generation}{/if}
+          {localClock(entry.turn.started_at)} · {t(
+            TURN_STATE[entry.turn.state].label,
+          )}
+          {#if entry.generation !== null}{t('· gen {generation}', {
+              generation: entry.generation,
+            })}{/if}
         </button>
       {/each}
       {#if detail.turns_partial}
-        <span class="events-note">Older turns are in History.</span>
+        <span class="events-note">{t('Older turns are in History.')}</span>
       {/if}
     </div>
   {/if}
@@ -107,50 +110,56 @@
   <div
     class="agent-transcript"
     role="log"
-    aria-label="Turn"
+    aria-label={t('Turn')}
     bind:this={log}
     onscroll={scrolled}
   >
     {#if !convo}
       <div class="agent-blank">
-        <p class="empty-title">No turn is open.</p>
+        <p class="empty-title">{t('No turn is open.')}</p>
         <p>
-          Write an objective below. The authority decides whether the turn may
-          start and what Codex is allowed to do in it.
+          {t(
+            'Write an objective below. The authority decides whether the turn may start and what Codex is allowed to do in it.',
+          )}
         </p>
       </div>
     {:else}
-      <article class="turn" aria-label="Turn">
+      <article class="turn" aria-label={t('Turn')}>
         <header class="turn-head">
           {#if turn}
             <span class="pill compact" data-tone={TURN_STATE[turn.state].tone}>
               <span class="dot" aria-hidden="true"></span>
-              {TURN_STATE[turn.state].label}
+              {t(TURN_STATE[turn.state].label)}
             </span>
             <time datetime={turn.started_at}>{localClock(turn.started_at)}</time
             >
             {#if convo.info?.generation !== null && convo.info?.generation !== undefined}
-              <span class="turn-reason">generation {convo.info.generation}</span
+              <span class="turn-reason"
+                >{t('generation {generation}', {
+                  generation: convo.info.generation,
+                })}</span
               >
             {/if}
             {#if turn.reason && TURN_REASON[turn.reason]}
-              <span class="turn-reason">{TURN_REASON[turn.reason]}</span>
+              <span class="turn-reason">{t(TURN_REASON[turn.reason])}</span>
             {/if}
           {:else}
             <span class="pill compact" data-tone="pending">
               <span class="dot" aria-hidden="true"></span>
-              Reading
+              {t('Reading')}
             </span>
           {/if}
         </header>
         <p class="turn-note">
-          The input of a turn is not shown: Wyss keeps no conversation text.
+          {t(
+            'The input of a turn is not shown: Wyss keeps no conversation text.',
+          )}
         </p>
         <div class="turn-answer">
           <p class="turn-who">Codex</p>
           {#if convo.transcript.truncated}
             <p class="turn-note">
-              The beginning of this output is no longer shown.
+              {t('The beginning of this output is no longer shown.')}
             </p>
           {/if}
           {#each convo.transcript.items as item, index (index)}
@@ -159,52 +168,55 @@
               <p class="turn-text">{item.text}</p>
             {:else if item.kind === 'activity'}
               <p class="turn-activity">
-                {activityLabel(item.event, item.count)}
+                {tJoin(activityLabel(item.event, item.count))}
               </p>
             {:else if item.kind === 'approval'}
-              <p class="turn-activity">{outcomeLabel(item.outcome)}</p>
+              <p class="turn-activity">{t(outcomeLabel(item.outcome))}</p>
             {:else if item.kind === 'thinking'}
-              <p class="turn-activity">Thinking</p>
+              <p class="turn-activity">{t('Thinking')}</p>
             {:else}
-              <p class="turn-gap">Output here was not kept by the authority.</p>
+              <p class="turn-gap">
+                {t('Output here was not kept by the authority.')}
+              </p>
             {/if}
           {/each}
           {#if turn && turnEnded(turn.state) && convo.transcript.items.length === 0}
             <p class="turn-note">
               {turn.output
-                ? 'This turn produced no answer.'
-                : 'The authority no longer holds the output of this turn.'}
+                ? t('This turn produced no answer.')
+                : t('The authority no longer holds the output of this turn.')}
             </p>
           {/if}
           {#if convo.following && !convo.approval && !convo.reconnecting}
             <p class="turn-activity live" role="status">
               <span class="dot" aria-hidden="true"></span>
-              Following the turn…
+              {t('Following the turn…')}
             </p>
           {/if}
           {#if convo.reconnecting}
             <p class="turn-activity live" role="status">
               <span class="dot" aria-hidden="true"></span>
-              The authority stopped answering; reading the turn again…
+              {t('The authority stopped answering; reading the turn again…')}
             </p>
           {/if}
           {#if convo.lost}
             <div class="turn-alert unknown" role="alert">
               <p>
-                This turn can no longer be followed: the authority does not have
-                it or did not answer. What it did is read from History.
+                {t(
+                  'This turn can no longer be followed: the authority does not have it or did not answer. What it did is read from History.',
+                )}
               </p>
               <button
                 type="button"
                 class="action"
-                onclick={() => controller.refresh()}>Read again</button
+                onclick={() => controller.refresh()}>{t('Read again')}</button
               >
             </div>
           {/if}
           {#if cancelling}
             <p class="turn-activity live" role="status">
               <span class="dot" aria-hidden="true"></span>
-              Cancelling…
+              {t('Cancelling…')}
             </p>
           {/if}
         </div>
@@ -217,18 +229,18 @@
           />
         {:else if convo.approval}
           <div class="turn-approval" role="status">
-            <p class="approval-title">Waiting for approval</p>
-            <p>Reading what Codex asked for…</p>
+            <p class="approval-title">{t('Waiting for approval')}</p>
+            <p>{t('Reading what Codex asked for…')}</p>
           </div>
         {/if}
       </article>
     {/if}
   </div>
 
-  <form class="agent-composer" aria-label="New turn" onsubmit={submit}>
+  <form class="agent-composer" aria-label={t('New turn')} onsubmit={submit}>
     <textarea
-      aria-label="Objective"
-      placeholder="What should Codex do in this project?"
+      aria-label={t('Objective')}
+      placeholder={t('What should Codex do in this project?')}
       rows="3"
       spellcheck="false"
       value={f8.draft}
@@ -236,7 +248,7 @@
       onkeydown={keydown}></textarea>
     <div class="composer-row">
       <p class="composer-hint" class:warn={bytes > PROMPT_MAX_BYTES}>
-        {hint ?? 'Enter to run · Shift+Enter for a new line'}
+        {hint ?? t('Enter to run · Shift+Enter for a new line')}
       </p>
       {#if running}
         <button
@@ -244,11 +256,11 @@
           class="action danger"
           disabled={!connected || cancelling || pending}
           onclick={() => controller.cancelTurn()}
-          >{cancelling ? 'Cancelling…' : 'Cancel turn'}</button
+          >{cancelling ? t('Cancelling…') : t('Cancel turn')}</button
         >
       {/if}
       <button type="submit" class="action primary" disabled={!runnable}
-        >Run</button
+        >{t('Run')}</button
       >
     </div>
     {#if f8.operation?.kind === 'turn' && f8.operation.failure}

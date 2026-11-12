@@ -1670,4 +1670,91 @@ export const ES: Readonly<Record<string, string>> = {
     '¿Cerrar esta sesión? No se puede reabrir, y su concesión de ejecución se revoca. La autoridad rechaza el cierre mientras su runtime corre o hay un turno activo.',
   'Close…': 'Cerrar…',
   'Stop the runtime first.': 'Detené el runtime primero.',
+
+  // Conversation and approval (F8): the turn transcript and the approval card
+  'Recent turns': 'Turnos recientes',
+  'Older turns are in History.': 'Los turnos anteriores están en Historial.',
+  'No turn is open.': 'No hay ningún turno abierto.',
+  'The input of a turn is not shown: Wyss keeps no conversation text.':
+    'No se muestra la entrada de un turno: Wyss no guarda texto de conversación.',
+  Thinking: 'Pensando',
+  'Following the turn…': 'Siguiendo el turno…',
+  'The authority stopped answering; reading the turn again…':
+    'La autoridad dejó de responder; leyendo el turno de nuevo…',
+  'This turn can no longer be followed: the authority does not have it or did not answer. What it did is read from History.':
+    'Este turno ya no se puede seguir: la autoridad no lo tiene o no respondió. Lo que hizo se lee desde Historial.',
+  'Reading what Codex asked for…': 'Leyendo lo que pidió Codex…',
+  'The authority is not connected.': 'La autoridad no está conectada.',
+  'A turn is running. Cancel it to start another.':
+    'Hay un turno en curso. Cancelalo para iniciar otro.',
+  'The objective is too long.': 'El objetivo es demasiado largo.',
+  '· gen {generation}': '· gen. {generation}',
+  'generation {generation}': 'generación {generation}',
+  Command: 'Comando',
+  Directory: 'Directorio',
+  '· turn': '· turno',
+  'Preview truncated:': 'Vista previa truncada:',
+  'Show the rest': 'Mostrar el resto',
+  'The rest of this change could not be read.':
+    'No se pudo leer el resto de este cambio.',
+  '{shown} of {total} files shown.': '{shown} de {total} archivos mostrados.',
+  'Show more files': 'Mostrar más archivos',
+  'The authority no longer holds what this approval was about. It cannot be accepted.':
+    'La autoridad ya no tiene aquello a lo que se refería esta aprobación. No se puede aceptar.',
+  'Its time ran out at': 'Su plazo venció a las',
+  'Waits until': 'Espera hasta',
+  '— the authority checks the action again before anything runs.':
+    '— la autoridad vuelve a verificar la acción antes de que se ejecute nada.',
+  'The runtime this approval was asked on is no longer the live one, so it cannot be decided.':
+    'El runtime en el que se pidió esta aprobación ya no es el activo, así que no se puede decidir.',
+  'The authority did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.':
+    'La autoridad no respondió, así que no se sabe si la decisión se tomó. Reintentar repite la misma decisión: no puede decidir dos veces.',
+  Accept: 'Aceptar',
+  Decline: 'Rechazar',
+  'Cancel action': 'Cancelar acción',
+  'Read the whole change to accept it.':
+    'Leé el cambio completo para aceptarlo.',
+  'Codex wants to run a command': 'Codex quiere ejecutar un comando',
+  'Codex wants to change a file': 'Codex quiere cambiar un archivo',
+  'Codex wants to change {count} files':
+    'Codex quiere cambiar {count} archivos',
+  'Codex wants to change files': 'Codex quiere cambiar archivos',
+  'Waiting for your Allow in the confirmation window, then asking the authority…':
+    'Esperando tu Permitir en la ventana de confirmación; después se lo pide a la autoridad…',
+  'Asking the authority to decline it…':
+    'Pidiéndole a la autoridad que la rechace…',
+  'Asking the authority to cancel it…':
+    'Pidiéndole a la autoridad que la cancele…',
+  'It was not accepted.': 'No se aceptó.',
+  'It was not declined.': 'No se rechazó.',
+  'It was not cancelled.': 'No se canceló.',
+  Pending: 'Pendiente',
+  Approved: 'Aprobada',
+  Denied: 'Rechazada',
+  Cancelled: 'Cancelada',
+  'No longer applies': 'Ya no aplica',
+  'File change': 'Cambio de archivo',
+  Add: 'Agregar',
+  Delete: 'Borrar',
+  Modify: 'Modificar',
+  Move: 'Mover',
+  'Nobody decided it in time.': 'Nadie la decidió a tiempo.',
+  'The execution lease of its turn expired.':
+    'La concesión de ejecución de su turno venció.',
+  'The execution lease of its turn was revoked.':
+    'Se revocó la concesión de ejecución de su turno.',
+  'Its turn was cancelled.': 'Su turno se canceló.',
+  'Its turn ended.': 'Su turno terminó.',
+  'Its session was closed.': 'Su sesión se cerró.',
+  'Codex stopped while it waited.': 'Codex se detuvo mientras esperaba.',
+  'The authority shut down while it waited.':
+    'La autoridad se apagó mientras esperaba.',
+  'The authority restarted while it waited.':
+    'La autoridad se reinició mientras esperaba.',
+  'It was approved, and the authority could not confirm what Codex did with that.':
+    'Fue aprobada, y la autoridad no pudo confirmar qué hizo Codex con eso.',
+  'Codex asked for something that cannot be approved.':
+    'Codex pidió algo que no se puede aprobar.',
+  'Codex acted outside what the session allows.':
+    'Codex actuó fuera de lo que la sesión permite.',
 };
