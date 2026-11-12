@@ -3211,4 +3211,7 @@ export const ES: Readonly<Record<string, string>> = {
   'Same content twice': 'Mismo contenido dos veces',
   'Several rules': 'Varias reglas',
   'Two methodologies kept': 'Dos metodologías conservadas',
+  'The session ended.': 'La sesión terminó.',
+  'The terminal host refused the input.':
+    'El host de la terminal rechazó la entrada.',
 };

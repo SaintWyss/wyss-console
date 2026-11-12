@@ -164,7 +164,7 @@
           if (out.data.length > 0) await renderer.write(out.data);
           from = out.next;
           if (out.eof) {
-            note = 'The session ended.';
+            note = msg('The session ended.');
             return;
           }
         } catch (error) {
@@ -199,7 +199,7 @@
         inputNote = inputReportWords(
           report,
           report.kind === 'not_sent'
-            ? words(report.error, 'The terminal host refused the input.')
+            ? words(report.error, msg('The terminal host refused the input.'))
             : '',
         );
         // A refusal can mean the claim is gone: what the backend says now is read again.

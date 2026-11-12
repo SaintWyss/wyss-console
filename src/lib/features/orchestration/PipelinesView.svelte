@@ -992,7 +992,7 @@
 >
   <header class="m6-toolbar">
     <div>
-      <h2>Pipelines</h2>
+      <h2>{t('Pipelines')}</h2>
       <p class="m6-muted">
         {t('OL3 supervised · finite DAG · Managed concurrency pinned at 1')}
       </p>
