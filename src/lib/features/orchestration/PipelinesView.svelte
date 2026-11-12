@@ -12,7 +12,7 @@
     WorkspaceSnapshot,
   } from '../../contracts/orchestration';
   import { chooseWorkspace } from '../../desktop/sessions-client';
-  import { msg, t } from '../../i18n/index.svelte';
+  import { msg, t, tPhrase, type Phrase } from '../../i18n/index.svelte';
   import {
     listRuns,
     OrchestrationCallError,
@@ -132,10 +132,10 @@
   let freshReceiverId = $state<string | null>(null);
   let receiverIntentId = $state<string | null>(null);
   let receiverReady = $state(false);
-  let receiverStatus = $state(
-    'Primero prepara una sesión nueva Managed para este handoff.',
+  let receiverStatus = $state<string>(
+    msg('First prepare a new Managed session for this handoff.'),
   );
-  let receiverSummary = $state('');
+  let receiverSummary = $state<Phrase | null>(null);
   let handoffNativeProfile = $state('');
   let handoffObjective = $state('');
   let handoffContext = $state('');
@@ -535,8 +535,9 @@
       handoffTargetProvider !== 'managed_codex' ||
       !handoffTargetRoot
     ) {
-      receiverStatus =
-        'Selecciona workspace de destino y habilita F8 Managed antes de preparar el receptor.';
+      receiverStatus = msg(
+        'Select a target workspace and enable F8 Managed before preparing the receiver.',
+      );
       return;
     }
     busy = true;
@@ -547,15 +548,20 @@
       const receipt = await prepareSession(receiverIntentId);
       handoffTargetSession = receipt.id;
       freshReceiverId = receipt.id;
-      receiverStatus =
-        'Sesión Managed nueva preparada. Autoriza su binding, runtime y lease desde Runtimes.';
-      receiverSummary = `Receptor nuevo ${receipt.id}`;
+      receiverStatus = msg(
+        'New Managed session prepared. Authorize its binding, runtime and lease from Runtimes.',
+      );
+      receiverSummary = {
+        text: msg('New receiver {id}'),
+        values: { id: receipt.id },
+      };
       handoffPreview = null;
       await loadSessions();
     } catch {
-      receiverStatus =
-        'F8 no confirmó la preparación. No se crea otra sesión con un intent diferente; vuelve a intentar el mismo pedido.';
-      lastError = 'No se pudo preparar el receptor Managed mediante F8.';
+      receiverStatus = msg(
+        'F8 did not confirm the preparation. No other session is created with a different intent; retry the same request.',
+      );
+      lastError = msg('Could not prepare the Managed receiver through F8.');
     } finally {
       busy = false;
     }
@@ -569,13 +575,15 @@
       !handoffTargetSession ||
       !handoffTargetRoot
     ) {
-      receiverStatus =
-        'Falta una sesión nueva Managed, F8 activo o workspace destino.';
+      receiverStatus = msg(
+        'A new Managed session, active F8 or a target workspace is missing.',
+      );
       return false;
     }
     if (handoffTargetSession !== freshReceiverId) {
-      receiverStatus =
-        'El receptor no fue creado para este handoff. Prepara una sesión Managed nueva.';
+      receiverStatus = msg(
+        'The receiver was not created for this handoff. Prepare a new Managed session.',
+      );
       return false;
     }
     try {
@@ -607,15 +615,30 @@
         lease.scopes.includes('turn_start') &&
         Date.parse(lease.expires_at) > Date.now() &&
         gate?.reason === 'allowed';
-      receiverSummary = `${detail.session.id} · generation ${detail.session.runtime.generation} · ${detail.session.runtime.profile ?? 'perfil desconocido'} · lease ${lease?.state ?? 'ausente'}`;
+      receiverSummary = {
+        text: msg('{id} · generation {generation} · {profile} · lease {lease}'),
+        values: {
+          id: detail.session.id,
+          generation: detail.session.runtime.generation,
+          profile: detail.session.runtime.profile ?? {
+            text: msg('unknown profile'),
+          },
+          lease: lease?.state ?? { text: msg('absent') },
+        },
+      };
       receiverReady = ready;
       receiverStatus = ready
-        ? 'Receptor nuevo, sin historial, adjunto al workspace y habilitado por la lease F8 turn_start.'
-        : 'Receptor aún no admitido. En Runtimes, configura el perfil solicitado, enlaza el workspace destino y concede una lease turn_start; no se enviará el handoff hasta confirmar todo.';
+        ? msg(
+            'New receiver, without history, attached to the workspace and enabled by the F8 turn_start lease.',
+          )
+        : msg(
+            'Receiver not admitted yet. In Runtimes, configure the requested profile, bind the target workspace and grant a turn_start lease; the handoff will not be sent until everything is confirmed.',
+          );
       return ready;
     } catch {
-      receiverStatus =
-        'No se pudo observar el receptor desde F8; no se asume que esté preparado.';
+      receiverStatus = msg(
+        'The receiver could not be observed through F8; it is not assumed to be prepared.',
+      );
       return false;
     }
   }
@@ -673,8 +696,9 @@
         throw new OrchestrationCallError('provider_blocked');
       }
       if (handoffTargetProvider === 'managed_codex' && !freshReceiverId) {
-        receiverStatus =
-          'Prepara primero un receptor Managed nuevo para este handoff.';
+        receiverStatus = msg(
+          'Prepare a new Managed receiver for this handoff first.',
+        );
         throw new Error('receiver');
       }
       if (
@@ -1645,14 +1669,14 @@
                 >{t('Prepare new Managed receiver through F8')}</button
               >
               {#if receiverSummary}<p class="m6-meta">
-                  <code>{receiverSummary}</code>
+                  <code>{tPhrase(receiverSummary)}</code>
                 </p>{/if}
               <p
                 class="m6-status"
                 data-state={receiverReady ? 'completed' : 'needs_review'}
                 role="status"
               >
-                {receiverStatus}
+                {t(receiverStatus)}
               </p>
               {#if freshReceiverId && !receiverReady}<button
                   class="m6-button"

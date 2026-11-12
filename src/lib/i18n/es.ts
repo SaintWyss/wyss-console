@@ -1813,4 +1813,33 @@ export const ES: Readonly<Record<string, string>> = {
     'La sesión Native ya no está activa; actualiza y selecciona una sesión en ejecución.',
   'Select the workspace and confirm the current revision before declaring an effect completed.':
     'Selecciona el workspace y confirma la revisión actual antes de declarar un efecto completado.',
+
+  // Pipelines view: the managed receiver preparation and its status
+  'First prepare a new Managed session for this handoff.':
+    'Primero prepara una sesión nueva Managed para este handoff.',
+  'Select a target workspace and enable F8 Managed before preparing the receiver.':
+    'Selecciona workspace de destino y habilita F8 Managed antes de preparar el receptor.',
+  'New Managed session prepared. Authorize its binding, runtime and lease from Runtimes.':
+    'Sesión Managed nueva preparada. Autoriza su binding, runtime y lease desde Runtimes.',
+  'New receiver {id}': 'Receptor nuevo {id}',
+  'F8 did not confirm the preparation. No other session is created with a different intent; retry the same request.':
+    'F8 no confirmó la preparación. No se crea otra sesión con un intent diferente; vuelve a intentar el mismo pedido.',
+  'Could not prepare the Managed receiver through F8.':
+    'No se pudo preparar el receptor Managed mediante F8.',
+  'A new Managed session, active F8 or a target workspace is missing.':
+    'Falta una sesión nueva Managed, F8 activo o workspace destino.',
+  'The receiver was not created for this handoff. Prepare a new Managed session.':
+    'El receptor no fue creado para este handoff. Prepara una sesión Managed nueva.',
+  '{id} · generation {generation} · {profile} · lease {lease}':
+    '{id} · generation {generation} · {profile} · lease {lease}',
+  'unknown profile': 'perfil desconocido',
+  absent: 'ausente',
+  'New receiver, without history, attached to the workspace and enabled by the F8 turn_start lease.':
+    'Receptor nuevo, sin historial, adjunto al workspace y habilitado por la lease F8 turn_start.',
+  'Receiver not admitted yet. In Runtimes, configure the requested profile, bind the target workspace and grant a turn_start lease; the handoff will not be sent until everything is confirmed.':
+    'Receptor aún no admitido. En Runtimes, configura el perfil solicitado, enlaza el workspace destino y concede una lease turn_start; no se enviará el handoff hasta confirmar todo.',
+  'The receiver could not be observed through F8; it is not assumed to be prepared.':
+    'No se pudo observar el receptor desde F8; no se asume que esté preparado.',
+  'Prepare a new Managed receiver for this handoff first.':
+    'Prepara primero un receptor Managed nuevo para este handoff.',
 };
