@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SessionRow } from '../../contracts/f8';
   import { localClock } from '../agent/present';
-  import { t, tPhrase } from '../../i18n/index.svelte';
+  import { msg, t, tPhrase } from '../../i18n/index.svelte';
   import { shortId } from '../sessions/present';
   import type { F8Controller, F8Tab, F8ViewState } from './controller';
   import ConversationPanel from './ConversationPanel.svelte';
@@ -35,12 +35,12 @@
   );
   const pending = $derived(f8.operation?.status === 'pending');
   const TABS: readonly { id: F8Tab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'conversation', label: 'Conversation' },
-    { id: 'models', label: 'Models' },
-    { id: 'history', label: 'History' },
+    { id: 'overview', label: msg('Overview') },
+    { id: 'conversation', label: msg('Conversation') },
+    { id: 'models', label: msg('Models') },
+    { id: 'history', label: msg('History') },
   ];
-  const name = (row: SessionRow) => `Session ${shortId(row.id)}`;
+  const name = (row: SessionRow) => t('Session {id}', { id: shortId(row.id) });
 
   /** Left and Right move between tabs, as a tab list does. */
   function tabKey(event: KeyboardEvent, index: number) {
@@ -60,38 +60,40 @@
   }
 
   const OPERATION: Record<string, string> = {
-    prepare: 'Creating the session…',
-    close: 'Closing the session…',
-    start: 'Starting the runtime…',
-    stop: 'Stopping the runtime…',
-    grant: 'Granting the execution lease…',
-    renew: 'Renewing the execution lease…',
-    revoke: 'Revoking the execution lease…',
-    bind: 'Binding the workspace…',
-    resume: 'Attaching the session…',
-    abandon: 'Discarding the attempt…',
-    turn: 'Asking the authority to start the turn…',
-    cancel: 'Asking the authority to cancel the turn…',
+    prepare: msg('Creating the session…'),
+    close: msg('Closing the session…'),
+    start: msg('Starting the runtime…'),
+    stop: msg('Stopping the runtime…'),
+    grant: msg('Granting the execution lease…'),
+    renew: msg('Renewing the execution lease…'),
+    revoke: msg('Revoking the execution lease…'),
+    bind: msg('Binding the workspace…'),
+    resume: msg('Attaching the session…'),
+    abandon: msg('Discarding the attempt…'),
+    turn: msg('Asking the authority to start the turn…'),
+    cancel: msg('Asking the authority to cancel the turn…'),
   };
 </script>
 
 <section
   class="runtimes-feature"
-  aria-label="Managed runtimes"
+  aria-label={t('Managed runtimes')}
   hidden={!visible}
   inert={!visible}
 >
   <div class="sessions-toolbar">
     <div class="sessions-heading">
-      <h2>Managed runtimes · protocol 2</h2>
+      <h2>{t('Managed runtimes · protocol 2')}</h2>
       <p class="sessions-count">
         {#if f8.authority && connected}
-          {f8.authority.prepared_count} prepared · {f8.authority.closed_count} closed
-          · protocol 2
+          {t('{prepared} prepared · {closed} closed · protocol 2', {
+            prepared: f8.authority.prepared_count,
+            closed: f8.authority.closed_count,
+          })}
         {:else if link}
           {t(link.label)}
         {:else}
-          Connecting to the authority
+          {t('Connecting to the authority')}
         {/if}
       </p>
     </div>
@@ -105,27 +107,27 @@
       type="button"
       class="action"
       disabled={f8.reading}
-      onclick={() => controller.refresh()}>Refresh</button
+      onclick={() => controller.refresh()}>{t('Refresh')}</button
     >
     <button
       type="button"
       class="action primary"
       disabled={!connected || pending}
-      onclick={() => controller.prepare()}>New session</button
+      onclick={() => controller.prepare()}>{t('New session')}</button
     >
   </div>
 
   {#if f8.notice === 'authority_changed'}
     <div class="sessions-status failed unknown" role="alert">
       <p>
-        The authority restarted or was replaced. Its runtimes, leases and turns
-        are not the ones shown before, so everything was read again and nothing
-        from before is acted on.
+        {t(
+          'The authority restarted or was replaced. Its runtimes, leases and turns are not the ones shown before, so everything was read again and nothing from before is acted on.',
+        )}
       </p>
       <button
         type="button"
         class="action"
-        onclick={() => controller.dismissNotice()}>Dismiss</button
+        onclick={() => controller.dismissNotice()}>{t('Dismiss')}</button
       >
     </div>
   {:else if f8.notice === 'stale'}
@@ -134,7 +136,7 @@
       <button
         type="button"
         class="action"
-        onclick={() => controller.dismissNotice()}>Dismiss</button
+        onclick={() => controller.dismissNotice()}>{t('Dismiss')}</button
       >
     </div>
   {/if}
@@ -143,14 +145,16 @@
     <p class="sessions-status" role="status">
       <span class="dot" aria-hidden="true"></span>
       {f8.operation.step === 'starting'
-        ? 'Waiting for the runtime to be ready…'
+        ? t('Waiting for the runtime to be ready…')
         : f8.operation.step === 'stopping'
-          ? 'Waiting for the runtime to stop…'
+          ? t('Waiting for the runtime to stop…')
           : f8.operation.step === 'binding'
-            ? 'The authority is binding the workspace…'
+            ? t('The authority is binding the workspace…')
             : f8.operation.step === 'confirming'
-              ? 'Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.'
-              : OPERATION[f8.operation.kind]}
+              ? t(
+                  'Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.',
+                )
+              : t(OPERATION[f8.operation.kind])}
     </p>
   {:else if f8.operation?.failure}
     <div
@@ -164,13 +168,13 @@
           type="button"
           class="action"
           disabled={!connected}
-          onclick={() => controller.retry()}>Retry</button
+          onclick={() => controller.retry()}>{t('Retry')}</button
         >
       {/if}
       <button
         type="button"
         class="action"
-        onclick={() => controller.dismissOperation()}>Dismiss</button
+        onclick={() => controller.dismissOperation()}>{t('Dismiss')}</button
       >
     </div>
   {/if}
@@ -179,20 +183,22 @@
     <div class="sessions-status failed unknown" role="status">
       <p>
         {#if f8.link.state === 'waiting'}
-          {link?.note ? t(link.note) : 'The authority is not answering.'}
+          {link?.note ? t(link.note) : t('The authority is not answering.')}
           {f8.link.retry_in_ms !== null
-            ? 'The console asks again by itself.'
+            ? t('The console asks again by itself.')
             : ''}
-          What is shown was read before the connection was lost; no action is offered.
+          {t(
+            'What is shown was read before the connection was lost; no action is offered.',
+          )}
         {:else}
-          Connecting to the authority…
+          {t('Connecting to the authority…')}
         {/if}
       </p>
       {#if f8.link.state === 'waiting'}
         <button
           type="button"
           class="action"
-          onclick={() => controller.reconnect()}>Reconnect now</button
+          onclick={() => controller.reconnect()}>{t('Reconnect now')}</button
         >
       {/if}
     </div>
@@ -200,41 +206,43 @@
 
   {#if !page && f8.readFailure && !connected}
     <div class="sessions-empty" role="status">
-      <p class="empty-title">The authority is unavailable</p>
+      <p class="empty-title">{t('The authority is unavailable')}</p>
       <p>
-        Managed runtimes are read from the authority and cannot be created,
-        started or stopped until it is connected. The Console keeps working.
+        {t(
+          'Managed runtimes are read from the authority and cannot be created, started or stopped until it is connected. The Console keeps working.',
+        )}
       </p>
     </div>
   {:else if !page && f8.readFailure}
     <div class="sessions-empty" role="alert">
       <p class="empty-title">{t(failureText(f8.readFailure.code))}</p>
       <button type="button" class="action" onclick={() => controller.refresh()}
-        >Try again</button
+        >{t('Try again')}</button
       >
     </div>
   {:else if !page}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Reading managed sessions…</p>
+      <p class="empty-title">{t('Reading managed sessions…')}</p>
     </div>
   {:else if page.sessions.length === 0 && f8.depth === 0}
     <div class="sessions-empty">
-      <p class="empty-title">No managed sessions yet.</p>
+      <p class="empty-title">{t('No managed sessions yet.')}</p>
       <p>
-        A session gets a runtime of its own. Create one, start its runtime, give
-        it an execution lease and bind a project folder to work in.
+        {t(
+          'A session gets a runtime of its own. Create one, start its runtime, give it an execution lease and bind a project folder to work in.',
+        )}
       </p>
       <button
         type="button"
         class="action primary"
         disabled={!connected || pending}
-        onclick={() => controller.prepare()}>New session</button
+        onclick={() => controller.prepare()}>{t('New session')}</button
       >
     </div>
   {:else}
     <div class="runtimes-body">
       <div class="runtimes-list sessions-main">
-        <ul class="sessions-list" aria-label="Managed sessions">
+        <ul class="sessions-list" aria-label={t('Managed sessions')}>
           {#each page.sessions as row (row.id)}
             <li>
               <button
@@ -253,14 +261,15 @@
                 >
                   <span class="dot" aria-hidden="true"></span>
                   {row.state === 'closed'
-                    ? 'Closed'
+                    ? t('Closed')
                     : t(RUNTIME_STATE[row.runtime.actual].label)}
                 </span>
                 <span class="session-meta"
                   >{tPhrase(runtimeLine(row.runtime))}</span
                 >
                 <span class="session-meta">
-                  Updated <time datetime={row.updated_at}
+                  {t('Updated')}
+                  <time datetime={row.updated_at}
                     >{localClock(row.updated_at)}</time
                   >
                 </span>
@@ -272,32 +281,33 @@
           <div class="sessions-pager">
             <p>
               {f8.depth === 0
-                ? 'Newest sessions'
-                : `Older sessions · page ${f8.depth + 1}`}
+                ? t('Newest sessions')
+                : t('Older sessions · page {page}', { page: f8.depth + 1 })}
             </p>
             <button
               type="button"
               class="action"
               disabled={f8.depth === 0 || f8.reading}
-              onclick={() => controller.newer()}>Newer</button
+              onclick={() => controller.newer()}>{t('Newer')}</button
             >
             <button
               type="button"
               class="action"
               disabled={!page.older || f8.reading}
-              onclick={() => controller.older()}>Older</button
+              onclick={() => controller.older()}>{t('Older')}</button
             >
           </div>
         {/if}
       </div>
 
-      <div class="runtimes-detail" aria-label="Session details">
+      <div class="runtimes-detail" aria-label={t('Session details')}>
         {#if !f8.selected}
           <div class="sessions-empty">
-            <p class="empty-title">Select a session</p>
+            <p class="empty-title">{t('Select a session')}</p>
             <p>
-              Its runtime, workspace, execution lease, conversation, models and
-              history are shown here, exactly as the authority holds them.
+              {t(
+                'Its runtime, workspace, execution lease, conversation, models and history are shown here, exactly as the authority holds them.',
+              )}
             </p>
           </div>
         {:else if !selected}
@@ -307,12 +317,12 @@
               <button
                 type="button"
                 class="action"
-                onclick={() => controller.refresh()}>Try again</button
+                onclick={() => controller.refresh()}>{t('Try again')}</button
               >
             </div>
           {:else}
             <div class="sessions-empty" role="status" aria-busy="true">
-              <p class="empty-title">Reading the session…</p>
+              <p class="empty-title">{t('Reading the session…')}</p>
             </div>
           {/if}
         {:else}
@@ -326,7 +336,7 @@
             >
               <span class="dot" aria-hidden="true"></span>
               {selected.session.state === 'closed'
-                ? 'Closed'
+                ? t('Closed')
                 : t(RUNTIME_STATE[selected.session.runtime.actual].label)}
             </span>
             <span class="rt-id mono" title={selected.session.id}
@@ -335,11 +345,15 @@
             <button
               type="button"
               class="details-close"
-              aria-label="Hide details"
+              aria-label={t('Hide details')}
               onclick={() => controller.select(null)}>×</button
             >
           </header>
-          <div class="rt-tabs" role="tablist" aria-label="Session sections">
+          <div
+            class="rt-tabs"
+            role="tablist"
+            aria-label={t('Session sections')}
+          >
             {#each TABS as tab, index (tab.id)}
               <button
                 type="button"
@@ -349,7 +363,8 @@
                 aria-controls={`rt-panel-${tab.id}`}
                 tabindex={f8.tab === tab.id ? 0 : -1}
                 onclick={() => controller.setTab(tab.id)}
-                onkeydown={(event) => tabKey(event, index)}>{tab.label}</button
+                onkeydown={(event) => tabKey(event, index)}
+                >{t(tab.label)}</button
               >
             {/each}
           </div>

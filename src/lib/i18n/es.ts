@@ -1778,4 +1778,46 @@ export const ES: Readonly<Record<string, string>> = {
   'The runtime marks': 'El runtime marca',
   'as its replacement': 'como su reemplazo',
   ', retiring {date}': ', que se retira el {date}',
+
+  // Runtimes (F8): the managed runtimes view
+  'Managed runtimes': 'Runtimes Managed',
+  'Managed runtimes · protocol 2': 'Runtimes Managed · protocolo 2',
+  '{prepared} prepared · {closed} closed · protocol 2':
+    '{prepared} preparadas · {closed} cerradas · protocolo 2',
+  Overview: 'Resumen',
+  'Creating the session…': 'Creando la sesión…',
+  'Closing the session…': 'Cerrando la sesión…',
+  'Starting the runtime…': 'Iniciando el runtime…',
+  'Stopping the runtime…': 'Deteniendo el runtime…',
+  'Granting the execution lease…': 'Otorgando la concesión de ejecución…',
+  'Renewing the execution lease…': 'Renovando la concesión de ejecución…',
+  'Revoking the execution lease…': 'Revocando la concesión de ejecución…',
+  'Binding the workspace…': 'Asociando el workspace…',
+  'Attaching the session…': 'Conectando la sesión…',
+  'Discarding the attempt…': 'Descartando el intento…',
+  'Asking the authority to cancel the turn…':
+    'Pidiéndole a la autoridad que cancele el turno…',
+  'Waiting for the runtime to be ready…':
+    'Esperando a que el runtime esté listo…',
+  'Waiting for the runtime to stop…': 'Esperando a que el runtime se detenga…',
+  'The authority is binding the workspace…':
+    'La autoridad está asociando el workspace…',
+  'Waiting for your answer in the confirmation window. Nothing is allowed until you choose Allow. If you cannot see it, it may be behind another window.':
+    'Esperando tu respuesta en la ventana de confirmación. No se permite nada hasta que elijas Permitir. Si no la ves, puede estar detrás de otra ventana.',
+  'The authority is not answering.': 'La autoridad no responde.',
+  'The console asks again by itself.': 'La consola vuelve a preguntar sola.',
+  'What is shown was read before the connection was lost; no action is offered.':
+    'Lo que se muestra se leyó antes de perder la conexión; no se ofrece ninguna acción.',
+  'Reconnect now': 'Reconectar ahora',
+  'The authority restarted or was replaced. Its runtimes, leases and turns are not the ones shown before, so everything was read again and nothing from before is acted on.':
+    'La autoridad se reinició o la reemplazaron. Sus runtimes, concesiones y turnos no son los que se mostraban antes, así que se volvió a leer todo y no se actúa sobre nada de antes.',
+  'Managed runtimes are read from the authority and cannot be created, started or stopped until it is connected. The Console keeps working.':
+    'Los runtimes Managed se leen de la autoridad y no se pueden crear, iniciar ni detener hasta que esté conectada. La consola sigue funcionando.',
+  'Reading managed sessions…': 'Leyendo las sesiones Managed…',
+  'A session gets a runtime of its own. Create one, start its runtime, give it an execution lease and bind a project folder to work in.':
+    'Cada sesión tiene un runtime propio. Creá uno, iniciá su runtime, dale una concesión de ejecución y asociale una carpeta de proyecto donde trabajar.',
+  'Select a session': 'Seleccioná una sesión',
+  'Its runtime, workspace, execution lease, conversation, models and history are shown here, exactly as the authority holds them.':
+    'Su runtime, workspace, concesión de ejecución, conversación, modelos e historial se muestran acá, tal como los tiene la autoridad.',
+  'Session sections': 'Secciones de la sesión',
 };
