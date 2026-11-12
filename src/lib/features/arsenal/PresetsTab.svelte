@@ -101,7 +101,8 @@
   let draft = $state<Draft>({ id: null, name: '', items: [], composites: [] });
   let saved = $state<Draft | null>(null);
   let query = $state('');
-  let kind = $state<'all' | 'skill' | 'agent' | 'rule'>('all');
+  /** The type the owner picked; `null` until they pick one. */
+  let kindChoice = $state<'all' | 'skill' | 'agent' | 'rule' | null>(null);
   let family = $state<Family | 'all'>('all');
   let opened = $state<Group[]>([]);
   let menuFor = $state<string | null>(null);
@@ -112,6 +113,11 @@
 
   const library = $derived(
     arsenal.library.filter((item) => item.provider === provider),
+  );
+  /** Starts on Rules when the provider has any, so the first thing on screen is the rules. */
+  const kind = $derived(
+    kindChoice ??
+      (library.some((item) => item.kind === 'rule') ? 'rule' : 'all'),
   );
   const chosen = $derived(new Set(draft.items.map((item) => item.capability)));
   const allRows = $derived(groupRows(library, chosen, arsenal.groups));
@@ -396,7 +402,8 @@
             type="button"
             class="chip"
             aria-pressed={kind === option.value}
-            onclick={() => (kind = option.value)}>{t(option.label)}</button
+            onclick={() => (kindChoice = option.value)}
+            >{t(option.label)}</button
           >
         {/each}
       </div>

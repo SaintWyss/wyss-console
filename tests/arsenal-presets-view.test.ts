@@ -195,6 +195,24 @@ describe('Presets screen', () => {
     );
   });
 
+  it('starts on Rules when the provider has rules, and on All when it has none', () => {
+    const pressed = (root: Element) =>
+      [...root.querySelectorAll('button[aria-pressed="true"]')]
+        .map((node) => text(node))
+        .filter((label) =>
+          ['All', 'Skills', 'Agents', 'Rules'].includes(label),
+        );
+    const noRules = render(stateWith());
+    flushSync();
+    expect(pressed(noRules.root)).not.toContain('Rules');
+    const rule = item('invariantes', { kind: 'rule' });
+    const withRules = render(stateWith({ library: [frontend, rule] }));
+    flushSync();
+    expect(pressed(withRules.root)).toContain('Rules');
+    expect(withRules.root.textContent).toContain('invariantes');
+    expect(withRules.root.textContent).not.toContain('frontend-design');
+  });
+
   it('fills the group meter when a capability is ticked, checks the draft, and never saves it', () => {
     const { controller, root } = render(stateWith());
     flushSync();
