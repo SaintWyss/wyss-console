@@ -1803,4 +1803,14 @@ export const ES: Readonly<Record<string, string>> = {
     'No se pudieron leer sesiones Managed desde F8.',
   'The Managed authority is inactive; only the observed Native sessions are shown.':
     'La autoridad Managed está inactiva; se muestran solo las sesiones Native observadas.',
+
+  // Pipelines view: plan review, the Native source and the effect confirmation
+  'The budget must be a whole number from 1 to 60 minutes.':
+    'El presupuesto debe ser un número entero entre 1 y 60 minutos.',
+  'Complete the workspace, objective, steps, dependencies and sessions before reviewing.':
+    'Completa el workspace, objetivo, pasos, dependencias y sesiones antes de revisar.',
+  'The Native session is no longer active; refresh and select a running session.':
+    'La sesión Native ya no está activa; actualiza y selecciona una sesión en ejecución.',
+  'Select the workspace and confirm the current revision before declaring an effect completed.':
+    'Selecciona el workspace y confirma la revisión actual antes de declarar un efecto completado.',
 };

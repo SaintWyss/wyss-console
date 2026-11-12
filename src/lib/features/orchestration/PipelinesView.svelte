@@ -363,8 +363,9 @@
     busy = true;
     try {
       if (budgetInvalid) {
-        lastError =
-          'El presupuesto debe ser un número entero entre 1 y 60 minutos.';
+        lastError = msg(
+          'The budget must be a whole number from 1 to 60 minutes.',
+        );
         return;
       }
       const plan = planFromDraft();
@@ -382,8 +383,9 @@
     } catch (error) {
       if (error instanceof OrchestrationCallError) showError(error);
       else
-        lastError =
-          'Completa el workspace, objetivo, pasos, dependencias y sesiones antes de revisar.';
+        lastError = msg(
+          'Complete the workspace, objective, steps, dependencies and sessions before reviewing.',
+        );
     } finally {
       busy = false;
     }
@@ -497,8 +499,9 @@
       (candidate) => candidate.id === sessionId,
     );
     if (!session || session.state !== 'running') {
-      lastError =
-        'La sesión Native ya no está activa; actualiza y selecciona una sesión en ejecución.';
+      lastError = msg(
+        'The Native session is no longer active; refresh and select a running session.',
+      );
       return;
     }
     busy = true;
@@ -911,8 +914,9 @@
     } catch (error) {
       if (error instanceof OrchestrationCallError) showError(error);
       else
-        lastError =
-          'Selecciona el workspace y confirma la revisión actual antes de declarar un efecto completado.';
+        lastError = msg(
+          'Select the workspace and confirm the current revision before declaring an effect completed.',
+        );
     } finally {
       busy = false;
     }
