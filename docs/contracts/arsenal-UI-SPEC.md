@@ -191,7 +191,7 @@ Decisiones del dueño del 2026-11-12. Reabren lo que el contrato del 2026-11-11 
 
 1. **Ocho tipos en Elegir**, en este orden: Todos · Reglas · Skills · Agentes · Hooks · MCP · Plugins · Comandos. Al pasar el mouse sobre cada tipo aparece qué es.
 2. **Todo se puede elegir**, incluidos los hooks de seguridad (`r3-gate`, control de ruteo). No hay piso fijo. Un preset puede abrir una terminal sin ningún hook: **decisión del dueño**, que este contrato registra y no discute.
-3. **Antes de abrir Claude Code, la Console escribe la configuración global** (`~/.claude/settings.json` para hooks, `~/.claude.json` para MCP) según el preset, y recién después lanza la terminal.
+3. **Cada terminal arranca con su propia configuración.** El global no se reescribe en cada lanzamiento: Arsenal le pasa a cada Claude Code los hooks y MCP del preset (`--settings`, `--mcp-config --strict-mcp-config`). Decidido el 2026-11-12 a propuesta del agente, en lugar de escribir el global antes de cada lanzamiento.
 4. **GSD no se rompe.** Sigue siendo un paquete que va entero. En Claude, sus 35 agentes (links a `~/.local/share/wyss/gsd-core/<versión>/`) se muestran en Agentes con la etiqueta _parte de GSD Core_, y se prenden o apagan con "Mantener GSD Core".
 5. **Categorías en 5 secciones**, todas visibles en cada tipo aunque estén vacías (con `0`).
 6. **Categorías del dueño:** se pueden crear, renombrar y borrar. Las básicas no se borran.
@@ -219,10 +219,12 @@ Una corrección guardada con `group_id = models` sobre una regla se lee como `ru
 
 ### Hooks y MCP elegibles
 
-- **Qué se elige:** cada hook es una entrada `evento + matcher + comando` de `~/.claude/settings.json`, y cada MCP es un servidor de `~/.claude.json`. El preset guarda la referencia (provider, tipo, clave estable = hash de evento+matcher+comando, o nombre del servidor), nunca una copia del comando ni de las variables del MCP, porque pueden tener credenciales.
-- **El catálogo maestro:** la primera vez que se aplica un preset, la Console copia todos los hooks y MCP actuales a `~/.local/share/wyss-console/arsenal/catalog-claude.json` (`0600`). Es la lista completa de dónde se sacan los que van a cada lanzamiento. Lo que agregues después a mano a `settings.json` se suma al catálogo en el siguiente lanzamiento, y nada se pierde.
-- **Al lanzar:** respaldo con fecha de `settings.json` y `~/.claude.json` → se escribe en ambos solo lo que el preset eligió (temporal + rename, sin tocar ninguna otra clave) → se lanza Claude Code. Cuando el preset no menciona hooks ni MCP, no se toca nada.
-- **Terminales ya abiertas:** Claude Code toma una foto de los hooks al arrancar. Hay que verificar en la etapa 5 que cambiar el global después no afecte a las sesiones abiertas. Si las afecta, se vuelve a charlar.
+- **Qué se elige:** cada hook es una entrada `evento + matcher + comando`, y cada MCP es un servidor. El preset guarda la referencia (provider, tipo, clave estable = hash de evento+matcher+comando, o nombre del servidor), nunca una copia del comando ni de las variables del MCP, porque pueden tener credenciales.
+- **Migración, una sola vez y con el OK del dueño:** respaldo con fecha de `~/.claude/settings.json` y `~/.claude.json` → todos los hooks y MCP pasan al catálogo maestro `~/.local/share/wyss-console/arsenal/catalog-claude.json` (`0600`) → en el global quedan solo los que el dueño marque como **default**, que por defecto son los que hoy están activos (fuera de la Console nada cambia). Antes de mover nada se muestra la lista.
+- **Al lanzar:** Arsenal escribe en la carpeta privada de la terminal `hooks.json` (`{"hooks":…}` con lo que eligió el preset) y `mcp.json` (`{"mcpServers":…}`), y lanza `claude --settings hooks.json --mcp-config mcp.json --strict-mcp-config`. El global no se toca.
+- **Límite:** `--settings` suma hooks al global y no puede sacar los que están ahí. Todo lo que se quiera poder apagar por preset tiene que quedar fuera del global (solo en el catálogo).
+- **Probado el 2026-11-12 con Claude Code 2.1.323:** un hook `SessionStart` que llega por `--settings` corre, y con `--strict-mcp-config` y un `mcp.json` vacío la sesión arranca con 0 servidores MCP (sin el flag arranca con 18, contando plugins y conectores de claude.ai).
+- **Lo que agregues a mano al global** lo cargan todas las terminales. Arsenal lo muestra en el panel como "en el global (siempre activo)" y ofrece pasarlo al catálogo.
 - **Panel de composición:** lista los hooks activos. Si el preset deja afuera `r3-gate`, el panel muestra "Sin freno ante comandos destructivos" como dato, no como bloqueo.
 - **Codex:** fuera de esta ampliación. Sus hooks están apagados a propósito.
 
@@ -243,7 +245,7 @@ Una corrección guardada con `group_id = models` sobre una regla se lee como `ru
 | E | Ampliación: los 8 tipos en Elegir (hooks, MCP, plugins y comandos solo para ver) + agentes GSD en Claude. | test de vista por tipo; test del escaneo de comandos. |
 | F | Las 5 secciones y las categorías nuevas, siempre visibles. | test de reglas con el fixture (Other ≤ 10 %); test de vista con categorías vacías. |
 | G | Categorías del dueño en `groups.json` v2. | tests de Rust: v1→v2, tope, nombre repetido, borrado que devuelve a la regla. |
-| H | Hooks y MCP elegibles: catálogo maestro, respaldo, escritura del global antes de lanzar. | tests de Rust: respaldo, solo claves elegidas, otras claves intactas; prueba real con 2 terminales abiertas. |
+| H | Hooks y MCP elegibles: catálogo maestro, respaldo, escritura del global antes de lanzar. | tests de Rust: respaldo, solo claves elegidas, otras claves intactas; prueba real con 2 terminales de presets distintos abiertas a la vez. |
 
 Cierre: una revisión externa del conjunto, con foco en `launch_save` (escritura de archivos nombrados por la ventana) y en la migración.
 
