@@ -3055,4 +3055,89 @@ export const ES: Readonly<Record<string, string>> = {
     'no lo observa esta vista de configuración del proveedor',
   'not reported by the agent': 'el agente no lo informa',
   'The launch preview failed.': 'La vista previa del lanzamiento falló.',
+  // ---- workspace ----
+  '{name} · not applied': '{name} · sin aplicar',
+  'Update {agent}': 'Actualizar {agent}',
+  'Started with {name} applied.': 'Iniciado con {name} aplicado.',
+  'Started without applying {name}; the selection is recorded.':
+    'Iniciado sin aplicar {name}; la selección queda registrada.',
+  'ended {time}': 'terminó {time}',
+  profile: 'perfil',
+  agent: 'agente',
+  'this agent': 'este agente',
+  'Home · {path}': 'Inicio · {path}',
+  'Start {agent}': 'Iniciar {agent}',
+  'Agents started from the Console': 'Agentes iniciados desde la Console',
+  'Hermes Native is a full-account provider session. Its approval prompts and hooks are not a Wyss security boundary. Hermes planner admission is separately blocked pending tested OS isolation. The installed version is not probed because Hermes version output performs an update check.':
+    'Hermes Native es una sesión de proveedor con toda la cuenta. Sus avisos de aprobación y sus hooks no son una frontera de seguridad de Wyss. La admisión del planificador de Hermes está bloqueada aparte hasta probar un aislamiento del sistema. La versión instalada no se sondea, porque la salida de versión de Hermes hace una comprobación de actualización.',
+  'Looking for your agents…': 'Buscando tus agentes…',
+  'Agents cannot be started here': 'Los agentes no se pueden iniciar aquí',
+  'The desktop did not answer. Nothing was started.':
+    'El escritorio no respondió. No se inició nada.',
+  'OpenCode and Hermes wait until the Console confirms its private M9 session store again.':
+    'OpenCode y Hermes esperan a que la Console vuelva a confirmar su almacén privado de sesiones M9.',
+  'Check again': 'Revisar de nuevo',
+  'OpenCode and Hermes are blocked: the Console could not confirm its private M9 session store, because a read or a write failed. Claude Code and Codex stay available where the Console allows them.':
+    'OpenCode y Hermes están bloqueados: la Console no pudo confirmar su almacén privado de sesiones M9, porque falló una lectura o una escritura. Claude Code y Codex siguen disponibles donde la Console los permite.',
+  'This terminal host predates M9. OpenCode and Hermes Native require a matching M9 host; existing Native sessions remain available.':
+    'Este host de terminal es anterior a M9. OpenCode y Hermes Native requieren un host M9 compatible; las sesiones Native existentes siguen disponibles.',
+  'Start an agent': 'Iniciar un agente',
+  installed: 'instalado',
+  'Project folder': 'Carpeta del proyecto',
+  'Could not verify this profile preview. Start stays disabled until a fresh preview succeeds.':
+    'No se pudo verificar la vista previa de este perfil. Iniciar sigue deshabilitado hasta que una vista previa nueva funcione.',
+  'Refreshing the profile preview…': 'Actualizando la vista previa del perfil…',
+  'The selected profile changed. Checking a fresh preview before Start.':
+    'El perfil elegido cambió. Se verifica una vista previa nueva antes de Iniciar.',
+  'Retry preview': 'Reintentar vista previa',
+  'Use for this project': 'Usar en este proyecto',
+  'This profile cannot be applied to {agent}, so it will not start.':
+    'Este perfil no se puede aplicar a {agent}, así que no se iniciará.',
+  Delegation: 'Delegación',
+  'Let it hand tasks to Claude Code and Codex through Wyss (2 agents at a time, 20 minutes each, writes only in the workspace).':
+    'Permitir que pase tareas a Claude Code y Codex a través de Wyss (de a 2 agentes a la vez, 20 minutos cada uno, escribe solo en el workspace).',
+  Change: 'Cambiar',
+  'Checked {date}.': 'Verificado el {date}.',
+  'Interface: {interface}. Format: {format}. Scope: {scope}.':
+    'Interfaz: {interface}. Formato: {format}. Alcance: {scope}.',
+  'Reload: {reload}.': 'Recarga: {reload}.',
+  'Source: {source}.': 'Fuente: {source}.',
+  'Limit: {limit}.': 'Límite: {limit}.',
+  'Runs “{command}” in a new terminal':
+    'Ejecuta “{command}” en una terminal nueva',
+  'Capability evidence and limits': 'Evidencia y límites de capacidades',
+  'Starts through your shell ({family}): same environment as typing the command yourself.':
+    'Inicia a través de tu shell ({family}): mismo entorno que si escribieras el comando vos mismo.',
+  'Starts directly with the Console’s own environment.':
+    'Inicia directamente con el entorno propio de la Console.',
+  "Native sessions: the provider's own tools, configuration and privileges stay active. The Console does not mediate, contain or approve their effects.":
+    'Sesiones Native: las herramientas, la configuración y los privilegios del proveedor siguen activos. La Console no media, contiene ni aprueba sus efectos.',
+  'Native plane': 'Plano Native',
+  'Start the lost session again': 'Iniciar de nuevo la sesión perdida',
+  'Start {count} lost sessions again':
+    'Iniciar de nuevo {count} sesiones perdidas',
+  'Remove finished': 'Quitar terminadas',
+  'No agent sessions yet': 'Todavía no hay sesiones de agentes',
+  'Start one above. It opens in the Console as a terminal tab.':
+    'Inicia una arriba. Se abre en la Console como una pestaña de terminal.',
+  'Two sessions run here and can write the same files. Nothing coordinates them.':
+    'Dos sesiones corren aquí y pueden escribir los mismos archivos. Nada las coordina.',
+  'Sessions in {folder}': 'Sesiones en {folder}',
+  'Profile {name} (v{version})': 'Perfil {name} (v{version})',
+  'No profile': 'Sin perfil',
+  'up {time}': 'activa {time}',
+  'started {date}': 'iniciada {date}',
+  'started directly': 'iniciada directamente',
+  'restart {count}': 'reinicio {count}',
+  'process {pid}': 'proceso {pid}',
+  '{count} processes': '{count} procesos',
+  'Model: asked for {requested} · set in its files {configured} · in use: {inUse} · Effort: asked for {effort} · set in its files {configuredEffort}':
+    'Modelo: pedido {requested} · fijado en sus archivos {configured} · en uso: {inUse} · Esfuerzo: pedido {effort} · fijado en sus archivos {configuredEffort}',
+  Open: 'Abrir',
+  Stop: 'Detener',
+  Restart: 'Reiniciar',
+  'Show terminal': 'Mostrar terminal',
+  'Start again': 'Iniciar de nuevo',
+  'Hand off…': 'Transferir…',
+  'Native sessions': 'Sesiones Native',
 };

@@ -89,10 +89,14 @@
   let evidenceOpen = $state(false);
   const skillsSummary = $derived(
     arsenalChoice === null
-      ? 'None — all installed skills'
+      ? t('None — all installed skills')
       : arsenalChoice.pending
-        ? 'Checking…'
-        : `${arsenalChoice.plan.selection_name}${arsenalChoice.apply ? '' : ' · not applied'}`,
+        ? t('Checking…')
+        : arsenalChoice.apply
+          ? arsenalChoice.plan.selection_name
+          : t('{name} · not applied', {
+              name: arsenalChoice.plan.selection_name,
+            }),
   );
   $effect(() => {
     if (arsenalChoice && !arsenalChoice.pending && !arsenalChoice.ready)
@@ -102,7 +106,11 @@
     id === 'claude_code' ? 'claude update' : 'codex update';
   function updateAgent(id: AgentId) {
     const cwd = projects.find((p) => p.home)?.path ?? project ?? '~';
-    onupdate?.(`Update ${AGENT_LABEL[id]}`, cwd, updateCommand(id));
+    onupdate?.(
+      t('Update {agent}', { agent: AGENT_LABEL[id] }),
+      cwd,
+      updateCommand(id),
+    );
   }
   // Bumped when the Arsenal plan must be computed again: the view is shown, or a start was refused.
   let arsenalRefresh = $state(0);
@@ -277,11 +285,16 @@
         );
         arsenalNote =
           binding.state === 'applied'
-            ? `Started with ${binding.selection_name} applied.`
-            : `Started without applying ${binding.selection_name}; the selection is recorded.`;
+            ? t('Started with {name} applied.', {
+                name: binding.selection_name,
+              })
+            : t('Started without applying {name}; the selection is recorded.', {
+                name: binding.selection_name,
+              });
       } catch {
-        arsenalNote =
-          'The terminal started, but Arsenal could not record its selection.';
+        arsenalNote = t(
+          'The terminal started, but Arsenal could not record its selection.',
+        );
       }
       void readBindings();
       onconsole();
@@ -295,10 +308,13 @@
   }
   function ended(s: NativeSession): string {
     if (!s.ended_at) return '';
-    return ` · ended ${new Date(s.ended_at * 1000).toLocaleTimeString(undefined, { timeStyle: 'short' })}`;
+    const time = new Date(s.ended_at * 1000).toLocaleTimeString(undefined, {
+      timeStyle: 'short',
+    });
+    return ` · ${t('ended {time}', { time })}`;
   }
   const profileName = (id: string) =>
-    native.profiles.find((p) => p.id === id)?.body.name ?? 'profile';
+    native.profiles.find((p) => p.id === id)?.body.name ?? t('profile');
 
   // Save as launch… (arsenal-UI-SPEC, phase D): the choices on this card, written as a session
   // launch that Launch ▾ lists. The desktop checks the profile and the preset again.
@@ -494,16 +510,15 @@
 
 <section
   class="native-feature"
-  aria-label="Agents started from the Console"
+  aria-label={t('Agents started from the Console')}
   hidden={!visible}
   inert={!visible}
 >
   {#if chosen?.agent_id === 'hermes'}
     <p class="sessions-status failed" role="note">
-      Hermes Native is a full-account provider session. Its approval prompts and
-      hooks are not a Wyss security boundary. Hermes planner admission is
-      separately blocked pending tested OS isolation. The installed version is
-      not probed because Hermes version output performs an update check.
+      {t(
+        'Hermes Native is a full-account provider session. Its approval prompts and hooks are not a Wyss security boundary. Hermes planner admission is separately blocked pending tested OS isolation. The installed version is not probed because Hermes version output performs an update check.',
+      )}
     </p>
   {/if}
 
@@ -518,41 +533,44 @@
 
   {#if native.phase === 'loading' || native.phase === 'idle'}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Looking for your agents…</p>
+      <p class="empty-title">{t('Looking for your agents…')}</p>
     </div>
   {:else if native.phase === 'failed' || !launcher}
     <div class="sessions-empty" role="alert">
-      <p class="empty-title">Agents cannot be started here</p>
-      <p>The desktop did not answer. Nothing was started.</p>
+      <p class="empty-title">{t('Agents cannot be started here')}</p>
+      <p>{t('The desktop did not answer. Nothing was started.')}</p>
       <button
         type="button"
         class="action"
-        onclick={() => controller.checkLauncher()}>Try again</button
+        onclick={() => controller.checkLauncher()}>{t('Try again')}</button
       >
     </div>
   {:else}
     <div class="native-main">
       {#if native.m9Uncertain}
         <p class="sessions-status" role="status">
-          OpenCode and Hermes wait until the Console confirms its private M9
-          session store again.
+          {t(
+            'OpenCode and Hermes wait until the Console confirms its private M9 session store again.',
+          )}
           <button
             type="button"
             class="action"
             disabled={native.checkingLauncher}
-            onclick={() => controller.checkLauncher()}>Check again</button
+            onclick={() => controller.checkLauncher()}
+            >{t('Check again')}</button
           >
         </p>
       {:else if launcher.m9_native_status === 'storage_unavailable'}
         <p class="sessions-status failed" role="alert">
-          OpenCode and Hermes are blocked: the Console could not confirm its
-          private M9 session store, because a read or a write failed. Claude
-          Code and Codex stay available where the Console allows them.
+          {t(
+            'OpenCode and Hermes are blocked: the Console could not confirm its private M9 session store, because a read or a write failed. Claude Code and Codex stay available where the Console allows them.',
+          )}
         </p>
       {:else if launcher.m9_native_status === 'legacy_host'}
         <p class="sessions-status" role="note">
-          This terminal host predates M9. OpenCode and Hermes Native require a
-          matching M9 host; existing Native sessions remain available.
+          {t(
+            'This terminal host predates M9. OpenCode and Hermes Native require a matching M9 host; existing Native sessions remain available.',
+          )}
         </p>
       {/if}
       {#if handoffSession}
@@ -569,11 +587,14 @@
           />
         {/key}
       {/if}
-      <section class="native-card native-launch" aria-label="Start an agent">
-        <h3 class="visually-hidden">Start an agent</h3>
+      <section
+        class="native-card native-launch"
+        aria-label={t('Start an agent')}
+      >
+        <h3 class="visually-hidden">{t('Start an agent')}</h3>
 
         <div class="launch-block">
-          <h4 id="step-agent">Agent</h4>
+          <h4 id="step-agent">{t('Agent')}</h4>
           <div
             class="native-agents"
             role="radiogroup"
@@ -595,8 +616,8 @@
                 />
                 <span class="event-title">{entry.name}</span>
                 <span class="event-meta">
-                  {#if entry.installed}{entry.version ?? 'installed'}{:else}Not
-                    installed{/if}
+                  {#if entry.installed}{entry.version ??
+                      t('installed')}{:else}{t('Not installed')}{/if}
                 </span>
               </label>
             {/each}
@@ -605,38 +626,42 @@
 
         <div class="launch-grid">
           <div class="launch-block">
-            <h4 id="step-folder">Folder</h4>
+            <h4 id="step-folder">{t('Folder')}</h4>
             <div class="native-field">
               <label class="visually-hidden" for="native-project"
-                >Project folder</label
+                >{t('Project folder')}</label
               >
               <div class="native-row">
                 <select id="native-project" bind:value={project}>
                   {#each projects as p (p.path)}
                     <option value={p.path}
-                      >{p.home ? `Home · ${p.path}` : p.path}</option
+                      >{p.home
+                        ? t('Home · {path}', { path: p.path })
+                        : p.path}</option
                     >
                   {/each}
                 </select>
                 <button type="button" class="action" onclick={chooseFolder}
-                  >Choose…</button
+                  >{t('Choose…')}</button
                 >
               </div>
             </div>
           </div>
 
           <div class="launch-block">
-            <h4 id="step-permissions">Permissions</h4>
+            <h4 id="step-permissions">{t('Permissions')}</h4>
             {#if profile && !previewCurrent}
               <p class="native-warning" role="status">
                 {#if previewFailedFor === previewContext}
-                  Could not verify this profile preview. Start stays disabled
-                  until a fresh preview succeeds.
+                  {t(
+                    'Could not verify this profile preview. Start stays disabled until a fresh preview succeeds.',
+                  )}
                 {:else if previewPendingFor === previewContext}
-                  Refreshing the profile preview…
+                  {t('Refreshing the profile preview…')}
                 {:else}
-                  The selected profile changed. Checking a fresh preview before
-                  Start.
+                  {t(
+                    'The selected profile changed. Checking a fresh preview before Start.',
+                  )}
                 {/if}
               </p>
               {#if previewFailedFor === previewContext}
@@ -644,19 +669,23 @@
                   type="button"
                   class="action"
                   disabled={native.starting}
-                  onclick={retryPreview}>Retry preview</button
+                  onclick={retryPreview}>{t('Retry preview')}</button
                 >
               {/if}
             {/if}
             <div class="native-field">
-              <label class="visually-hidden" for="native-profile">Profile</label
+              <label class="visually-hidden" for="native-profile"
+                >{t('Profile')}</label
               >
               <div class="native-row">
                 <select id="native-profile" bind:value={profile}>
-                  <option value={null}>No profile — as configured</option>
+                  <option value={null}>{t('No profile — as configured')}</option
+                  >
                   {#each profiles as p (p.id)}
                     <option value={p.id}
-                      >{p.body.name}{p.template ? ' (template)' : ''}</option
+                      >{p.body.name}{p.template
+                        ? ` ${t('(template)')}`
+                        : ''}</option
                     >
                   {/each}
                 </select>
@@ -666,12 +695,15 @@
                     class="action"
                     onclick={() =>
                       project && controller.setProjectDefault(project, profile)}
-                    >Use for this project</button
+                    >{t('Use for this project')}</button
                   >
                 {/if}
               </div>
               {#if preview && previewFor === previewContext}
-                <ul class="native-preview" aria-label="What the profile does">
+                <ul
+                  class="native-preview"
+                  aria-label={t('What the profile does')}
+                >
                   {#each preview.applied as line (line)}<li>{line}</li>{/each}
                   {#each preview.with_cost as line (line)}<li class="cost">
                       {line}
@@ -687,9 +719,10 @@
                 </ul>
                 {#if !preview.can_start}
                   <p class="native-warning">
-                    This profile cannot be applied to {agent
-                      ? AGENT_LABEL[agent]
-                      : 'this agent'}, so it will not start.
+                    {t(
+                      'This profile cannot be applied to {agent}, so it will not start.',
+                      { agent: agent ? AGENT_LABEL[agent] : t('this agent') },
+                    )}
                   </p>
                 {/if}
               {/if}
@@ -698,11 +731,12 @@
 
           {#if agent === 'claude_code' || agent === 'codex'}
             <div class="launch-block">
-              <h4 id="step-delegation">Delegation</h4>
+              <h4 id="step-delegation">{t('Delegation')}</h4>
               <label class="native-check">
                 <input type="checkbox" bind:checked={delegate} />
-                Let it hand tasks to Claude Code and Codex through Wyss (2 agents
-                at a time, 20 minutes each, writes only in the workspace).
+                {t(
+                  'Let it hand tasks to Claude Code and Codex through Wyss (2 agents at a time, 20 minutes each, writes only in the workspace).',
+                )}
               </label>
             </div>
           {/if}
@@ -744,10 +778,10 @@
         {/if}
         <details class="launch-skills" bind:open={skillsOpen}>
           <summary>
-            <h4 id="step-skills">Skills</h4>
+            <h4 id="step-skills">{t('Skills')}</h4>
             <span class="launch-skills-state">{skillsSummary}</span>
             <span class="launch-change"
-              >{skillsOpen ? 'Close' : 'Change'}
+              >{skillsOpen ? t('Close') : t('Change')}
               <svg viewBox="0 0 24 24" aria-hidden="true"
                 ><path d="M6 9l6 6 6-6" /></svg
               ></span
@@ -775,20 +809,41 @@
         {#if evidenceOpen && chosen?.installed}
           <div class="native-capability-details">
             {#if chosen.profile_capability.status === 'syntax_verified'}
-              <p>Checked {chosen.profile_capability.checked_on}.</p>
+              <p>
+                {t('Checked {date}.', {
+                  date: chosen.profile_capability.checked_on ?? '',
+                })}
+              </p>
               <ul>
                 {#each chosen.profile_capability.operations as operation (operation)}
                   <li>{operation}</li>
                 {/each}
               </ul>
               <p>
-                Interface: {chosen.profile_capability.interface}. Format:
-                {chosen.profile_capability.format}. Scope:
-                {chosen.profile_capability.scope}.
+                {t(
+                  'Interface: {interface}. Format: {format}. Scope: {scope}.',
+                  {
+                    interface: chosen.profile_capability.interface ?? '',
+                    format: chosen.profile_capability.format ?? '',
+                    scope: chosen.profile_capability.scope ?? '',
+                  },
+                )}
               </p>
-              <p>Reload: {chosen.profile_capability.reload_semantics}.</p>
-              <p>Source: {chosen.profile_capability.source}.</p>
-              <p>Limit: {chosen.profile_capability.limitation}.</p>
+              <p>
+                {t('Reload: {reload}.', {
+                  reload: chosen.profile_capability.reload_semantics ?? '',
+                })}
+              </p>
+              <p>
+                {t('Source: {source}.', {
+                  source: chosen.profile_capability.source ?? '',
+                })}
+              </p>
+              <p>
+                {t('Limit: {limit}.', {
+                  limit: chosen.profile_capability.limitation ?? '',
+                })}
+              </p>
             {:else}
               <p>{chosen.profile_capability.limitation}</p>
             {/if}
@@ -802,9 +857,13 @@
                 <button
                   type="button"
                   class="action"
-                  title={`Runs “${updateCommand(chosen.agent_id)}” in a new terminal`}
+                  title={t('Runs “{command}” in a new terminal', {
+                    command: updateCommand(chosen.agent_id),
+                  })}
                   onclick={() => updateAgent(chosen.agent_id)}
-                  >Update {AGENT_LABEL[chosen.agent_id]}</button
+                  >{t('Update {agent}', {
+                    agent: AGENT_LABEL[chosen.agent_id],
+                  })}</button
                 >
               {/if}
               <button
@@ -812,7 +871,7 @@
                 class="action"
                 aria-expanded={evidenceOpen}
                 onclick={() => (evidenceOpen = !evidenceOpen)}
-                >Capability evidence and limits</button
+                >{t('Capability evidence and limits')}</button
               >
             {/if}
           </div>
@@ -830,13 +889,18 @@
             class="action primary"
             disabled={!canStart}
             title={launcher.shell?.through_shell
-              ? `Starts through your shell (${launcher.shell.family}): same environment as typing the command yourself.`
-              : 'Starts directly with the Console’s own environment.'}
+              ? t(
+                  'Starts through your shell ({family}): same environment as typing the command yourself.',
+                  { family: String(launcher.shell.family) },
+                )
+              : t('Starts directly with the Console’s own environment.')}
             onclick={launch}
           >
             {native.starting
-              ? 'Starting…'
-              : `Start ${agent ? AGENT_LABEL[agent] : 'agent'}`}
+              ? t('Starting…')
+              : t('Start {agent}', {
+                  agent: agent ? AGENT_LABEL[agent] : t('agent'),
+                })}
           </button>
         </div>
         {#if launchForm && launchAgent && project}
@@ -979,13 +1043,18 @@
       </section>
 
       <div class="native-side">
-        <section class="native-sessions" aria-label="Native sessions">
+        <section class="native-sessions" aria-label={t('Native sessions')}>
           <h3 class="native-heading">
-            Sessions <span
+            {t('Sessions')}
+            <span
               class="pill compact"
               data-tone="idle"
-              title="Native sessions: the provider's own tools, configuration and privileges stay active. The Console does not mediate, contain or approve their effects."
-              ><span class="dot" aria-hidden="true"></span>Native plane</span
+              title={t(
+                "Native sessions: the provider's own tools, configuration and privileges stay active. The Console does not mediate, contain or approve their effects.",
+              )}
+              ><span class="dot" aria-hidden="true"></span>{t(
+                'Native plane',
+              )}</span
             >
             {#if toRestore.length > 0}
               <button
@@ -995,9 +1064,11 @@
                 onclick={async () => {
                   if ((await controller.restoreLost()) > 0) onconsole();
                 }}
-                >Start {toRestore.length === 1
-                  ? 'the lost session'
-                  : `${toRestore.length} lost sessions`} again</button
+                >{toRestore.length === 1
+                  ? t('Start the lost session again')
+                  : t('Start {count} lost sessions again', {
+                      count: toRestore.length,
+                    })}</button
               >
             {/if}
             {#if native.sessions.some((s) => s.state !== 'running' && s.state !== 'requested')}
@@ -1005,14 +1076,18 @@
                 type="button"
                 class="action"
                 onclick={() => controller.forgetFinished()}
-                >Remove finished</button
+                >{t('Remove finished')}</button
               >
             {/if}
           </h3>
           {#if native.sessions.length === 0}
             <div class="sessions-empty">
-              <p class="empty-title">No agent sessions yet</p>
-              <p>Start one above. It opens in the Console as a terminal tab.</p>
+              <p class="empty-title">{t('No agent sessions yet')}</p>
+              <p>
+                {t(
+                  'Start one above. It opens in the Console as a terminal tab.',
+                )}
+              </p>
             </div>
           {:else}
             {#each groups as group (group.project)}
@@ -1021,14 +1096,17 @@
                   <span class="mono">{group.project}</span>
                   {#if crowded.has(group.project)}
                     <span class="native-warning">
-                      · Two sessions run here and can write the same files.
-                      Nothing coordinates them.
+                      · {t(
+                        'Two sessions run here and can write the same files. Nothing coordinates them.',
+                      )}
                     </span>
                   {/if}
                 </p>
                 <ul
                   class="events-list"
-                  aria-label={`Sessions in ${folderName(group.project)}`}
+                  aria-label={t('Sessions in {folder}', {
+                    folder: folderName(group.project),
+                  })}
                 >
                   {#each group.sessions as session (session.id)}
                     {@const label = stateLabel(session)}
@@ -1049,36 +1127,43 @@
                         )}
                       </span>
                       <span class="event-meta native-facts">
-                        {#if session.profile}Profile {profileName(
-                            session.profile.id,
-                          )} (v{session.profile.version}) ·
-                        {:else}No profile ·
+                        {#if session.profile}{t('Profile {name} (v{version})', {
+                            name: profileName(session.profile.id),
+                            version: session.profile.version,
+                          })} ·
+                        {:else}{t('No profile')} ·
                         {/if}
                         {#if session.state === 'running' || session.state === 'requested'}
-                          up {since(session.started_at, now)}
+                          {t('up {time}', {
+                            time: since(session.started_at, now),
+                          })}
                         {:else}
-                          started {new Date(
-                            session.started_at * 1000,
-                          ).toLocaleString(undefined, {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
+                          {t('started {date}', {
+                            date: new Date(
+                              session.started_at * 1000,
+                            ).toLocaleString(undefined, {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            }),
                           })}{ended(session)}
                         {/if}
                         {#if !session.through_shell}
-                          · started directly{/if}
+                          · {t('started directly')}{/if}
                         {#if session.restarts > 0}
-                          · restart {session.restarts}{/if}
+                          · {t('restart {count}', {
+                            count: session.restarts,
+                          })}{/if}
                         {#if sessionArsenalLine(session, bindings)}
                           · {sessionArsenalLine(session, bindings)}{/if}
                         {#if session.state === 'running' && session.pid}
-                          · process {session.pid}{/if}
+                          · {t('process {pid}', { pid: session.pid })}{/if}
                         {#if session.usage}
                           · {session.usage.cpu_percent === null
                             ? '…'
                             : `${session.usage.cpu_percent.toFixed(0)}%`} CPU · {formatBytes(
                             session.usage.rss_bytes,
                           )}{session.usage.processes > 1
-                            ? ` · ${session.usage.processes} processes`
+                            ? ` · ${t('{count} processes', { count: session.usage.processes })}`
                             : ''}
                         {/if}
                       </span>
@@ -1092,12 +1177,16 @@
                           class="event-meta native-facts"
                           data-testid="models"
                         >
-                          Model: asked for {t(facts.requested)} · set in its files
-                          {t(facts.configured)}
-                          · in use: {t(facts.inUse)} · Effort: asked for {t(
-                            facts.requestedEffort,
+                          {t(
+                            'Model: asked for {requested} · set in its files {configured} · in use: {inUse} · Effort: asked for {effort} · set in its files {configuredEffort}',
+                            {
+                              requested: t(facts.requested),
+                              configured: t(facts.configured),
+                              inUse: t(facts.inUse),
+                              effort: t(facts.requestedEffort),
+                              configuredEffort: t(facts.configuredEffort),
+                            },
                           )}
-                          · set in its files {t(facts.configuredEffort)}
                         </span>
                         <span
                           class="event-meta native-note"
@@ -1117,13 +1206,13 @@
                             type="button"
                             class="action"
                             disabled={!controller.hasTab(session.id)}
-                            onclick={() => open(session)}>Open</button
+                            onclick={() => open(session)}>{t('Open')}</button
                           >
                           <button
                             type="button"
                             class="action"
                             onclick={() => controller.stop(session.id)}
-                            >Stop</button
+                            >{t('Stop')}</button
                           >
                           <button
                             type="button"
@@ -1131,7 +1220,7 @@
                             disabled={native.starting ||
                               (native.m9Blocked && isM9Agent(session.agent_id))}
                             onclick={() => controller.restart(session.id)}
-                            >Restart</button
+                            >{t('Restart')}</button
                           >
                         {:else}
                           {#if controller.hasTab(session.id)}
@@ -1139,7 +1228,7 @@
                               type="button"
                               class="action"
                               onclick={() => open(session)}
-                              >Show terminal</button
+                              >{t('Show terminal')}</button
                             >
                           {/if}
                           <button
@@ -1148,13 +1237,13 @@
                             disabled={native.starting ||
                               (native.m9Blocked && isM9Agent(session.agent_id))}
                             onclick={() => controller.restart(session.id)}
-                            >Start again</button
+                            >{t('Start again')}</button
                           >
                           <button
                             type="button"
                             class="action"
                             onclick={() => controller.forget(session.id)}
-                            >Remove</button
+                            >{t('Remove')}</button
                           >
                         {/if}
                         <button
@@ -1162,7 +1251,7 @@
                           class="action"
                           disabled={native.starting}
                           onclick={() => (handingOff = session.id)}
-                          >Hand off…</button
+                          >{t('Hand off…')}</button
                         >
                       </span>
                     </li>
