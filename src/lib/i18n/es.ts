@@ -834,4 +834,224 @@ export const ES: Readonly<Record<string, string>> = {
   'Discard changes': 'Descartar cambios',
   'Keep editing': 'Seguir editando',
   'Unsaved changes': 'Cambios sin guardar',
+  // Arsenal: the view's tabs, Library, Discover, Composites and Activity
+  Library: 'Biblioteca',
+  Activity: 'Actividad',
+  Imported: 'Importada',
+  Discover: 'Descubrir',
+  Composites: 'Composites',
+  Account: 'Cuenta',
+  Project: 'Proyecto',
+  'Not imported': 'No importada',
+  'Source changed': 'El origen cambió',
+  'Read only': 'Solo lectura',
+  Tool: 'Herramienta',
+  File: 'Archivo',
+  'declared, not checked offline': 'declarada, sin verificar sin conexión',
+  present: 'presente',
+  missing: 'falta',
+  unknown: 'desconocida',
+  'A hook runs code. Arsenal lists it and never copies or runs it.':
+    'Un hook ejecuta código. Arsenal lo lista y nunca lo copia ni lo ejecuta.',
+  'An MCP definition can hold credentials. Arsenal lists it and never copies it.':
+    'Una definición MCP puede tener credenciales. Arsenal la lista y nunca la copia.',
+  'A plugin brings code and hooks. Arsenal lists it; importing plugins is not available yet.':
+    'Un plugin trae código y hooks. Arsenal lo lista; importar plugins todavía no está disponible.',
+  'GSD Core payload': 'Contenido de GSD Core',
+  'Claude Code plugin': 'Plugin de Claude Code',
+  'Codex plugin': 'Plugin de Codex',
+  'Claude user skills': 'Skills de usuario de Claude',
+  'Codex user skills': 'Skills de usuario de Codex',
+  'Codex home skills': 'Skills de la carpeta de Codex',
+  'Codex system skills': 'Skills del sistema de Codex',
+  'Claude project skills': 'Skills de proyecto de Claude',
+  'Codex project skills': 'Skills de proyecto de Codex',
+  'Claude user agents': 'Agentes de usuario de Claude',
+  'Codex user agents': 'Agentes de usuario de Codex',
+  'Claude project agents': 'Agentes de proyecto de Claude',
+  'Codex project agents': 'Agentes de proyecto de Codex',
+  'Claude user rules': 'Reglas de usuario de Claude',
+  'Codex user rules': 'Reglas de usuario de Codex',
+  'Claude project rules': 'Reglas de proyecto de Claude',
+  'Codex project rules': 'Reglas de proyecto de Codex',
+  'Credential file, not copied': 'Archivo de credenciales, no se copia',
+  'Hidden, not copied': 'Oculto, no se copia',
+  'Link, not followed': 'Enlace, no se sigue',
+  'Binary, not copied': 'Binario, no se copia',
+  'May hold a secret': 'Puede tener un secreto',
+  'Special file, not copied': 'Archivo especial, no se copia',
+  'Nested too deep, not copied': 'Anidado demasiado profundo, no se copia',
+  'Name is not UTF-8, not copied': 'El nombre no es UTF-8, no se copia',
+  read: 'leída',
+  'not present': 'no está',
+  'could not be read': 'no se pudo leer',
+  'Importing…': 'Importando…',
+  'Already imported': 'Ya importada',
+  'Import as new revision': 'Importar como revisión nueva',
+  'Capabilities installed on this machine':
+    'Capacidades instaladas en esta computadora',
+  'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.':
+    'Instalada no quiere decir importada. Un preset llega a una terminal solo cuando la iniciás con él desde Workspace.',
+  Provider: 'Proveedor',
+  'Arsenal sections': 'Secciones de Arsenal',
+  'Reading the Arsenal library…': 'Leyendo la biblioteca de Arsenal…',
+  'The Arsenal library could not be opened. Refresh after the Wyss data folder is writable.':
+    'No se pudo abrir la biblioteca de Arsenal. Actualizá cuando la carpeta de datos de Wyss se pueda escribir.',
+  'The library did not load completely. Try Refresh.':
+    'La biblioteca no se cargó completa. Probá Actualizar.',
+  'Library sections': 'Secciones de la biblioteca',
+  Search: 'Buscar',
+  'Name, description or origin': 'Nombre, descripción u origen',
+  Source: 'Origen',
+  'Nothing is imported yet. Open Discover to import a capability you already have.':
+    'Todavía no hay nada importado. Abrí Descubrir para importar una capacidad que ya tenés.',
+  'No capabilities match these filters.':
+    'Ninguna capacidad coincide con estos filtros.',
+  '{count} imported': '{count} importadas',
+  '{shown} of {total} imported': '{shown} de {total} importadas',
+  'Imported capabilities': 'Capacidades importadas',
+  'Revision {revision}': 'Revisión {revision}',
+  'Capability details': 'Detalle de la capacidad',
+  'Revision {current} of {total}': 'Revisión {current} de {total}',
+  '{files} files · {bytes} B': '{files} archivos · {bytes} B',
+  Revisions: 'Revisiones',
+  Current: 'Actual',
+  'Restoring…': 'Restaurando…',
+  'Restore revision {revision}': 'Restaurar la revisión {revision}',
+  'Show files of revision {revision}':
+    'Ver los archivos de la revisión {revision}',
+  'Imported from': 'Importada desde',
+  Content: 'Contenido',
+  'Use in a session': 'Uso en una sesión',
+  'Only through a terminal plan: Workspace shows, per terminal, whether this revision is installed and whether it can be applied.':
+    'Solo a través del plan de una terminal: Workspace muestra, por terminal, si esta revisión está instalada y si se puede aplicar.',
+  Dependencies: 'Dependencias',
+  'Its files declare and point at nothing Arsenal can check.':
+    'Sus archivos no declaran nada que Arsenal pueda verificar.',
+  'Files in revision {revision}': 'Archivos de la revisión {revision}',
+  Kind: 'Tipo',
+  'MCP servers': 'Servidores MCP',
+  Hooks: 'Hooks',
+  Plugins: 'Plugins',
+  Where: 'Dónde',
+  'Account and project': 'Cuenta y proyecto',
+  'Scan again': 'Escanear de nuevo',
+  'Importing {done} of {total}…': 'Importando {done} de {total}…',
+  'Import {count} eligible': 'Importar {count} elegibles',
+  'Bulk import progress': 'Progreso de la importación',
+  'Reading installed capabilities…': 'Leyendo las capacidades instaladas…',
+  'Project: {project}': 'Proyecto: {project}',
+  'No project selected. Project capabilities are not listed; select a project in Configuration.':
+    'No hay proyecto elegido. Las capacidades de proyecto no se listan; elegí un proyecto en Configuración.',
+  'Capability folders': 'Carpetas de capacidades',
+  'The folders have more entries than the scan shows. Some are not listed.':
+    'Las carpetas tienen más entradas de las que muestra el escaneo. Algunas no se listan.',
+  '{count} composite collection(s) installed.':
+    '{count} colección(es) compuesta(s) instalada(s).',
+  'Open Composites': 'Abrir Composites',
+  'No capabilities found in your Claude, Codex or project folders.':
+    'No se encontraron capacidades en tus carpetas de Claude, Codex o de proyecto.',
+  'Discovered capabilities': 'Capacidades encontradas',
+  Blocked: 'Bloqueada',
+  'Duplicate content': 'Contenido duplicado',
+  'Name collision': 'Nombre repetido',
+  'Capability to import': 'Capacidad para importar',
+  'Read from': 'Leída desde',
+  'Listed only. Arsenal does not copy it.':
+    'Solo listada. Arsenal no la copia.',
+  'Contains scripts. Arsenal copies them and never runs them.':
+    'Tiene scripts. Arsenal los copia y nunca los ejecuta.',
+  'Same content as {names}.': 'Mismo contenido que {names}.',
+  'Another capability here has the same name. Both can be imported; they stay separate.':
+    'Otra capacidad de acá tiene el mismo nombre. Se pueden importar las dos; quedan separadas.',
+  'Files that will be copied': 'Archivos que se van a copiar',
+  'Files in this capability': 'Archivos de esta capacidad',
+  'Not copied': 'No se copia',
+  'Review before importing': 'Revisar antes de importar',
+  'These files use a credential word. They are copied; check that none holds a real value.':
+    'Estos archivos usan una palabra de credencial. Se copian; revisá que ninguno tenga un valor real.',
+  'Mentions a credential word': 'Menciona una palabra de credencial',
+  'This is a link into {composite} {version}. It is read only: GSD Core installs it, so Arsenal does not copy it.':
+    'Es un enlace a {composite} {version}. Es solo lectura: lo instala GSD Core, así que Arsenal no lo copia.',
+  'A composite is installed by its own tool: GSD Core by its installer, a plugin by Claude Code or Codex. Arsenal describes it and never copies it.':
+    'Un composite lo instala su propia herramienta: GSD Core con su instalador, un plugin con Claude Code o Codex. Arsenal lo describe y nunca lo copia.',
+  'Reading installed composites…': 'Leyendo los composites instalados…',
+  'No composite collection is installed in your Claude or Codex folders.':
+    'No hay ninguna colección composite instalada en tus carpetas de Claude o Codex.',
+  'Enabled in your settings': 'Habilitado en tu configuración',
+  'Disabled in your settings': 'Deshabilitado en tu configuración',
+  Methodology: 'Metodología',
+  'Not importable': 'No importable',
+  Members: 'Miembros',
+  '{skills} skills · {agents} agents': '{skills} skills · {agents} agentes',
+  '{count} commands': '{count} comandos',
+  '{count} artifacts in its manifest': '{count} artefactos en su manifiesto',
+  'Runs code': 'Ejecuta código',
+  'Yes: it registers hooks.': 'Sí: registra hooks.',
+  'Its hooks and engine belong to the GSD Core install.':
+    'Sus hooks y su motor pertenecen a la instalación de GSD Core.',
+  'No hooks declared.': 'No declara hooks.',
+  'It declares MCP servers.': 'Declara servidores MCP.',
+  Manifest: 'Manifiesto',
+  Limits: 'Límites',
+  'Skills ({count})': 'Skills ({count})',
+  'Agents ({count})': 'Agentes ({count})',
+  "What each terminal started with, recorded right after its start from the host's own session record. Applied means the host launched it with that exact exclusion; whether the provider then used each skill is not observed.":
+    'Con qué arrancó cada terminal, anotado justo después de su inicio desde el registro de sesión del propio host. Aplicado quiere decir que el host la lanzó con esa exclusión exacta; no se observa si el provider después usó cada skill.',
+  'Terminal configurations': 'Configuraciones de terminal',
+  APPLIED: 'APLICADO',
+  'NOT APPLIED': 'NO APLICADO',
+  'Use not observed': 'Uso no observado',
+  '{prepared} prepared · {excluded} installed skills switched off · {kept} kept':
+    '{prepared} preparadas · {excluded} skills instaladas apagadas · {kept} conservadas',
+  '{prepared} prepared · {excluded} installed skills would have been switched off · {kept} kept':
+    '{prepared} preparadas · {excluded} skills instaladas que se habrían apagado · {kept} conservadas',
+  'No terminal has started with a selection yet. Choose one in Workspace when starting Claude Code or Codex.':
+    'Ninguna terminal arrancó todavía con un preset. Elegí uno en Workspace al iniciar Claude Code o Codex.',
+  // Arsenal: failure texts the view shows (messages.ts)
+  'The Arsenal library could not be opened. Check that the Wyss data folder is writable, then Refresh.':
+    'No se pudo abrir la biblioteca de Arsenal. Revisá que la carpeta de datos de Wyss se pueda escribir y después actualizá.',
+  'The Arsenal library is damaged, so nothing was changed. Keep the file and report it.':
+    'La biblioteca de Arsenal está dañada, así que no se cambió nada. Guardá el archivo y avisalo.',
+  'Another change is in progress. Try again in a moment.':
+    'Hay otro cambio en curso. Probá de nuevo en un momento.',
+  'This library was written by a newer version of Wyss Console.':
+    'Esta biblioteca la escribió una versión más nueva de Wyss Console.',
+  'Your home folder is not known, so skills cannot be read. Refresh to try again.':
+    'No se conoce tu carpeta personal, así que no se pueden leer las skills. Actualizá para probar de nuevo.',
+  'That item is no longer in the library or in your skill folders. Refresh and try again.':
+    'Ese elemento ya no está en la biblioteca ni en tus carpetas de skills. Actualizá y probá de nuevo.',
+  'The request was not valid. Check the fields and try again.':
+    'El pedido no era válido. Revisá los campos y probá de nuevo.',
+  'This kind is listed only. Arsenal does not copy it.':
+    'Este tipo solo se lista. Arsenal no lo copia.',
+  'This file is too large to show here.':
+    'Este archivo es demasiado grande para mostrarlo acá.',
+  'This file is not text, so it cannot be shown here.':
+    'Este archivo no es texto, así que no se puede mostrar acá.',
+  'Arsenal returned something unexpected. Refresh and try again.':
+    'Arsenal devolvió algo inesperado. Actualizá y probá de nuevo.',
+  'A file holds something that looks like a secret. Remove it from the skill to import it.':
+    'Un archivo tiene algo que parece un secreto. Quitalo de la skill para importarla.',
+  'This folder has no SKILL.md, so it is not a skill.':
+    'Esta carpeta no tiene SKILL.md, así que no es una skill.',
+  'This skill is a symbolic link. Arsenal does not follow links out of a skill folder.':
+    'Esta skill es un enlace simbólico. Arsenal no sigue enlaces que salgan de una carpeta de skill.',
+  'This skill has more files than the import limit.':
+    'Esta skill tiene más archivos que el límite de importación.',
+  'This skill is larger than the import limit.':
+    'Esta skill supera el límite de importación.',
+  'One file in this skill is larger than the import limit.':
+    'Un archivo de esta skill supera el límite de importación.',
+  'This skill nests folders deeper than the import limit.':
+    'Esta skill anida carpetas más profundo que el límite de importación.',
+  'A file of this skill could not be read.':
+    'No se pudo leer un archivo de esta skill.',
+  'This skill changed while it was being read. Scan again.':
+    'Esta skill cambió mientras se leía. Escaneá de nuevo.',
+  'Codex installs and replaces this skill itself. Arsenal lists it and does not copy it.':
+    'Codex instala y reemplaza esta skill por sí mismo. Arsenal la lista y no la copia.',
+  'This project is in a folder another account can write. Arsenal lists it as read only and does not copy it.':
+    'Este proyecto está en una carpeta que otra cuenta puede escribir. Arsenal lo lista como solo lectura y no lo copia.',
+  'This skill cannot be imported.': 'Esta skill no se puede importar.',
 };
