@@ -7,6 +7,7 @@ import type {
 } from '../../contracts/arsenal';
 import type { NativeSession, Preview } from '../../contracts/native';
 import type { ArsenalStart } from '../../desktop/native-client';
+import { msg } from '../../i18n/msg';
 
 /**
  * What the Workspace knows about the Arsenal part of a start. `pending` while the plan is read;
@@ -24,25 +25,25 @@ export type ArsenalChoice =
     };
 
 export const ENFORCEMENT_LABEL: Record<EnforcementState, string> = {
-  available: 'Can be applied',
-  unqualified: 'Not qualified for this build',
-  version_unknown: 'Build not identified',
-  incomplete_inventory: 'Installed skills not fully read',
+  available: msg('Can be applied'),
+  unqualified: msg('Not qualified for this build'),
+  version_unknown: msg('Build not identified'),
+  incomplete_inventory: msg('Installed skills not fully read'),
 };
 
 export const ITEM_STATE_LABEL: Record<PlanItemState, string> = {
-  prepared: 'prepared',
-  rejected: 'rejected',
-  unsupported: 'not carried',
-  missing: 'missing',
+  prepared: msg('prepared'),
+  rejected: msg('rejected'),
+  unsupported: msg('not carried'),
+  missing: msg('missing'),
 };
 
 export const PLAN_CONFLICT_LABEL: Record<PlanConflictCode, string> = {
-  name_collision: 'Same name twice',
-  duplicate_content: 'Same content twice',
-  instruction_overlap: 'Several rules',
-  methodology_conflict: 'Two methodologies kept',
-  scope_shadow: 'Installed in account and project',
+  name_collision: msg('Same name twice'),
+  duplicate_content: msg('Same content twice'),
+  instruction_overlap: msg('Several rules'),
+  methodology_conflict: msg('Two methodologies kept'),
+  scope_shadow: msg('Installed in account and project'),
 };
 
 export function planCounts(plan: TerminalPlan) {

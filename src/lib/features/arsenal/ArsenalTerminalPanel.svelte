@@ -197,15 +197,16 @@
 
 <fieldset
   class="native-field arsenal-terminal"
-  aria-label="Arsenal for this terminal"
+  aria-label={t('Arsenal for this terminal')}
 >
-  <legend id="native-arsenal-label">Arsenal selection</legend>
+  <legend id="native-arsenal-label">{t('Arsenal selection')}</legend>
   {#if !agent}
-    <p class="event-meta">Choose an agent first.</p>
+    <p class="event-meta">{t('Choose an agent first.')}</p>
   {:else if !provider}
     <p class="event-meta">
-      Arsenal selections are for Claude Code and Codex. This agent starts as
-      configured.
+      {t(
+        'Arsenal selections are for Claude Code and Codex. This agent starts as configured.',
+      )}
     </p>
   {:else}
     {#if choices}
@@ -224,7 +225,7 @@
               value=""
               bind:group={selected}
             />
-            None — skills as installed
+            {t('None — skills as installed')}
           </label>
           {#each offered as selection (selection.id)}
             <label class="arsenal-check">
@@ -238,78 +239,95 @@
             </label>
           {/each}
         </div>
-        <button type="button" class="action" onclick={load}>Reload</button>
+        <button type="button" class="action" onclick={load}
+          >{t('Reload')}</button
+        >
       </div>
       {#if loadFailed}
         <p class="native-warning" role="alert">{loadFailed}</p>
       {:else if offered.length === 0}
         <p class="event-meta">
-          No saved selection for this provider. Make one in Arsenal ›
-          Selections.
+          {t(
+            'No saved selection for this provider. Make one in Arsenal › Selections.',
+          )}
         </p>
       {/if}
     {/if}
 
     {#if planning}
-      <p class="event-meta" role="status">Building the terminal plan…</p>
+      <p class="event-meta" role="status">{t('Building the terminal plan…')}</p>
     {:else if planFailed}
       <p class="native-warning" role="alert">{planFailed}</p>
     {:else if plan && counts}
       <div class="arsenal-plan" aria-live="polite">
         <p class="arsenal-plan-line">
           <span class="pill" data-state={plan.enforcement.state}
-            >{ENFORCEMENT_LABEL[plan.enforcement.state]}</span
+            >{t(ENFORCEMENT_LABEL[plan.enforcement.state])}</span
           >
           <span class="pill" data-state={plan.status}
-            >{plan.status === 'ready'
-              ? 'Plan ready'
-              : plan.status === 'partial'
-                ? 'Plan partial'
-                : 'Plan blocked'}</span
+            >{t(
+              plan.status === 'ready'
+                ? msg('Plan ready')
+                : plan.status === 'partial'
+                  ? msg('Plan partial')
+                  : msg('Plan blocked'),
+            )}</span
           >
           <span class="event-meta"
-            >{plan.provider_version ?? 'unidentified build'}{plan.project
+            >{plan.provider_version ?? t('unidentified build')}{plan.project
               ? ` · ${plan.project}`
-              : ' · no project'}</span
+              : ` · ${t('no project')}`}</span
           >
         </p>
         <p class="event-meta">{plan.enforcement.reason}</p>
         <p class="event-meta">
-          {counts.prepared} prepared · {counts.rejected} rejected · {counts.unsupported}
-          not carried · {plan.kept.length - plan.inherited_off.length} installed skill(s)
-          stay{#if plan.inherited_off.length > 0}<span>&nbsp;·&nbsp;</span>{plan
-              .inherited_off.length} already off in your settings{/if} ·
-          {plan.excluded.length} would be switched off
+          {t('{count} prepared', { count: counts.prepared })} · {t(
+            '{count} rejected',
+            { count: counts.rejected },
+          )} ·
+          {t('{count} not carried', { count: counts.unsupported })} ·
+          {t('{count} installed skill(s) stay', {
+            count: plan.kept.length - plan.inherited_off.length,
+          })}{#if plan.inherited_off.length > 0}<span>&nbsp;·&nbsp;</span>{t(
+              '{count} already off in your settings',
+              { count: plan.inherited_off.length },
+            )}{/if} ·
+          {t('{count} would be switched off', { count: plan.excluded.length })}
         </p>
         {#each plan.conflicts as conflict, index (index)}
           <p class={conflict.blocking ? 'native-warning' : 'event-meta'}>
-            {PLAN_CONFLICT_LABEL[conflict.code]}: {conflict.names.join(', ')}
+            {t(PLAN_CONFLICT_LABEL[conflict.code])}: {conflict.names.join(', ')}
           </p>
         {/each}
         {#each plan.warnings as warning (warning)}
           <p class="event-meta">{warning}</p>
         {/each}
         <details>
-          <summary>Items ({plan.items.length})</summary>
+          <summary>{t('Items ({count})', { count: plan.items.length })}</summary
+          >
           <ul class="native-preview">
             {#each plan.items as item (item.capability)}
               <li class={item.state === 'prepared' ? '' : 'refused'}>
-                <strong>{item.name || 'Missing capability'}</strong>
-                · {ITEM_STATE_LABEL[item.state]}{item.revision !== null
-                  ? ` · revision ${item.revision}${item.pinned ? ' (pinned)' : ''}`
+                <strong>{item.name || t('Missing capability')}</strong>
+                · {t(ITEM_STATE_LABEL[item.state])}{item.revision !== null
+                  ? ` · ${t('revision {rev}', { rev: item.revision })}${item.pinned ? ` (${t('pinned')})` : ''}`
                   : ''} — {item.reason}
               </li>
             {/each}
           </ul>
         </details>
         <details>
-          <summary>Switched off ({plan.excluded.length})</summary>
+          <summary
+            >{t('Switched off ({count})', {
+              count: plan.excluded.length,
+            })}</summary
+          >
           <p class="arsenal-member-list">
-            {plan.excluded.join(', ') || 'Nothing.'}
+            {plan.excluded.join(', ') || t('Nothing.')}
           </p>
         </details>
         <details>
-          <summary>Not changed</summary>
+          <summary>{t('Not changed')}</summary>
           <ul class="native-preview">
             {#each plan.untouched as line (line)}<li>{line}</li>{/each}
           </ul>
@@ -317,9 +335,11 @@
         {#if plan.overlay}
           <details>
             <summary
-              >{plan.provider === 'codex'
-                ? 'Session flag it would add (with --no-daemon)'
-                : 'Session settings it would write'}</summary
+              >{t(
+                plan.provider === 'codex'
+                  ? msg('Session flag it would add (with --no-daemon)')
+                  : msg('Session settings it would write'),
+              )}</summary
             >
             <pre class="arsenal-overlay">{plan.overlay}</pre>
           </details>
@@ -328,27 +348,33 @@
         {#if plan.can_apply}
           <label class="arsenal-check">
             <input type="checkbox" bind:checked={apply} />
-            Apply to this terminal (restart required to change it later)
+            {t('Apply to this terminal (restart required to change it later)')}
           </label>
         {/if}
         {#if applying}
           {#if previewing}
-            <p class="event-meta" role="status">Checking the launch preview…</p>
+            <p class="event-meta" role="status">
+              {t('Checking the launch preview…')}
+            </p>
           {:else if previewFailed}
             <p class="native-warning" role="alert">{t(previewFailed)}</p>
           {:else if preview && !preview.can_start}
             <p class="native-warning" role="alert">
-              The launch preview refuses this combination:
+              {t('The launch preview refuses this combination:')}
               {preview.not_applicable.join(' ')}
             </p>
           {/if}
         {:else}
           <p class="native-warning" role="note">
-            NOT APPLIED: this terminal will start with every installed skill.
+            {t(
+              'NOT APPLIED: this terminal will start with every installed skill.',
+            )}
           </p>
           <label class="arsenal-check">
             <input type="checkbox" bind:checked={recordOnly} />
-            Start without applying it, and record the selection with the terminal
+            {t(
+              'Start without applying it, and record the selection with the terminal',
+            )}
           </label>
         {/if}
       </div>

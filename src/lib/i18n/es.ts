@@ -3157,4 +3157,58 @@ export const ES: Readonly<Record<string, string>> = {
     'aplicó {applied} de {published} cambio(s) de esta computadora',
   'last heard {time}': 'última señal {time}',
   'Check now': 'Comprobar ahora',
+  // ---- sweep ----
+  'Arsenal for this terminal': 'Arsenal para esta terminal',
+  'Arsenal selection': 'Selección de Arsenal',
+  'Choose an agent first.': 'Elegí un agente primero.',
+  'Arsenal selections are for Claude Code and Codex. This agent starts as configured.':
+    'Las selecciones de Arsenal son para Claude Code y Codex. Este agente arranca como está configurado.',
+  'None — skills as installed': 'Ninguna: skills como están instaladas',
+  Reload: 'Recargar',
+  'No saved selection for this provider. Make one in Arsenal › Selections.':
+    'No hay una selección guardada para este proveedor. Creá una en Arsenal › Selecciones.',
+  'Building the terminal plan…': 'Armando el plan de la terminal…',
+  'Plan ready': 'Plan listo',
+  'Plan partial': 'Plan parcial',
+  'Plan blocked': 'Plan bloqueado',
+  'unidentified build': 'build sin identificar',
+  'no project': 'sin proyecto',
+  '{count} prepared': '{count} preparada(s)',
+  '{count} rejected': '{count} rechazada(s)',
+  '{count} not carried': '{count} no incluida(s)',
+  '{count} installed skill(s) stay':
+    '{count} skill(s) instalada(s) se mantienen',
+  '{count} already off in your settings':
+    '{count} ya desactivada(s) en tu configuración',
+  '{count} would be switched off': '{count} se desactivarían',
+  'Items ({count})': 'Ítems ({count})',
+  'Missing capability': 'Capacidad faltante',
+  'revision {rev}': 'revisión {rev}',
+  pinned: 'fijada',
+  'Switched off ({count})': 'Desactivadas ({count})',
+  'Nothing.': 'Nada.',
+  'Not changed': 'Sin cambios',
+  'Session flag it would add (with --no-daemon)':
+    'Flag de sesión que agregaría (con --no-daemon)',
+  'Session settings it would write': 'Configuración de sesión que escribiría',
+  'Apply to this terminal (restart required to change it later)':
+    'Aplicar a esta terminal (hace falta reiniciar para cambiarlo después)',
+  'Checking the launch preview…': 'Revisando la vista previa del arranque…',
+  'The launch preview refuses this combination:':
+    'La vista previa del arranque rechaza esta combinación:',
+  'NOT APPLIED: this terminal will start with every installed skill.':
+    'NO APLICADO: esta terminal arrancará con todas las skills instaladas.',
+  'Start without applying it, and record the selection with the terminal':
+    'Arrancar sin aplicarlo, y registrar la selección con la terminal',
+  'Can be applied': 'Se puede aplicar',
+  'Not qualified for this build': 'Build no calificada',
+  'Build not identified': 'Build no identificada',
+  'Installed skills not fully read': 'Skills instaladas no leídas por completo',
+  prepared: 'preparada',
+  'not carried': 'no incluida',
+  missing: 'faltante',
+  'Same name twice': 'Mismo nombre dos veces',
+  'Same content twice': 'Mismo contenido dos veces',
+  'Several rules': 'Varias reglas',
+  'Two methodologies kept': 'Dos metodologías conservadas',
 };
