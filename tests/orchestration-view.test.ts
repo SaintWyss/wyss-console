@@ -573,6 +573,31 @@ it.each(['-5', '0', '61', '1.5', ''])(
   },
 );
 
+it('draws the pipelines plan sentences in English when English is chosen', async () => {
+  setLanguage('en');
+  const ipc = desktop();
+  component = mount(PipelinesView, {
+    target: document.body,
+    props: { visible: true, f8Active: false, onruntimes: () => undefined },
+  });
+  await flush();
+  const budget = label('Total budget in minutes')!.querySelector('input')!;
+  budget.value = '0';
+  budget.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  expect(text(document.getElementById('plan-budget-error'))).toBe(
+    'The budget must be a whole number between 1 and 60 minutes.',
+  );
+  const before = ipc.calls.length;
+  button('Review the full plan')!.click();
+  await flush();
+  expect(ipc.calls.length).toBe(before);
+  expect(document.body.textContent).toContain(
+    'The budget must be a whole number from 1 to 60 minutes.',
+  );
+  expect(document.body.textContent).not.toContain('Presupuesto');
+});
+
 it('keeps a failed review visible across successful background refreshes', async () => {
   vi.useFakeTimers();
   try {
