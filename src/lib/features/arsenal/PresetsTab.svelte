@@ -312,7 +312,17 @@
         ><span aria-hidden="true">+</span> {t('New preset')}</button
       >
     </div>
-    {#if presets.length === 0}
+    {#if arsenal.selectionsFailure}
+      <div class="notice" data-tone="error" role="alert">
+        <p>{t(arsenal.selectionsFailure)}</p>
+        <button
+          type="button"
+          class="action"
+          onclick={() => void controller.loadSelections()}
+          >{t('Try again')}</button
+        >
+      </div>
+    {:else if presets.length === 0}
       {#if arsenal.phase === 'loading'}
         <p class="muted">{t('Reading presets…')}</p>
       {:else}
@@ -1038,6 +1048,10 @@
   .help {
     color: var(--muted);
     font-size: var(--text-xs);
+  }
+  .notice[data-tone='error'] {
+    background: var(--error-soft);
+    color: var(--error-text);
   }
   @media (max-width: 1279px) {
     .presets {

@@ -80,6 +80,8 @@ export interface ArsenalState {
   notice: Notice | null;
   presets: Preset[];
   selections: Selection[];
+  /** Why the presets could not be read; the list shows it with Try again. `null` once they were read. */
+  selectionsFailure: string | null;
   preview: Preview | null;
   /** What started terminals carry, newest first. */
   bindings: Binding[];
@@ -116,6 +118,7 @@ export class ArsenalController {
     notice: null,
     presets: [],
     selections: [],
+    selectionsFailure: null,
     preview: null,
     bindings: [],
     sync: null,
@@ -468,11 +471,15 @@ export class ArsenalController {
     }
   }
 
+  /** Reads the presets. A failed read is kept for the list to show, with Try again, not as a notice. */
   async loadSelections() {
     try {
-      this.set({ selections: await this.client.selections() });
+      this.set({
+        selections: await this.client.selections(),
+        selectionsFailure: null,
+      });
     } catch (error) {
-      this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+      this.set({ selectionsFailure: failureMessage(error) });
     }
   }
 

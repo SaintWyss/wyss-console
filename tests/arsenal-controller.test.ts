@@ -478,6 +478,25 @@ describe('Arsenal controller', () => {
     expect(client.selections).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a failed read of the presets for the list to show with Try again, and clears it on the next good read', async () => {
+    const client = fakeClient();
+    client.selections = vi.fn(async () => {
+      throw new ArsenalCallError({ code: 'storage_unavailable', reason: null });
+    });
+    const { controller, last } = controllerWith(client);
+    await controller.loadSelections();
+    await settle();
+    expect(last().selectionsFailure).toBe(
+      'The Arsenal library could not be opened. Check that the Wyss data folder is writable, then Refresh.',
+    );
+    expect(last().notice).toBeNull();
+    client.selections = vi.fn(async () => [selection]);
+    await controller.loadSelections();
+    await settle();
+    expect(last().selectionsFailure).toBeNull();
+    expect(last().selections).toEqual([selection]);
+  });
+
   it('drops the preview of a selection once it is saved, so no preview shows the version before the save', async () => {
     const { controller, last } = controllerWith(fakeClient());
     await controller.loadPreview('sel-1');

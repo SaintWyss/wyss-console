@@ -87,6 +87,7 @@ function controllerMock() {
     })),
     deleteSelection: vi.fn(async () => true),
     moveGroup: vi.fn(async () => undefined),
+    loadSelections: vi.fn(async () => undefined),
   };
 }
 type Mocked = ReturnType<typeof controllerMock>;
@@ -114,6 +115,7 @@ function stateWith(overrides: Partial<ArsenalState> = {}): ArsenalState {
     movingGroup: null,
     groupFailure: null,
     plan: null,
+    selectionsFailure: null,
     ...overrides,
   };
 }
@@ -385,5 +387,21 @@ describe('Presets screen', () => {
     button('Delete').click();
     await Promise.resolve();
     expect(controller.deleteSelection).toHaveBeenCalledWith('sel-1');
+  });
+
+  it('says the presets could not be read in the list, and Try again reads them again', () => {
+    const { controller, root } = render(
+      stateWith({
+        selectionsFailure:
+          'The Arsenal library could not be opened. Check that the Wyss data folder is writable, then Refresh.',
+      }),
+    );
+    const list = root.querySelector('.presets-list');
+    expect(text(list?.querySelector('.notice'))).toContain(
+      'The Arsenal library could not be opened.',
+    );
+    expect(text(list)).not.toContain('No presets for Claude Code yet.');
+    button('Try again').click();
+    expect(controller.loadSelections).toHaveBeenCalledTimes(1);
   });
 });
