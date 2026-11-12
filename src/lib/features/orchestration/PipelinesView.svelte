@@ -1031,7 +1031,7 @@
               <code>{planWorkspace.workspace_revision.slice(0, 16)}…</code>
             </p>{/if}
           <label
-            >Project ID (etiqueta, no ruta)<input
+            >{t('Project ID (label, not path)')}<input
               bind:value={planProjectId}
               maxlength="128"
               oninput={invalidatePlanReview}
@@ -1463,18 +1463,19 @@
       <section class="m6-panel" aria-labelledby="handoff-title">
         <div class="m6-panel-head">
           <div>
-            <h3 id="handoff-title">Preparar handoff estructurado v1</h3>
+            <h3 id="handoff-title">{t('Prepare structured handoff v1')}</h3>
             <p>
-              El contenido del origen se selecciona explícitamente; nunca se
-              heredan conversación, credenciales, permisos ni aprobaciones.
+              {t(
+                'Source content is selected explicitly; conversation, credentials, permissions and approvals are never inherited.',
+              )}
             </p>
           </div>
         </div>
         <div class="m6-form">
           <fieldset>
-            <legend>Origen</legend>
+            <legend>{t('Source')}</legend>
             <label
-              >Plano de origen<select
+              >{t('Source plane')}<select
                 value={handoffSourcePlane}
                 onchange={(event) => {
                   handoffSourcePlane = event.currentTarget.value as
@@ -1489,43 +1490,51 @@
             >
             {#if handoffSourcePlane === 'managed'}
               <label
-                >Sesión Managed de origen<select
+                >{t('Managed source session')}<select
                   value={handoffSourceSession}
                   onchange={(event) =>
                     void selectManagedSource(event.currentTarget.value)}
                   ><option value=""
-                    >Selecciona sesión para observar generación y workspace</option
+                    >{t(
+                      'Select a session to observe generation and workspace',
+                    )}</option
                   >{#each managedSessions as session (session.id)}<option
                       value={session.id}
-                      >{session.id.slice(0, 8)} · {session.state} · generation {session
-                        .runtime.generation}</option
+                      >{session.id.slice(0, 8)} · {session.state} · {t(
+                        'generation',
+                      )}
+                      {session.runtime.generation}</option
                     >{/each}</select
                 ></label
               >
             {:else}
               <label
-                >Sesión Native de origen<select
+                >{t('Native source session')}<select
                   value={handoffSourceSession}
                   onchange={(event) =>
                     void selectNativeSource(event.currentTarget.value)}
-                  ><option value="">Selecciona sesión Native activa</option
+                  ><option value=""
+                    >{t('Select an active Native session')}</option
                   >{#each nativeSessions.filter((session) => session.state === 'running') as session (session.id)}<option
                       value={session.id}
-                      >{session.agent_name} · {session.id.slice(0, 8)} · reinicios
+                      >{session.agent_name} · {session.id.slice(0, 8)} · {t(
+                        'restarts',
+                      )}
                       {session.restarts}</option
                     >{/each}</select
                 ></label
               >
             {/if}
             <label
-              >Workspace de origen<input
+              >{t('Source workspace')}<input
                 readonly
                 value={handoffSourceRoot}
-                placeholder="Se toma de la sesión observada"
+                placeholder={t('Taken from the observed session')}
               /></label
             >
             {#if handoffSourceWorkspace}<p class="m6-meta">
-                Revisión de origen <code
+                {t('Source revision')}
+                <code
                   >{handoffSourceWorkspace.workspace_revision.slice(
                     0,
                     18,
@@ -1533,11 +1542,13 @@
                 >
               </p>{/if}
             {#if handoffSourceObservation}<p class="m6-meta">
-                Session <code>{handoffSourceSession}</code> · generation
-                observada {handoffSourceGeneration}
+                {t('Session ID')} <code>{handoffSourceSession}</code> ·
+                {t('generation observed {generation}', {
+                  generation: handoffSourceGeneration,
+                })}
               </p>{/if}
             <label
-              >Project ID (etiqueta, no ruta)<input
+              >{t('Project ID (label, not path)')}<input
                 bind:value={handoffSourceProject}
                 maxlength="128"
                 oninput={() => (handoffPreview = null)}
@@ -1545,23 +1556,25 @@
             >
           </fieldset>
           <fieldset>
-            <legend>Destino</legend>
+            <legend>{t('Target')}</legend>
             <label
-              >Workspace de destino <span class="m6-inline"
+              >{t('Target workspace')}
+              <span class="m6-inline"
                 ><input
                   readonly
                   value={handoffTargetRoot}
-                  placeholder="Elige la carpeta receptora"
+                  placeholder={t('Choose the receiving folder')}
                 /><button
                   class="m6-button"
                   type="button"
                   onclick={() => void pickHandoffWorkspace('target')}
-                  >Elegir…</button
+                  >{t('Choose…')}</button
                 ></span
               ></label
             >
             {#if handoffTargetWorkspace}<p class="m6-meta">
-                Revisión de destino <code
+                {t('Target revision')}
+                <code
                   >{handoffTargetWorkspace.workspace_revision.slice(
                     0,
                     18,
@@ -1569,14 +1582,14 @@
                 >
               </p>{/if}
             <label
-              >Project ID (etiqueta, no ruta)<input
+              >{t('Project ID (label, not path)')}<input
                 bind:value={handoffTargetProject}
                 maxlength="128"
                 oninput={() => (handoffPreview = null)}
               /></label
             >
             <label
-              >Proveedor receptor<select
+              >{t('Receiving provider')}<select
                 bind:value={handoffTargetProvider}
                 onchange={() => {
                   handoffPreview = null;
@@ -1584,33 +1597,34 @@
                 }}
               >
                 <option value="managed_codex"
-                  >Managed Codex · admitido por F8</option
+                  >{t('Managed Codex · admitted by F8')}</option
                 >
                 <option value="managed_claude"
-                  >Managed Claude · bloqueado</option
+                  >{t('Managed Claude · blocked')}</option
                 >
                 <option value="native_codex"
-                  >Native Codex · bloqueado, solo copia manual</option
+                  >{t('Native Codex · blocked, manual copy only')}</option
                 >
                 <option value="native_claude"
-                  >Native Claude · bloqueado, solo copia manual</option
+                  >{t('Native Claude · blocked, manual copy only')}</option
                 >
                 <option value="hermes_planner"
-                  >Hermes planner · bloqueado</option
+                  >{t('Hermes planner · blocked')}</option
                 >
               </select></label
             >
             {#if handoffTargetProvider === 'managed_codex'}
               <p class="m6-meta">
-                Cada handoff requiere un receptor Managed nuevo, sin turnos ni
-                contexto previo. El receptor no hereda permisos.
+                {t(
+                  'Each handoff requires a new Managed receiver, with no earlier turns or context. The receiver inherits no permissions.',
+                )}
               </p>
               <button
                 class="m6-button"
                 type="button"
                 disabled={busy || !f8Active || !handoffTargetRoot}
                 onclick={() => void prepareHandoffReceiver()}
-                >Preparar receptor Managed nuevo mediante F8</button
+                >{t('Prepare new Managed receiver through F8')}</button
               >
               {#if receiverSummary}<p class="m6-meta">
                   <code>{receiverSummary}</code>
@@ -1626,53 +1640,60 @@
                   class="m6-button"
                   type="button"
                   disabled={busy || !f8Active}
-                  onclick={onruntimes}>Configurar receptor en Runtimes</button
+                  onclick={onruntimes}
+                  >{t('Configure receiver in Runtimes')}</button
                 >{/if}
               <label
-                >Efecto <select
+                >{t('Effect')}
+                <select
                   bind:value={handoffTargetEffect}
                   onchange={() => {
                     handoffPreview = null;
                     receiverReady = false;
                   }}
-                  ><option value="managed_inference">Managed inference</option
+                  ><option value="managed_inference"
+                    >{t('Managed inference')}</option
                   ><option value="managed_local_tools"
-                    >Managed local tools con aprobación F8</option
+                    >{t('Managed local tools with F8 approval')}</option
                   ></select
                 ></label
               >
             {:else if handoffTargetProvider === 'managed_claude'}
               <p class="m6-blocked">
-                BLOCKED_PROVIDER · no hay adaptador Managed Claude admitido por
-                la autoridad F8 de este M6.
+                {t(
+                  'BLOCKED_PROVIDER · no Managed Claude adapter admitted by the F8 authority in this M6.',
+                )}
               </p>
             {:else if handoffTargetProvider === 'native_codex' || handoffTargetProvider === 'native_claude'}
               <label
-                >Perfil Native (referencia)<input
+                >{t('Native profile (reference)')}<input
                   bind:value={handoffNativeProfile}
                   maxlength="128"
                   oninput={() => (handoffPreview = null)}
                 /></label
               >
               <p class="m6-blocked">
-                BLOCKED_TRUST_BOUNDARY · no se iniciará automáticamente un
-                destino Native. El flujo manual existente sigue disponible.
+                {t(
+                  'BLOCKED_TRUST_BOUNDARY · no Native target will be started automatically. The existing manual flow remains available.',
+                )}
               </p>
             {:else}<p class="m6-blocked">
-                BLOCKED_PROVIDER · Hermes no recibe autoridad para ejecutar.
+                {t(
+                  'BLOCKED_PROVIDER · Hermes receives no authority to execute.',
+                )}
               </p>{/if}
           </fieldset>
           <fieldset>
-            <legend>Contenido seleccionado</legend>
+            <legend>{t('Selected content')}</legend>
             <label
-              >Objetivo confirmado por el dueño<input
+              >{t('Goal confirmed by the owner')}<input
                 bind:value={handoffObjective}
                 maxlength="2048"
                 oninput={() => (handoffPreview = null)}
               /></label
             >
             <label
-              >Procedencia<select
+              >{t('Provenance')}<select
                 bind:value={handoffProvenance}
                 onchange={() => (handoffPreview = null)}
                 ><option value="human_entered">{t('Human entered')}</option
@@ -1684,20 +1705,20 @@
               ></label
             >
             <label
-              >Extractos elegidos (una línea por elemento)<textarea
+              >{t('Chosen excerpts (one line per item)')}<textarea
                 rows="4"
                 bind:value={handoffContext}
                 oninput={() => (handoffPreview = null)}></textarea></label
             >
             <label
-              >Referencias de archivo como etiquetas relativas (una por línea)<textarea
+              >{t('File references as relative labels (one per line)')}<textarea
                 rows="3"
                 bind:value={handoffFiles}
                 oninput={() => (handoffPreview = null)}
                 placeholder="src/module.ts"></textarea></label
             >
             <label
-              >Preguntas abiertas (una por línea)<textarea
+              >{t('Open questions (one per line)')}<textarea
                 rows="3"
                 bind:value={handoffQuestions}
                 oninput={() => (handoffPreview = null)}></textarea></label
@@ -1708,39 +1729,42 @@
             type="button"
             disabled={busy}
             onclick={() => void reviewHandoff()}
-            >Sellar y revisar bytes exactos</button
+            >{t('Seal and review exact bytes')}</button
           >
         </div>
       </section>
       <section class="m6-panel" aria-labelledby="handoff-review-title">
         <div class="m6-panel-head">
           <div>
-            <h3 id="handoff-review-title">Revisión y entrega</h3>
+            <h3 id="handoff-review-title">{t('Review and delivery')}</h3>
             <p>
-              Todo texto citado es entrada no confiable. El digest se confirma
-              contra origen, destino, revisiones y selección.
+              {t(
+                'Every quoted text is untrusted input. The digest is confirmed against source, target, revisions and selection.',
+              )}
             </p>
           </div>
         </div>
         {#if !f8Active}<p class="m6-blocked">
-            M5/F8 está inactivo. Handoff Managed no puede iniciar hasta que la
-            autoridad aprobada esté activa.
+            {t(
+              'M5/F8 is inactive. Managed handoff cannot start until the approved authority is active.',
+            )}
           </p>{/if}
         {#if sessionsError}<p class="m6-blocked">{sessionsError}</p>{/if}
         {#if handoffPreview}
           <div class="m6-review">
             <p>
-              Handoff <code>{handoffPreview.envelope.handoff_id}</code> ·
-              revisión {handoffPreview.envelope.revision}
+              {t('Handoff')} <code>{handoffPreview.envelope.handoff_id}</code> ·
+              {t('revision')}
+              {handoffPreview.envelope.revision}
             </p>
             <p>
-              Digest confirmado <code
-                >{handoffPreview.envelope.content_digest}</code
-              >
+              {t('Confirmed digest')}
+              <code>{handoffPreview.envelope.content_digest}</code>
             </p>
             <p>
-              Origen {handoffPreview.envelope.source.plane} · destino {handoffPreview
-                .envelope.target.provider} · workspace
+              {t('Source')}
+              {handoffPreview.envelope.source.plane} · {t('target')}
+              {handoffPreview.envelope.target.provider} · {t('workspace')}
               <code
                 >{handoffPreview.envelope.target.workspace_id.slice(
                   0,
@@ -1749,38 +1773,43 @@
               >
             </p>
             <p>
-              Destino de sesión <code
+              {t('Session target')}
+              <code
                 >{handoffPreview.envelope.target.managed_session_id ??
                   handoffPreview.envelope.target.native_profile_id ??
-                  'propuesta sin sesión'}</code
+                  t('proposal without session')}</code
               >
             </p>
             <label
-              >Primer mensaje exacto, delimitado como contexto no confiable<textarea
+              >{t(
+                'Exact first message, delimited as untrusted context',
+              )}<textarea
                 class="m6-message"
                 readonly
                 rows="18"
                 value={handoffPreview.first_message}></textarea></label
             >
             <details>
-              <summary>Revisar sobre completo</summary>
+              <summary>{t('Review the full envelope')}</summary>
               <pre>{JSON.stringify(handoffPreview.envelope, null, 2)}</pre>
             </details>
             <button
               class="m6-button"
               type="button"
               onclick={() => void copyHandoff()}
-              >{copied ? 'Copiado' : 'Copiar mensaje revisado'}</button
+              >{copied ? t('Copied') : t('Copy reviewed message')}</button
             >
             {#if handoffPreview.envelope.target.provider === 'native_codex' || handoffPreview.envelope.target.provider === 'native_claude'}
               <p class="m6-blocked">
-                BLOCKED_TRUST_BOUNDARY · el digest no autoriza el lanzamiento
-                Native; usa el flujo manual y su confirmación local.
+                {t(
+                  'BLOCKED_TRUST_BOUNDARY · the digest does not authorize a Native launch; use the manual flow and its local confirmation.',
+                )}
               </p>
             {:else if handoffPreview.envelope.target.provider !== 'managed_codex'}
               <p class="m6-blocked">
-                BLOCKED_PROVIDER · el adaptador del destino no está admitido
-                para envío.
+                {t(
+                  'BLOCKED_PROVIDER · the target adapter is not admitted for sending.',
+                )}
               </p>
             {:else}
               <button
@@ -1788,22 +1817,22 @@
                 type="button"
                 disabled={busy || !f8Active}
                 onclick={() => void confirmHandoff()}
-                >Confirmar digest y entregar al Managed nuevo</button
+                >{t('Confirm digest and deliver to the new Managed')}</button
               >
             {/if}
           </div>
         {:else}
           <p class="m6-empty">
-            El contenido del handoff es volátil. Completa selección y workspace
-            para generar la revisión.
+            {t(
+              'Handoff content is volatile. Complete the selection and workspace to generate the review.',
+            )}
           </p>
         {/if}
         {#if handoffRun}
           <div class="m6-alert" role="status">
-            Ejecución <code>{handoffRun.run_id}</code> · {statusText(
+            {t('Execution')} <code>{handoffRun.run_id}</code> · {statusText(
               handoffRun.state,
-            )}. La entrega no implica que el destinatario haya terminado
-            correctamente.
+            )}. {t('Delivery does not mean the recipient finished correctly.')}
           </div>
         {/if}
       </section>

@@ -1652,6 +1652,84 @@ export const ES: Readonly<Record<string, string>> = {
     'Revisa objetivo, workspace, orden DAG, proveedor, efectos, prompts, presupuesto y vencimiento. Confirmar permite solo el plan exacto anterior.',
   'See the full plan and exact inputs': 'Ver plan completo y entradas exactas',
   'Confirm and send to the coordinator': 'Confirmar y enviar al coordinador',
+  'Prepare structured handoff v1': 'Preparar handoff estructurado v1',
+  'Source content is selected explicitly; conversation, credentials, permissions and approvals are never inherited.':
+    'El contenido del origen se selecciona explícitamente; nunca se heredan conversación, credenciales, permisos ni aprobaciones.',
+  Source: 'Origen',
+  'Source plane': 'Plano de origen',
+  'Managed source session': 'Sesión Managed de origen',
+  'Select a session to observe generation and workspace':
+    'Selecciona sesión para observar generación y workspace',
+  generation: 'generation',
+  'generation observed {generation}': 'generation observada {generation}',
+  'Native source session': 'Sesión Native de origen',
+  'Select an active Native session': 'Selecciona sesión Native activa',
+  restarts: 'reinicios',
+  'Source workspace': 'Workspace de origen',
+  'Taken from the observed session': 'Se toma de la sesión observada',
+  'Source revision': 'Revisión de origen',
+  'Session ID': 'Session',
+  'Target workspace': 'Workspace de destino',
+  'Choose the receiving folder': 'Elige la carpeta receptora',
+  'Target revision': 'Revisión de destino',
+  'Receiving provider': 'Proveedor receptor',
+  'Managed Codex · admitted by F8': 'Managed Codex · admitido por F8',
+  'Managed Claude · blocked': 'Managed Claude · bloqueado',
+  'Native Codex · blocked, manual copy only':
+    'Native Codex · bloqueado, solo copia manual',
+  'Native Claude · blocked, manual copy only':
+    'Native Claude · bloqueado, solo copia manual',
+  'Each handoff requires a new Managed receiver, with no earlier turns or context. The receiver inherits no permissions.':
+    'Cada handoff requiere un receptor Managed nuevo, sin turnos ni contexto previo. El receptor no hereda permisos.',
+  'Prepare new Managed receiver through F8':
+    'Preparar receptor Managed nuevo mediante F8',
+  'Configure receiver in Runtimes': 'Configurar receptor en Runtimes',
+  'Managed local tools with F8 approval':
+    'Managed local tools con aprobación F8',
+  'BLOCKED_PROVIDER · no Managed Claude adapter admitted by the F8 authority in this M6.':
+    'BLOCKED_PROVIDER · no hay adaptador Managed Claude admitido por la autoridad F8 de este M6.',
+  'Native profile (reference)': 'Perfil Native (referencia)',
+  'BLOCKED_TRUST_BOUNDARY · no Native target will be started automatically. The existing manual flow remains available.':
+    'BLOCKED_TRUST_BOUNDARY · no se iniciará automáticamente un destino Native. El flujo manual existente sigue disponible.',
+  'BLOCKED_PROVIDER · Hermes receives no authority to execute.':
+    'BLOCKED_PROVIDER · Hermes no recibe autoridad para ejecutar.',
+  'Selected content': 'Contenido seleccionado',
+  'Goal confirmed by the owner': 'Objetivo confirmado por el dueño',
+  Provenance: 'Procedencia',
+  'Chosen excerpts (one line per item)':
+    'Extractos elegidos (una línea por elemento)',
+  'File references as relative labels (one per line)':
+    'Referencias de archivo como etiquetas relativas (una por línea)',
+  'Open questions (one per line)': 'Preguntas abiertas (una por línea)',
+  'Seal and review exact bytes': 'Sellar y revisar bytes exactos',
+  Target: 'Destino',
+  target: 'destino',
+  workspace: 'workspace',
+  'Review and delivery': 'Revisión y entrega',
+  'Every quoted text is untrusted input. The digest is confirmed against source, target, revisions and selection.':
+    'Todo texto citado es entrada no confiable. El digest se confirma contra origen, destino, revisiones y selección.',
+  'M5/F8 is inactive. Managed handoff cannot start until the approved authority is active.':
+    'M5/F8 está inactivo. Handoff Managed no puede iniciar hasta que la autoridad aprobada esté activa.',
+  'Confirmed digest': 'Digest confirmado',
+  Handoff: 'Handoff',
+  'Session target': 'Destino de sesión',
+  'proposal without session': 'propuesta sin sesión',
+  'Exact first message, delimited as untrusted context':
+    'Primer mensaje exacto, delimitado como contexto no confiable',
+  'Review the full envelope': 'Revisar sobre completo',
+  Copied: 'Copiado',
+  'Copy reviewed message': 'Copiar mensaje revisado',
+  'BLOCKED_TRUST_BOUNDARY · the digest does not authorize a Native launch; use the manual flow and its local confirmation.':
+    'BLOCKED_TRUST_BOUNDARY · el digest no autoriza el lanzamiento Native; usa el flujo manual y su confirmación local.',
+  'BLOCKED_PROVIDER · the target adapter is not admitted for sending.':
+    'BLOCKED_PROVIDER · el adaptador del destino no está admitido para envío.',
+  'Confirm digest and deliver to the new Managed':
+    'Confirmar digest y entregar al Managed nuevo',
+  'Handoff content is volatile. Complete the selection and workspace to generate the review.':
+    'El contenido del handoff es volátil. Completa selección y workspace para generar la revisión.',
+  Execution: 'Ejecución',
+  'Delivery does not mean the recipient finished correctly.':
+    'La entrega no implica que el destinatario haya terminado correctamente.',
   'Local runs': 'Ejecuciones locales',
   'Durable metadata only. No prompts or provider output in the local log.':
     'Solo metadatos durables. Sin prompts ni salida de proveedor en el registro local.',
