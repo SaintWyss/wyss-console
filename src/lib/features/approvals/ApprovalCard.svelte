@@ -81,11 +81,9 @@
         </p>
         <pre class="approval-code">{file.text}</pre>
         {#if file.next !== null}
+          {@const preview = shownOf(file.text, file.bytes)}
           <p class="approval-note">
-            {t(
-              'Preview truncated: {shown} of {total} bytes shown.',
-              shownOf(file.text, file.bytes),
-            )}
+            {t(preview.text, preview.values)}
             <button
               type="button"
               class="action"
@@ -133,7 +131,7 @@
   {#if card.decision?.status === 'pending'}
     <p class="turn-activity live" role="status">
       <span class="dot" aria-hidden="true"></span>
-      {decidingMessage(card.decision.kind)}
+      {t(decidingMessage(card.decision.kind))}
     </p>
   {:else if card.decision?.failure}
     <div
