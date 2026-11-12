@@ -743,4 +743,85 @@ export const ES: Readonly<Record<string, string>> = {
     'Reanudar tiene que esperar a que la asociación de workspace esté definida.',
   'The agent runtime is not ready, so there is nothing to attach to.':
     'El runtime del agente no está listo, así que no hay a qué conectarse.',
+
+  // Models: what is offered, configured, selected and reported in use
+  'Four different things, kept apart: what a runtime':
+    'Cuatro cosas distintas, separadas: lo que un runtime',
+  offers: 'ofrece',
+  ', what an agent’s files are': ', lo que los archivos de un agente tienen',
+  configured: 'configurado',
+  'with, what a profile': 'con, lo que un perfil',
+  selects: 'selecciona',
+  'for a session it starts, and what a runtime':
+    'para una sesión que arranca, y lo que un runtime',
+  'reported in use': 'informó en uso',
+  '. None is filled from another. A default in a list, a value in a file or a name passed at start says what was asked for, never what answered.':
+    '. Ninguna se completa con otra. Un valor por defecto en una lista, un valor en un archivo o un nombre pasado al arrancar dice lo que se pidió, nunca lo que respondió.',
+  'Offered by the managed Codex runtime':
+    'Ofrecidos por el runtime de Codex administrado',
+  'Reading the runtime’s list…': 'Leyendo la lista del runtime…',
+  'The last read failed. What is shown is older.':
+    'La última lectura falló. Lo que se muestra es anterior.',
+  'The runtime listed no model.': 'El runtime no listó ningún modelo.',
+  'Models the runtime offers': 'Modelos que ofrece el runtime',
+  'default of this runtime': 'predeterminado de este runtime',
+  'Provider {provider}': 'Proveedor {provider}',
+  'Efforts:': 'Esfuerzos:',
+  'not reported by this authority version':
+    'no informado por esta versión de la autoridad',
+  'none listed': 'ninguno listado',
+  '{effort} (default)': '{effort} (predeterminado)',
+  '{effort}': '{effort}',
+  'Configured in the agents’ own files':
+    'Configurados en los archivos propios de los agentes',
+  'Not read yet. The Configuration view reads these files.':
+    'Todavía no se leyó. La vista de Configuración lee estos archivos.',
+  'No model setting was found in the places read.':
+    'No se encontró ninguna configuración de modelo en los lugares leídos.',
+  'Configured models': 'Modelos configurados',
+  'not shown here': 'no se muestra acá',
+  'As the file says; it applies to new sessions, and what a running session does with a change is not known.':
+    'Tal como dice el archivo; se aplica a las sesiones nuevas, y no se sabe qué hace una sesión en curso con un cambio.',
+  'Selected by a profile': 'Seleccionados por un perfil',
+  'No profile names a model or an effort.':
+    'Ningún perfil nombra un modelo ni un esfuerzo.',
+  'Models selected by profiles': 'Modelos seleccionados por perfiles',
+  '(template)': '(plantilla)',
+  'Model:': 'Modelo:',
+  'Effort:': 'Esfuerzo:',
+  'inherited from {from}': 'heredado de {from}',
+  'the agent’s own choice': 'la elección propia del agente',
+  'Reported in use': 'Informados en uso',
+  'Managed sessions have not been read yet.':
+    'Todavía no se leyeron las sesiones Managed.',
+  'No managed session is attached.': 'No hay ninguna sesión Managed conectada.',
+  'Models reported by the runtime': 'Modelos informados por el runtime',
+  'The list could not be read: the authority did not answer.':
+    'No se pudo leer la lista: la autoridad no respondió.',
+  'The list could not be read: the authority speaks another version than this app.':
+    'No se pudo leer la lista: la autoridad habla otra versión que esta app.',
+  'The list could not be read: the authority is busy. Try again.':
+    'No se pudo leer la lista: la autoridad está ocupada. Probá de nuevo.',
+  'The list could not be read. Nothing is shown rather than something unverified.':
+    'No se pudo leer la lista. No se muestra nada en lugar de algo no verificado.',
+  'This is the runtime’s own list. A model being listed does not mean your account can use it: that is not known here.':
+    'Esta es la lista propia del runtime. Que un modelo aparezca en la lista no quiere decir que tu cuenta pueda usarlo: eso no se sabe acá.',
+  'The managed Codex runtime is not running, so there is no list. A list of a runtime that has stopped is never shown. Start a managed session and it is listed again.':
+    'El runtime de Codex administrado no está corriendo, así que no hay lista. Nunca se muestra la lista de un runtime que se detuvo. Iniciá una sesión Managed y la lista vuelve a aparecer.',
+  'Listed once by the managed Codex runtime (version {version}) when it started, in {mode}. Read from the authority at {at}.':
+    'Listado una vez por el runtime de Codex administrado (versión {version}) al arrancar, en {mode}. Leído de la autoridad el {at}.',
+  'Listed once by the managed Codex runtime when it started, in {mode}. Read from the authority at {at}.':
+    'Listado una vez por el runtime de Codex administrado al arrancar, en {mode}. Leído de la autoridad el {at}.',
+  'The runtime’s list continued past what was taken: this list is partial.':
+    'La lista del runtime siguió más allá de lo que se tomó: esta lista está incompleta.',
+  'Whether this list is complete is not reported by this authority version.':
+    'Esta versión de la autoridad no informa si la lista está completa.',
+  'The runtime marks it for replacement by {by}, retiring {retires}.':
+    'El runtime marca que lo reemplaza {by}, y se retira el {retires}.',
+  'The runtime marks it for replacement by {by}.':
+    'El runtime marca que lo reemplaza {by}.',
+  'A profile passes these names to the agent when a session starts. Wyss Console cannot check them: the agent says so in its own session if it does not know one. Nothing changes the agent’s own files.':
+    'Un perfil pasa estos nombres al agente cuando arranca una sesión. Wyss Console no puede comprobarlos: si el agente no conoce uno, lo dice en su propia sesión. Nada cambia los archivos propios del agente.',
+  'Agents you start in a terminal do not report the model they use, and this app adds no hook and reads no terminal to find out. What you see for them is what was asked for and what their files say, never what is in use.':
+    'Los agentes que arrancás en una terminal no informan el modelo que usan, y esta app no agrega ningún hook ni lee la terminal para saberlo. Lo que se ve de ellos es lo que se pidió y lo que dicen sus archivos, nunca lo que está en uso.',
 };

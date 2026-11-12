@@ -19,6 +19,9 @@ import {
   pendingMessage,
   runtimeLine,
 } from '../src/lib/features/sessions/present';
+import { catalogueFailure, entryRow } from '../src/lib/features/models/present';
+import { parseModelCatalogue } from '../src/lib/contracts/models';
+import catalogues from './fixtures/model-catalogue-v1.json';
 
 afterEach(() => setLanguage('en'));
 
@@ -112,6 +115,21 @@ it('draws the sessions sentences in Spanish, with their nested places', () => {
   setLanguage('en');
   expect(impact && tPhrase(impact)).toBe(
     'Codex runs in Local Tools for rag-corp now, and the authority runs one Codex runtime. Activating this session restarts it in Inference, and the sessions attached to it are detached. A session created in Local Tools cannot be resumed in Inference.',
+  );
+});
+
+it('draws the models sentences in Spanish, with their efforts and places', () => {
+  const [listed] = parseModelCatalogue(catalogues.listed).entries.map(entryRow);
+  setLanguage('es');
+  expect(listed?.efforts && tJoin(listed.efforts)).toBe(
+    'low · medium (predeterminado) · high',
+  );
+  expect(tPhrase(catalogueFailure('busy'))).toBe(
+    'No se pudo leer la lista: la autoridad está ocupada. Probá de nuevo.',
+  );
+  setLanguage('en');
+  expect(listed?.efforts && tJoin(listed.efforts)).toBe(
+    'low · medium (default) · high',
   );
 });
 

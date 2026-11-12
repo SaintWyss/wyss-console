@@ -23,8 +23,12 @@ import {
 import ModelsHarness from './ModelsHarness.svelte';
 import catalogues from './fixtures/model-catalogue-v1.json';
 import pages from './fixtures/session-page-v4.json';
-import { tPhrase } from '../src/lib/i18n/index.svelte';
+import { tJoin, tPhrase, type Phrase } from '../src/lib/i18n/index.svelte';
 import { profiles } from './native-harness';
+
+/** The sentence a presenter hands over, drawn in the language in force; null when there is none. */
+const said = (phrase: Phrase | null) =>
+  phrase === null ? null : tPhrase(phrase);
 
 let component: ReturnType<typeof mount> | undefined;
 afterEach(() => {
@@ -96,36 +100,44 @@ describe('the catalogue contract', () => {
 describe('what is said about a catalogue', () => {
   it('says where it came from and when, or why there is none', () => {
     const listed = parseModelCatalogue(catalogues.listed);
-    expect(provenance(listed)).toContain(
+    expect(tPhrase(provenance(listed))).toContain(
       'Listed once by the managed Codex runtime',
     );
-    expect(provenance(listed)).toContain('0.159.0');
-    expect(provenance(listed)).toContain('Inference');
+    expect(tPhrase(provenance(listed))).toContain('0.159.0');
+    expect(tPhrase(provenance(listed))).toContain('Inference');
     expect(
-      provenance(parseModelCatalogue(catalogues.partial_without_offers)),
+      tPhrase(
+        provenance(parseModelCatalogue(catalogues.partial_without_offers)),
+      ),
     ).toContain('Local Tools');
-    expect(provenance(parseModelCatalogue(catalogues.not_ready))).toContain(
-      'never shown',
-    );
-    expect(completeness(listed)).toBeNull();
     expect(
-      completeness(parseModelCatalogue(catalogues.partial_without_offers)),
+      tPhrase(provenance(parseModelCatalogue(catalogues.not_ready))),
+    ).toContain('never shown');
+    expect(said(completeness(listed))).toBeNull();
+    expect(
+      said(
+        completeness(parseModelCatalogue(catalogues.partial_without_offers)),
+      ),
     ).toContain('partial');
     const unknown = damaged(catalogues.listed);
     unknown.complete = null;
-    expect(completeness(parseModelCatalogue(unknown))).toContain(
+    expect(said(completeness(parseModelCatalogue(unknown)))).toContain(
       'not reported',
     );
-    expect(completeness(parseModelCatalogue(catalogues.not_ready))).toBeNull();
+    expect(
+      said(completeness(parseModelCatalogue(catalogues.not_ready))),
+    ).toBeNull();
   });
   it('marks the default as the runtime’s, shows efforts and a replacement as marked, and claims nothing else', () => {
     const [a, b] = parseModelCatalogue(catalogues.listed).entries.map(entryRow);
     expect(a?.isDefault).toBe(true);
-    expect(a?.efforts).toBe('low · medium (default) · high');
+    expect(a?.efforts && tJoin(a.efforts)).toBe(
+      'low · medium (default) · high',
+    );
     expect(a?.title).toBe('Model A · model-a');
     expect(b?.isDefault).toBe(false);
     expect(b?.provider).toBe('custom');
-    expect(b?.replacement).toBe(
+    expect(b?.replacement && tPhrase(b.replacement)).toBe(
       'The runtime marks it for replacement by model-a, retiring 2027-01-31T00:00:00Z.',
     );
     // An authority that reported no offer says nothing, which is not "not the default".
@@ -137,9 +149,8 @@ describe('what is said about a catalogue', () => {
     expect(bare.replacement).toBeNull();
     const none = damaged(catalogues.listed);
     none.entries[0].efforts = [];
-    expect(entryRow(parseModelCatalogue(none).entries[0]!).efforts).toBe(
-      'none listed',
-    );
+    const noneRow = entryRow(parseModelCatalogue(none).entries[0]!);
+    expect(noneRow.efforts && tJoin(noneRow.efforts)).toBe('none listed');
   });
   it('offers only what the runtime listed, and only while it is listing', () => {
     const listed = parseModelCatalogue(catalogues.listed);
@@ -196,7 +207,7 @@ describe('configured, selected and observed are three lists', () => {
     expect(
       configuredRows([setting('model', 'x', 'codex', { detail: null })])[0]
         ?.value,
-    ).toBe('not shown here');
+    ).toBeNull();
   });
   it('shows what a profile would pass, and says by whom a field it does not name is inherited', () => {
     const all = profiles();
