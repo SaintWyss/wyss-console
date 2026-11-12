@@ -88,6 +88,7 @@ function controllerMock() {
     deleteSelection: vi.fn(async () => true),
     moveGroup: vi.fn(async () => undefined),
     loadSelections: vi.fn(async () => undefined),
+    writeCategory: vi.fn(async () => true),
   };
 }
 type Mocked = ReturnType<typeof controllerMock>;
@@ -112,6 +113,8 @@ function stateWith(overrides: Partial<ArsenalState> = {}): ArsenalState {
     bindings: [],
     sync: null,
     groups: {},
+    categories: [],
+    categoryFailure: null,
     movingGroup: null,
     groupFailure: null,
     plan: null,
@@ -249,7 +252,7 @@ describe('Presets screen', () => {
     flushSync();
     expect(root.querySelector('.kind-help')).toBeNull();
     const models = [...root.querySelectorAll('.group-toggle')].find((node) =>
-      text(node).includes('Models and rules'),
+      text(node).startsWith('Rules'),
     )!;
     expect(models.getAttribute('title')).toContain(
       'Rules the agent always follows',
@@ -539,22 +542,80 @@ describe('Presets screen', () => {
       )!;
     chip('Agents').click();
     flushSync();
-    const agents = text(root.querySelector('.view-only'));
-    expect(agents).toContain('gsd-planner');
-    expect(agents).toContain('Part of GSD Core');
-    expect(root.querySelector('.view-only input')).toBeNull();
+    const listed = () =>
+      [...root.querySelectorAll('.view-only-row')]
+        .map((row) => text(row))
+        .join(' ');
+    expect(listed()).toContain('gsd-planner');
+    expect(listed()).toContain('Part of GSD Core');
+    expect(root.querySelector('.view-only-row input')).toBeNull();
     chip('Hooks').click();
     flushSync();
-    expect(text(root.querySelector('.view-only'))).toContain('r3-gate');
-    expect(text(root.querySelector('.view-only'))).not.toContain('context7');
+    expect(listed()).toContain('r3-gate');
+    expect(listed()).not.toContain('context7');
     chip('MCP').click();
     flushSync();
-    expect(text(root.querySelector('.view-only'))).toContain('context7');
+    expect(listed()).toContain('context7');
     chip('Plugins').click();
     flushSync();
-    expect(text(root.querySelector('.view-only'))).toContain('GSD Core');
+    expect(listed()).toContain('GSD Core');
     chip('Commands').click();
     flushSync();
     expect(text(root)).toContain('No custom commands');
+  });
+
+  it('shows every category in its section, and lets the owner add, rename and delete their own', async () => {
+    const custom = {
+      id: 'u_00000000000000ab',
+      name: 'Clientes',
+      section: 'build' as const,
+    };
+    const { root, controller } = render(stateWith({ categories: [custom] }));
+    const titles = [...root.querySelectorAll('.section-title')].map((node) =>
+      text(node),
+    );
+    expect(titles).toEqual([
+      'How it works',
+      'Before building',
+      'Building',
+      'After',
+      'Environment',
+    ]);
+    // An empty basic category is listed, with no rename or delete.
+    const security = [...root.querySelectorAll('.group')].find((node) =>
+      text(node.querySelector('.group-name')).startsWith('Security'),
+    )!;
+    expect(security.getAttribute('data-empty')).toBe('true');
+    expect(text(security)).not.toContain('Rename');
+    const mine = [...root.querySelectorAll('.group')].find(
+      (node) => text(node.querySelector('.group-name')) === 'Clientes',
+    )!;
+    expect(text(mine)).toContain('Rename');
+    [...root.querySelectorAll<HTMLButtonElement>('.new-category')][0].click();
+    flushSync();
+    const input = root.querySelector<HTMLInputElement>('#new-category-how')!;
+    input.value = 'Mis reglas';
+    input.dispatchEvent(new Event('input'));
+    flushSync();
+    button('Add').click();
+    await Promise.resolve();
+    expect(controller.writeCategory).toHaveBeenCalledWith({
+      action: 'create',
+      name: 'Mis reglas',
+      section: 'how',
+    });
+    [...mine.querySelectorAll<HTMLButtonElement>('button')]
+      .find((node) => text(node) === 'Delete')!
+      .click();
+    flushSync();
+    expect(text(root)).toContain('Delete Clientes?');
+    [...root.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+      .find((node) => text(node) === 'Delete')!
+      .click();
+    await Promise.resolve();
+    expect(controller.writeCategory).toHaveBeenLastCalledWith({
+      action: 'delete',
+      id: custom.id,
+    });
   });
 });

@@ -16,10 +16,11 @@ import {
   arsenalClient,
   ArsenalCallError,
   type ArsenalClient,
+  type CategoryChange,
 } from '../../desktop/arsenal-client';
 import { msg } from '../../i18n/msg';
 import { failureMessage, importMessage } from './messages';
-import { planKey } from './presets';
+import { planKey, type CustomCategory } from './presets';
 
 /** The sentence a refused group move shows on its row. */
 const GROUP_NOT_SAVED = msg('Could not be saved. Nothing changed.');
@@ -89,6 +90,10 @@ export interface ArsenalState {
   sync: SyncStatus | null;
   /** The owner's group corrections, by capability identity. Kept on this computer. */
   groups: Record<string, string>;
+  /** Categories the owner made, kept on this computer. */
+  categories: CustomCategory[];
+  /** Why the last change to a category of the owner's was refused, shown beside the form. */
+  categoryFailure: string | null;
   /** The capability whose group move is being saved, if any. */
   movingGroup: string | null;
   /** A group move that was refused, shown on that capability's row. */
@@ -123,6 +128,8 @@ export class ArsenalController {
     bindings: [],
     sync: null,
     groups: {},
+    categories: [],
+    categoryFailure: null,
     movingGroup: null,
     groupFailure: null,
     plan: null,
@@ -434,6 +441,41 @@ export class ArsenalController {
       this.set({ presets: await this.client.presets() });
     } catch (error) {
       this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+    }
+    // The chooser places capabilities by the owner's corrections and categories: read them too.
+    await Promise.all([this.loadGroups(), this.loadCategories()]);
+  }
+
+  /** Reads the categories the owner made. */
+  async loadCategories() {
+    try {
+      this.set({ categories: await this.client.categories() });
+    } catch (error) {
+      this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+    }
+  }
+
+  /**
+   * Makes, renames or deletes a category of the owner's. A refusal (a repeated or empty name, a
+   * full list) leaves the categories as they were and says why next to the form.
+   */
+  async writeCategory(change: CategoryChange): Promise<boolean> {
+    this.set({ categoryFailure: null });
+    try {
+      const categories = await this.client.writeCategory(change);
+      this.set({ categories });
+      if (change.action === 'delete') await this.loadGroups();
+      return true;
+    } catch {
+      this.set({
+        categoryFailure:
+          change.action === 'delete'
+            ? msg('The category could not be deleted. Try again.')
+            : msg(
+                'That name cannot be used: it is empty, longer than 40 characters, or already in this section.',
+              ),
+      });
+      return false;
     }
   }
 

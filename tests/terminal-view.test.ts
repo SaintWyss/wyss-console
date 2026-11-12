@@ -252,6 +252,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-arsenal-preset-plan',
     'allow-arsenal-groups',
     'allow-arsenal-group-move',
+    'allow-arsenal-categories',
+    'allow-arsenal-category-write',
     'allow-arsenal-terminal-plan',
     'allow-arsenal-terminal-bind',
     'allow-arsenal-terminal-bindings',

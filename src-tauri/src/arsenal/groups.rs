@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 pub const MAX_GROUPS: usize = 4096;
 pub const MAX_FILE_BYTES: u64 = 512 * 1024;
 const FILE: &str = "groups.json";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+/// Most categories the owner can make.
+pub const MAX_CUSTOM: usize = 64;
+/// The sections a category of the owner's is placed in.
+pub const SECTIONS: [&str; 5] = ["how", "before", "build", "after", "env"];
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -26,6 +30,42 @@ pub struct State {
     pub schema_version: u32,
     pub presets_migrated: bool,
     pub groups: BTreeMap<String, String>,
+    /// Categories the owner made (version 2). A version 1 file has none.
+    #[serde(default)]
+    pub custom: Vec<Custom>,
+}
+
+/// A category the owner made: `u_` and 16 hex digits, a name, and the section it is shown in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Custom {
+    pub id: String,
+    pub name: String,
+    pub section: String,
+}
+
+/// An owner category's id: `u_` and 16 lowercase hex digits.
+pub fn custom_id_ok(id: &str) -> bool {
+    id.len() == 18
+        && id.starts_with("u_")
+        && id[2..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// A category name: 1 to 40 characters once trimmed, no control characters.
+pub fn name_ok(name: &str) -> bool {
+    let trimmed = name.trim();
+    (1..=40).contains(&trimmed.chars().count()) && !trimmed.chars().any(char::is_control)
+}
+
+fn custom_ok(custom: &[Custom]) -> bool {
+    custom.len() <= MAX_CUSTOM
+        && custom.iter().all(|category| {
+            custom_id_ok(&category.id)
+                && name_ok(&category.name)
+                && SECTIONS.contains(&category.section.as_str())
+        })
 }
 
 /// A group is 1 to 32 characters of lowercase letters, digits and `_`.
@@ -68,7 +108,8 @@ fn read(directory: &Path) -> Option<State> {
         return None;
     }
     let state: State = serde_json::from_slice(&bytes).ok()?;
-    let valid = state.schema_version == VERSION
+    let valid = (1..=VERSION).contains(&state.schema_version)
+        && custom_ok(&state.custom)
         && state.groups.len() <= MAX_GROUPS
         && state
             .groups
@@ -118,7 +159,7 @@ mod tests {
 
     fn empty() -> State {
         State {
-            schema_version: 1,
+            schema_version: VERSION,
             ..State::default()
         }
     }
@@ -141,13 +182,19 @@ mod tests {
             schema_version: 7,
             presets_migrated: true,
             groups: BTreeMap::new(),
+            custom: vec![Custom {
+                id: "u_00000000000000ab".into(),
+                name: "Clientes".into(),
+                section: "build".into(),
+            }],
         };
         state.groups.insert(identity(1), "design".into());
         save(&dir, &state).unwrap();
         let loaded = load(&dir);
-        assert_eq!(loaded.schema_version, 1);
+        assert_eq!(loaded.schema_version, VERSION);
         assert!(loaded.presets_migrated);
         assert_eq!(loaded.groups, state.groups);
+        assert_eq!(loaded.custom, state.custom);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -178,12 +225,15 @@ mod tests {
         let cases: Vec<Vec<u8>> = vec![
             b"{not json".to_vec(),
             br#"{"schema_version":1,"presets_migrated":true,"groups":{},"extra":1}"#.to_vec(),
-            br#"{"schema_version":2,"presets_migrated":true,"groups":{}}"#.to_vec(),
+            br#"{"schema_version":3,"presets_migrated":true,"groups":{}}"#.to_vec(),
+            br#"{"schema_version":2,"presets_migrated":true,"groups":{},"custom":[{"id":"u_x","name":"A","section":"build"}]}"#.to_vec(),
+            br#"{"schema_version":2,"presets_migrated":true,"groups":{},"custom":[{"id":"u_00000000000000ab","name":"A","section":"nowhere"}]}"#.to_vec(),
             bad_group.into_bytes(),
             serde_json::to_vec(&State {
                 schema_version: 1,
                 presets_migrated: false,
                 groups: too_many,
+                custom: Vec::new(),
             })
             .unwrap(),
         ];
@@ -193,6 +243,35 @@ mod tests {
             assert_eq!(fs::read(dir.join(FILE)).unwrap(), content);
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_version_1_file_still_loads_with_no_categories_of_the_owner() {
+        let dir = scratch("v1");
+        let content = format!(
+            r#"{{"schema_version":1,"presets_migrated":true,"groups":{{"{}":"design"}}}}"#,
+            identity(1)
+        );
+        fs::write(dir.join(FILE), &content).unwrap();
+        let loaded = load(&dir);
+        assert_eq!(
+            loaded.groups.get(&identity(1)).map(String::as_str),
+            Some("design")
+        );
+        assert!(loaded.custom.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn category_ids_and_names_are_checked() {
+        assert!(custom_id_ok("u_0123456789abcdef"));
+        assert!(!custom_id_ok("u_0123456789ABCDEF"));
+        assert!(!custom_id_ok("design"));
+        assert!(group_ok("u_0123456789abcdef"));
+        assert!(name_ok("Clientes"));
+        assert!(!name_ok("   "));
+        assert!(!name_ok(&"x".repeat(41)));
+        assert!(!name_ok("a\nb"));
     }
 
     #[test]

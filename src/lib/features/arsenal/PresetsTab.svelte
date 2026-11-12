@@ -11,11 +11,12 @@
   import { compatibilityMark } from './catalogue';
   import type { ArsenalController, ArsenalState } from './controller';
   import {
-    GROUPS,
     familyFor,
     groupFor,
+    knownGroup,
     type Family,
     type Group,
+    type Section,
   } from './groups';
   import {
     METER_CELLS,
@@ -27,6 +28,7 @@
     meterFill,
     planKey,
     summaryOf,
+    categoriesOf,
     totalsOf,
     viewOnlyEntries,
     type ChooserKind,
@@ -49,9 +51,12 @@
     codex: 'Codex',
   };
   const GROUP_LABEL: Record<Group, string> = {
-    models: msg('Models and rules'),
+    rules: msg('Rules'),
+    models: msg('Models'),
+    integrations: msg('Integrations'),
+    automations: msg('Automations'),
     security: msg('Security'),
-    debug: msg('Debugging'),
+    debug: msg('Fixing bugs'),
     content: msg('Content and SEO'),
     motion: msg('Animation and video'),
     design: msg('Design and interface'),
@@ -67,8 +72,17 @@
   };
   /** Hover text for each group header: what kind of capability lives there. */
   const GROUP_HELP: Record<Group, string> = {
+    rules: msg(
+      'Rules the agent always follows: standing instructions read when every session starts.',
+    ),
     models: msg(
-      'Rules the agent always follows, and the Codex model profiles (astra, luna, sol) that choose which model and effort a task runs with.',
+      'Model profiles (astra, luna, sol) that choose which model and effort a task runs with.',
+    ),
+    integrations: msg(
+      'MCP servers: connections to outside tools such as Notion, a browser or library docs.',
+    ),
+    automations: msg(
+      'Hooks that run by themselves at moments of the session and are not about security.',
     ),
     security: msg(
       'Checks for security problems: audits, threat reviews and guards against dangerous commands.',
@@ -110,6 +124,13 @@
     other: msg(
       'What no rule placed. Use Move to group… to put it where it belongs.',
     ),
+  };
+  const SECTION_LABEL: Record<Section, string> = {
+    how: msg('How it works'),
+    before: msg('Before building'),
+    build: msg('Building'),
+    after: msg('After'),
+    env: msg('Environment'),
   };
   const KIND_LABEL: Record<string, string> = {
     skill: msg('Skill'),
@@ -179,7 +200,14 @@
   /** The type the owner picked; `null` until they pick one. */
   let kindChoice = $state<ChooserKind | null>(null);
   let family = $state<Family | 'all'>('all');
-  let opened = $state<Group[]>([]);
+  let opened = $state<string[]>([]);
+  /** The section a new category is being named in, and the name typed so far. */
+  let adding = $state<Section | null>(null);
+  let newName = $state('');
+  /** The owner's category being renamed or confirmed for deletion. */
+  let renaming = $state<string | null>(null);
+  let renameText = $state('');
+  let deletingCategory = $state<string | null>(null);
   let menuFor = $state<string | null>(null);
   /** The switch the owner asked for while the draft had changes; it runs only after Discard changes. */
   let pending = $state<(() => void) | null>(null);
@@ -195,23 +223,42 @@
       (library.some((item) => item.kind === 'rule') ? 'rule' : 'all'),
   );
   const chosen = $derived(new Set(draft.items.map((item) => item.capability)));
-  const allRows = $derived(groupRows(library, chosen, arsenal.groups));
+  const categories = $derived(categoriesOf(arsenal.categories ?? []));
+  const viewOnly = $derived(
+    viewOnlyEntries(arsenal.discover ?? null, provider, kind, query),
+  );
+  const allRows = $derived(
+    groupRows(library, chosen, arsenal.groups, categories, viewOnly),
+  );
   const matching = $derived(
     new Set(
       filterChooser(library, { query, kind, family }).map((item) => item.id),
     ),
   );
+  /** Every category stays on screen, empty ones with 0, except while searching by text. */
   const rows = $derived(
     allRows
       .map((row) => ({
         ...row,
         shown: row.items.filter((item) => matching.has(item.id)),
       }))
-      .filter((row) => row.shown.length > 0),
+      .filter(
+        (row) =>
+          query.trim() === '' || row.shown.length > 0 || row.extras.length > 0,
+      ),
   );
-  const viewOnly = $derived(
-    viewOnlyEntries(arsenal.discover ?? null, provider, kind, query),
-  );
+  /** A category's name on screen: the owner's own, or the basic one translated. */
+  function labelOf(group: string): string {
+    const custom = (arsenal.categories ?? []).find(
+      (category) => category.id === group,
+    );
+    if (custom) return custom.name;
+    return t(GROUP_LABEL[group as Group] ?? GROUP_LABEL.other);
+  }
+  function helpOf(group: string): string | undefined {
+    const help = GROUP_HELP[group as Group];
+    return help ? t(help) : undefined;
+  }
   const filtering = $derived(
     query.trim() !== '' || kind !== 'all' || family !== 'all',
   );
@@ -336,12 +383,38 @@
       ? draft.composites.filter((entry) => entry !== entryKey)
       : [...draft.composites, entryKey];
   }
-  function toggleOpen(group: Group) {
+  async function addCategory(section: Section) {
+    const done = await controller.writeCategory({
+      action: 'create',
+      name: newName,
+      section,
+    });
+    if (done) {
+      adding = null;
+      newName = '';
+    }
+  }
+  async function renameCategory(id: string) {
+    if (
+      await controller.writeCategory({ action: 'rename', id, name: renameText })
+    )
+      renaming = null;
+  }
+  async function deleteCategory(id: string) {
+    if (await controller.writeCategory({ action: 'delete', id }))
+      deletingCategory = null;
+  }
+  /** The last category of each section, where "+ New category" goes. */
+  function lastOfSection(index: number): boolean {
+    const row = rows[index];
+    return row.section !== null && rows[index + 1]?.section !== row.section;
+  }
+  function toggleOpen(group: string) {
     opened = opened.includes(group)
       ? opened.filter((entry) => entry !== group)
       : [...opened, group];
   }
-  function isOpen(group: Group): boolean {
+  function isOpen(group: string): boolean {
     return filtering || opened.includes(group);
   }
   function nameOf(id: string): string {
@@ -378,7 +451,7 @@
     else confirmingDelete = false;
   }
 
-  function moveTo(item: LibraryItem, group: Group | null) {
+  function moveTo(item: LibraryItem, group: string | null) {
     menuFor = null;
     void controller.moveGroup(item.id, group);
   }
@@ -507,15 +580,22 @@
       {/if}
     </div>
 
-    {#if rows.length === 0 && viewOnly.length === 0}
+    {#if arsenal.categoryFailure}
+      <p class="error" role="alert">{t(arsenal.categoryFailure)}</p>
+    {/if}
+    {#if rows.every((row) => row.shown.length === 0 && row.extras.length === 0)}
       <p class="muted">
         {kind === 'command' && query.trim() === ''
           ? t('No custom commands. Your /commands are skills here.')
           : t('No capabilities match.')}
       </p>
-    {:else}
-      {#each rows as row (row.group)}
-        <div class="group">
+    {/if}
+    {#if rows.length > 0}
+      {#each rows as row, index (row.group)}
+        {#if row.section !== null && row.section !== rows[index - 1]?.section}
+          <h4 class="section-title">{t(SECTION_LABEL[row.section])}</h4>
+        {/if}
+        <div class="group" data-empty={row.total + row.extras.length === 0}>
           <div class="group-head">
             <button
               type="button"
@@ -526,7 +606,8 @@
                 : row.state === 'partial'
                   ? 'mixed'
                   : 'false'}
-              aria-label={t(GROUP_LABEL[row.group])}
+              aria-label={labelOf(row.group)}
+              disabled={row.total === 0}
               onclick={() => toggleGroup(row)}
               >{row.state === 'all'
                 ? '✓'
@@ -537,15 +618,84 @@
             <button
               type="button"
               class="group-toggle"
-              title={t(GROUP_HELP[row.group])}
+              title={helpOf(row.group)}
               aria-expanded={isOpen(row.group)}
               onclick={() => toggleOpen(row.group)}
             >
-              <span class="group-name">{t(GROUP_LABEL[row.group])}</span>
-              <span class="mono">{row.chosen}/{row.total}</span>
+              <span class="group-name">{labelOf(row.group)}</span>
+              <span class="mono"
+                >{row.chosen}/{row.total}{#if row.extras.length > 0}
+                  · +{row.extras.length}{/if}</span
+              >
               <span aria-hidden="true">{isOpen(row.group) ? '▾' : '▸'}</span>
             </button>
+            {#if row.name !== null}
+              <button
+                type="button"
+                class="action quiet"
+                onclick={() => {
+                  renaming = row.group;
+                  renameText = row.name ?? '';
+                  deletingCategory = null;
+                }}>{t('Rename')}</button
+              >
+              <button
+                type="button"
+                class="action quiet"
+                onclick={() => {
+                  deletingCategory = row.group;
+                  renaming = null;
+                }}>{t('Delete')}</button
+              >
+            {/if}
           </div>
+          {#if renaming === row.group}
+            <form
+              class="category-form"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void renameCategory(row.group);
+              }}
+            >
+              <label class="sr-only" for="rename-{row.group}"
+                >{t('Category name')}</label
+              >
+              <input
+                id="rename-{row.group}"
+                maxlength="40"
+                bind:value={renameText}
+                use:focusOnMount
+              />
+              <button type="submit" class="action">{t('Save')}</button>
+              <button
+                type="button"
+                class="action quiet"
+                onclick={() => (renaming = null)}>{t('Cancel')}</button
+              >
+            </form>
+          {/if}
+          {#if deletingCategory === row.group}
+            <div class="category-form" role="alertdialog">
+              <p class="confirm">
+                {t(
+                  'Delete {name}? Its {n} capabilities go back to their default category.',
+                  { name: row.name ?? '', n: String(row.total) },
+                )}
+              </p>
+              <button
+                type="button"
+                class="action danger"
+                onclick={() => void deleteCategory(row.group)}
+                >{t('Delete')}</button
+              >
+              <button
+                type="button"
+                class="action"
+                use:focusOnMount
+                onclick={() => (deletingCategory = null)}>{t('Cancel')}</button
+              >
+            </div>
+          {/if}
           {#if isOpen(row.group)}
             <ul class="capabilities">
               {#each row.shown as item (item.id)}
@@ -618,16 +768,18 @@
                         )}
                       </p>
                       <div class="menu" role="menu">
-                        {#each GROUPS as group (group)}
+                        {#each categories as category (category.id)}
                           <button
                             type="button"
                             role="menuitemradio"
-                            aria-checked={groupFor(
-                              item,
-                              arsenal.groups[item.id],
-                            ) === group}
-                            onclick={() => moveTo(item, group)}
-                            >{t(GROUP_LABEL[group])}</button
+                            aria-checked={knownGroup(
+                              groupFor(item, arsenal.groups[item.id]),
+                              categories
+                                .filter((entry) => entry.name !== null)
+                                .map((entry) => entry.id),
+                            ) === category.id}
+                            onclick={() => moveTo(item, category.id)}
+                            >{labelOf(category.id)}</button
                           >
                         {/each}
                         <button
@@ -641,40 +793,77 @@
                   </div>
                 </li>
               {/each}
+              {#each row.extras as entry (entry.key)}
+                <li class="capability view-only-row">
+                  <span class="view-only-mark" aria-hidden="true">·</span>
+                  <div class="capability-body">
+                    <div class="capability-head">
+                      <span class="capability-name">{entry.name}</span>
+                      <span class="tags">
+                        <span class="tag"
+                          >{t(KIND_LABEL[entry.kind] ?? entry.kind)}</span
+                        >
+                        {#if entry.partOf}
+                          <span class="tag"
+                            >{t('Part of {name}', { name: entry.partOf })}</span
+                          >
+                        {:else}
+                          <span class="tag">{t('Not selectable yet')}</span>
+                        {/if}
+                      </span>
+                    </div>
+                    {#if entry.description}
+                      <p class="capability-summary" title={entry.description}>
+                        {entry.description}
+                      </p>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+              {#if row.total + row.extras.length === 0}
+                <li class="muted empty-group">{t('Nothing here yet.')}</li>
+              {/if}
             </ul>
           {/if}
         </div>
+        {#if lastOfSection(index) && row.section !== null && query.trim() === ''}
+          {#if adding === row.section}
+            <form
+              class="category-form"
+              onsubmit={(event) => {
+                event.preventDefault();
+                if (row.section !== null) void addCategory(row.section);
+              }}
+            >
+              <label class="sr-only" for="new-category-{row.section}"
+                >{t('Category name')}</label
+              >
+              <input
+                id="new-category-{row.section}"
+                maxlength="40"
+                placeholder={t('Category name')}
+                bind:value={newName}
+                use:focusOnMount
+              />
+              <button type="submit" class="action">{t('Add')}</button>
+              <button
+                type="button"
+                class="action quiet"
+                onclick={() => (adding = null)}>{t('Cancel')}</button
+              >
+            </form>
+          {:else}
+            <button
+              type="button"
+              class="action quiet new-category"
+              onclick={() => {
+                adding = row.section;
+                newName = '';
+              }}>+ {t('New category')}</button
+            >
+          {/if}
+        {/if}
       {/each}
-      {#if viewOnly.length > 0}
-        <div class="view-only">
-          <h4>{t('Shown, not selectable yet')}</h4>
-          <p class="help">
-            {t(
-              'Hooks, MCP servers, plugins and commands will be chosen per preset in a later step. GSD Core agents go on and off with Keep GSD Core.',
-            )}
-          </p>
-          <ul class="view-only-rows">
-            {#each viewOnly as entry (entry.key)}
-              <li class="view-only-row">
-                <span class="capability-name">{entry.name}</span>
-                <span class="tag"
-                  >{t(KIND_LABEL[entry.kind] ?? entry.kind)}</span
-                >
-                {#if entry.partOf}
-                  <span class="tag"
-                    >{t('Part of {name}', { name: entry.partOf })}</span
-                  >
-                {/if}
-                {#if entry.description}
-                  <span class="capability-summary" title={entry.description}
-                    >{entry.description}</span
-                  >
-                {/if}
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
     {/if}
   </section>
 
@@ -720,7 +909,7 @@
                 ></span>
               {/each}
             </span>
-            <span class="meter-name">{t(GROUP_LABEL[row.group])}</span>
+            <span class="meter-name">{labelOf(row.group)}</span>
             <span class="mono">{row.chosen}</span>
           </li>
         {/each}
@@ -1230,6 +1419,41 @@
     margin: 0;
     color: var(--muted);
     font-size: var(--text-xs);
+  }
+  .category-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 6px 40px;
+  }
+  .category-form input {
+    min-height: 36px;
+    flex: 1 1 180px;
+    max-width: 280px;
+  }
+  .new-category {
+    margin: 2px 0 0 40px;
+  }
+  .section-title {
+    margin: 16px 0 4px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .group[data-empty='true'] .group-name {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .empty-group {
+    padding: 4px 12px;
+  }
+  .view-only-mark {
+    width: 18px;
+    text-align: center;
+    color: var(--muted);
   }
   .view-only {
     border-top: 1px solid var(--line);

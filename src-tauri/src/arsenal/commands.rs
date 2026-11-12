@@ -270,6 +270,8 @@ const COMMANDS: &[&str] = &[
     "arsenal_preset_plan",
     "arsenal_groups",
     "arsenal_group_move",
+    "arsenal_categories",
+    "arsenal_category_write",
     "arsenal_terminal_plan",
     "arsenal_terminal_bind",
     "arsenal_terminal_bindings",
@@ -300,6 +302,8 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_preset_plan,
             arsenal_groups,
             arsenal_group_move,
+            arsenal_categories,
+            arsenal_category_write,
             arsenal_terminal_plan,
             arsenal_terminal_bind,
             arsenal_terminal_bindings,
@@ -788,6 +792,23 @@ fn arsenal_group_move(
         None => arsenal.clear_group(&request.identity),
     }
     .map_err(ArsenalError::from)
+}
+
+/// The categories the owner made. Local to this computer, like the corrections.
+#[tauri::command]
+fn arsenal_categories(
+    arsenal: State<'_, Arsenal>,
+) -> Result<Vec<super::groups::Custom>, ArsenalError> {
+    arsenal.categories().map_err(ArsenalError::from)
+}
+
+/// Makes, renames or deletes a category of the owner's; answers the categories after the change.
+#[tauri::command]
+fn arsenal_category_write(
+    arsenal: State<'_, Arsenal>,
+    change: super::CategoryChange,
+) -> Result<Vec<super::groups::Custom>, ArsenalError> {
+    arsenal.write_category(change).map_err(ArsenalError::from)
 }
 
 #[tauri::command]

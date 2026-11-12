@@ -1,22 +1,54 @@
-/** Ordered classification from the approved Arsenal contract. Corrections stay local to a machine. */
+/**
+ * The basic categories, in screen order: five sections, then Other. Corrections stay local to a
+ * machine. The owner can add categories of their own (`u_…`), placed in one of the sections.
+ */
 export const GROUPS = [
+  'rules',
   'models',
-  'security',
-  'debug',
-  'content',
-  'motion',
-  'design',
-  'study',
-  'decide',
   'research',
-  'review',
-  'docs',
+  'decide',
   'planning',
   'build',
+  'design',
+  'motion',
+  'content',
+  'docs',
+  'review',
+  'debug',
+  'security',
   'system',
+  'study',
+  'integrations',
+  'automations',
   'other',
 ] as const;
 export type Group = (typeof GROUPS)[number];
+
+/** The five sections the categories are ordered in. Other goes last, outside them. */
+export const SECTIONS = ['how', 'before', 'build', 'after', 'env'] as const;
+export type Section = (typeof SECTIONS)[number];
+
+/** Which section each basic category belongs to; `null` for Other. */
+export const SECTION_OF: Record<Group, Section | null> = {
+  rules: 'how',
+  models: 'how',
+  research: 'before',
+  decide: 'before',
+  planning: 'before',
+  build: 'build',
+  design: 'build',
+  motion: 'build',
+  content: 'build',
+  docs: 'build',
+  review: 'after',
+  debug: 'after',
+  security: 'after',
+  system: 'env',
+  study: 'env',
+  integrations: 'env',
+  automations: 'env',
+  other: null,
+};
 export type Family = 'GSD' | 'gstack' | 'SEO' | 'HyperFrames' | null;
 
 const rules: ReadonlyArray<readonly [Group, readonly string[]]> = [
@@ -149,17 +181,16 @@ const rules: ReadonlyArray<readonly [Group, readonly string[]]> = [
 export function groupFor(
   item: { name: string; kind: string; description: string },
   correction?: string,
-): Group {
-  if (correction !== undefined)
-    return (GROUPS as readonly string[]).includes(correction)
-      ? (correction as Group)
-      : 'other';
+): string {
+  if (correction !== undefined) {
+    // Before 2026-11-12 rules and models shared one group; a rule moved there is a rule.
+    if (correction === 'models' && item.kind === 'rule') return 'rules';
+    return correction;
+  }
   const name = item.name.toLowerCase();
-  if (
-    item.kind === 'rule' ||
-    (item.kind === 'agent' && /^(astra|luna|sol)_/.test(name))
-  )
-    return 'models';
+  if (item.kind === 'rule') return 'rules';
+  if (item.kind === 'agent' && /^(astra|luna|sol)_/.test(name)) return 'models';
+  if (item.kind === 'mcp_server') return 'integrations';
   for (const [group, words] of rules) {
     if (group === 'content' && name.startsWith('seo-')) return group;
     if (
@@ -176,7 +207,16 @@ export function groupFor(
     )
       return group;
   }
+  if (item.kind === 'hook') return 'automations';
+  if (item.kind === 'plugin') return 'system';
   return 'other';
+}
+
+/** The category a stored correction names, if this screen knows it; otherwise Other. */
+export function knownGroup(group: string, custom: readonly string[]): string {
+  return (GROUPS as readonly string[]).includes(group) || custom.includes(group)
+    ? group
+    : 'other';
 }
 
 export function familyFor(name: string): Family {

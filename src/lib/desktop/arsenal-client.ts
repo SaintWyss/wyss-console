@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { CustomCategory } from '../features/arsenal/presets';
+import type { Section } from '../features/arsenal/groups';
 import {
   parseBinding,
   parseBindings,
@@ -148,6 +150,14 @@ export const arsenalClient = {
         throw new Error('group');
       return Object.fromEntries(entries) as Record<string, string>;
     }),
+  /** The categories the owner made, kept on this computer. */
+  categories: () =>
+    answer<CustomCategory[]>('arsenal_categories', parseCategories),
+  /** Makes, renames or deletes a category of the owner's; answers the list after the change. */
+  writeCategory: (change: CategoryChange) =>
+    answer<CustomCategory[]>('arsenal_category_write', parseCategories, {
+      change,
+    }),
   moveGroup: (identity: string, group_id: string | null) =>
     call('arsenal_group_move', { request: { identity, group_id } }).then(
       () => undefined,
@@ -184,3 +194,38 @@ export const arsenalClient = {
 };
 
 export type ArsenalClient = typeof arsenalClient;
+
+/** A change to the owner's categories, as the desktop takes it. */
+export type CategoryChange =
+  | { action: 'create'; name: string; section: Section }
+  | { action: 'rename'; id: string; name: string }
+  | { action: 'delete'; id: string };
+
+const SECTION_NAMES: readonly string[] = [
+  'how',
+  'before',
+  'build',
+  'after',
+  'env',
+];
+
+function parseCategories(value: unknown): CustomCategory[] {
+  if (!Array.isArray(value)) throw new Error('categories');
+  return value.map((entry: unknown) => {
+    const category = entry as Record<string, unknown>;
+    if (
+      typeof category !== 'object' ||
+      category === null ||
+      typeof category.id !== 'string' ||
+      typeof category.name !== 'string' ||
+      typeof category.section !== 'string' ||
+      !SECTION_NAMES.includes(category.section)
+    )
+      throw new Error('category');
+    return {
+      id: category.id,
+      name: category.name,
+      section: category.section as Section,
+    };
+  });
+}

@@ -102,6 +102,68 @@ impl Arsenal {
         })
     }
 
+    /// The categories the owner made, in the order they were made.
+    pub(super) fn categories(&self) -> Result<Vec<groups::Custom>, Error> {
+        let directory = self.directory.as_ref().ok_or(Error::Storage)?;
+        Ok(groups::load(directory).custom)
+    }
+
+    /// Makes, renames or deletes a category of the owner's. Deleting one also drops every
+    /// correction that pointed at it, so those capabilities go back to their rule's category.
+    pub(super) fn write_category(
+        &self,
+        change: CategoryChange,
+    ) -> Result<Vec<groups::Custom>, Error> {
+        let directory = self.directory.clone().ok_or(Error::Storage)?;
+        self.with_store(|_| {
+            let mut state = groups::load(&directory);
+            let taken = |state: &groups::State, name: &str, section: &str, except: &str| {
+                state.custom.iter().any(|category| {
+                    category.id != except
+                        && category.section == section
+                        && category.name.trim().to_lowercase() == name.trim().to_lowercase()
+                })
+            };
+            match change {
+                CategoryChange::Create { name, section } => {
+                    if !groups::name_ok(&name)
+                        || !groups::SECTIONS.contains(&section.as_str())
+                        || state.custom.len() >= groups::MAX_CUSTOM
+                        || taken(&state, &name, &section, "")
+                    {
+                        return Err(Error::Invalid);
+                    }
+                    let id = format!("u_{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
+                    state.custom.push(groups::Custom {
+                        id,
+                        name: name.trim().to_owned(),
+                        section,
+                    });
+                }
+                CategoryChange::Rename { id, name } => {
+                    let Some(index) = state.custom.iter().position(|c| c.id == id) else {
+                        return Err(Error::NotFound);
+                    };
+                    let section = state.custom[index].section.clone();
+                    if !groups::name_ok(&name) || taken(&state, &name, &section, &id) {
+                        return Err(Error::Invalid);
+                    }
+                    state.custom[index].name = name.trim().to_owned();
+                }
+                CategoryChange::Delete { id } => {
+                    let before = state.custom.len();
+                    state.custom.retain(|category| category.id != id);
+                    if state.custom.len() == before {
+                        return Err(Error::NotFound);
+                    }
+                    state.groups.retain(|_, group| *group != id);
+                }
+            }
+            groups::save(&directory, &state).map_err(|_| Error::Storage)?;
+            Ok(state.custom)
+        })
+    }
+
     /// Synchronization's status; `enabled: false` when it does not run here.
     pub(super) fn sync_status(&self) -> sync::Status {
         self.sync
@@ -212,6 +274,15 @@ fn open() -> Result<(Store, PathBuf), Error> {
         .open(&path)
         .map_err(|_| Error::Storage)?;
     Ok((Store::open(Connection::open(path)?)?, directory))
+}
+
+/// A change to the owner's categories, as the window asks for it.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CategoryChange {
+    Create { name: String, section: String },
+    Rename { id: String, name: String },
+    Delete { id: String },
 }
 
 #[cfg(test)]
@@ -327,6 +398,7 @@ mod tests {
             groups: (0..u32::try_from(groups::MAX_GROUPS).unwrap())
                 .map(|n| (id(n), "design".to_owned()))
                 .collect(),
+            custom: Vec::new(),
         };
         groups::save(&directory, &full).unwrap();
         let mut store = memory();
@@ -360,5 +432,63 @@ mod tests {
         assert_eq!(arsenal.set_group(&id(1), "design"), Err(Error::Storage));
         assert_eq!(arsenal.clear_group(&id(1)), Err(Error::Storage));
         assert_eq!(arsenal.groups(), Err(Error::Storage));
+    }
+
+    #[test]
+    fn the_owner_makes_renames_and_deletes_categories_and_corrections_go_back() {
+        let directory = scratch("categories");
+        let mut store = memory();
+        skill(&mut store, &id(1), "frontend");
+        let arsenal = open_with(store, directory.clone());
+        let made = arsenal
+            .write_category(CategoryChange::Create {
+                name: " Clientes ".into(),
+                section: "build".into(),
+            })
+            .unwrap();
+        assert_eq!(made.len(), 1);
+        assert_eq!(made[0].name, "Clientes");
+        assert!(groups::custom_id_ok(&made[0].id));
+        let category = made[0].id.clone();
+        // The same name in the same section is refused; a bad section too.
+        for change in [
+            CategoryChange::Create {
+                name: "clientes".into(),
+                section: "build".into(),
+            },
+            CategoryChange::Create {
+                name: "Otra".into(),
+                section: "nowhere".into(),
+            },
+            CategoryChange::Create {
+                name: "  ".into(),
+                section: "env".into(),
+            },
+        ] {
+            assert_eq!(arsenal.write_category(change), Err(Error::Invalid));
+        }
+        arsenal.set_group(&id(1), &category).unwrap();
+        let renamed = arsenal
+            .write_category(CategoryChange::Rename {
+                id: category.clone(),
+                name: "Trabajo".into(),
+            })
+            .unwrap();
+        assert_eq!(renamed[0].name, "Trabajo");
+        assert!(
+            arsenal
+                .write_category(CategoryChange::Delete {
+                    id: category.clone()
+                })
+                .unwrap()
+                .is_empty()
+        );
+        // Its capability goes back to its rule's category: the correction is gone.
+        assert!(arsenal.groups().unwrap().is_empty());
+        assert_eq!(
+            arsenal.write_category(CategoryChange::Delete { id: category }),
+            Err(Error::NotFound)
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

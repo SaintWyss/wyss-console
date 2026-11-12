@@ -150,6 +150,8 @@ fn main() {
             "arsenal_preset_plan",
             "arsenal_groups",
             "arsenal_group_move",
+            "arsenal_categories",
+            "arsenal_category_write",
             "arsenal_terminal_plan",
             "arsenal_terminal_bind",
             "arsenal_terminal_bindings",

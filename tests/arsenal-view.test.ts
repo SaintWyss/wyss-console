@@ -81,6 +81,8 @@ function stateWith(overrides: Partial<ArsenalState>): ArsenalState {
     bindings: [],
     sync: null,
     groups: {},
+    categories: [],
+    categoryFailure: null,
     movingGroup: null,
     groupFailure: null,
     plan: null,
@@ -534,7 +536,10 @@ describe('Arsenal sections', () => {
 
   it('asks before switching provider with unsaved changes; Keep editing stays, Discard changes switches and empties the draft', () => {
     const { root } = render(stateWith({ tab: 'presets' }));
-    root.querySelector<HTMLButtonElement>('.group-toggle')!.click();
+    // Every category is listed now, empty ones too: open the one that holds the capability.
+    [...root.querySelectorAll<HTMLButtonElement>('.group-toggle')]
+      .find((node) => text(node).includes('Design and interface'))!
+      .click();
     flushSync();
     const design = () =>
       root.querySelector<HTMLInputElement>('input[aria-label="design"]')!;

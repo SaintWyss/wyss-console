@@ -7,7 +7,16 @@ import type {
   Preview,
 } from '../../contracts/arsenal';
 import { filterLibrary } from './catalogue';
-import { GROUPS, familyFor, groupFor, type Family, type Group } from './groups';
+import {
+  GROUPS,
+  SECTIONS,
+  SECTION_OF,
+  familyFor,
+  groupFor,
+  knownGroup,
+  type Family,
+  type Section,
+} from './groups';
 
 /** The cells a group's meter draws: one per chosen capability, never more than this many. */
 export const METER_CELLS = 5;
@@ -33,37 +42,105 @@ export const FAMILIES: readonly Exclude<Family, null>[] = [
   'HyperFrames',
 ];
 
-/** One group of the provider's library: how many of it are chosen, and whether the group box is mixed. */
+/** A category the owner made: a name, placed in one of the sections. */
+export interface CustomCategory {
+  id: string;
+  name: string;
+  section: Section;
+}
+
+/** One category on screen, basic or the owner's, with the section it is shown under. */
+export interface Category {
+  id: string;
+  section: Section | null;
+  /** The owner's name for a category they made; `null` for a basic one. */
+  name: string | null;
+}
+
+/** Every category in screen order: each section's basic ones, then the owner's, and Other last. */
+export function categoriesOf(custom: readonly CustomCategory[]): Category[] {
+  const basic = (section: Section | null): Category[] =>
+    GROUPS.filter((group) => SECTION_OF[group] === section).map((group) => ({
+      id: group,
+      section,
+      name: null,
+    }));
+  return [
+    ...SECTIONS.flatMap((section) => [
+      ...basic(section),
+      ...custom
+        .filter((category) => category.section === section)
+        .map((category) => ({
+          id: category.id,
+          section,
+          name: category.name,
+        })),
+    ]),
+    ...basic(null),
+  ];
+}
+
+/** One category of the provider's library: how many of it are chosen, and whether its box is mixed. */
 export interface GroupRow {
-  group: Group;
+  group: string;
+  section: Section | null;
+  name: string | null;
   total: number;
   chosen: number;
   state: 'none' | 'partial' | 'all';
   items: LibraryItem[];
+  /** What the category lists without a checkbox: hooks, MCP servers, plugins, commands. */
+  extras: ViewOnlyEntry[];
 }
 
 /**
- * The provider's capabilities by group, in the order of the group table. A group the provider has
- * no capability in is left out. A correction the owner made wins over the rules.
+ * The provider's capabilities by category, every category listed even when it is empty, in screen
+ * order. A correction the owner made wins over the rules; one this screen does not know is Other.
  */
 export function groupRows(
   library: readonly LibraryItem[],
   chosen: ReadonlySet<string>,
   corrections: Readonly<Record<string, string>>,
+  categories: readonly Category[] = categoriesOf([]),
+  extras: readonly ViewOnlyEntry[] = [],
 ): GroupRow[] {
-  const byGroup = new Map<Group, LibraryItem[]>();
+  const custom = categories
+    .filter((category) => category.name !== null)
+    .map((category) => category.id);
+  const place = (
+    item: { name: string; kind: string; description: string },
+    id?: string,
+  ) => {
+    const correction = id === undefined ? undefined : corrections[id];
+    return knownGroup(groupFor(item, correction), custom);
+  };
+  const byGroup = new Map<string, LibraryItem[]>();
   for (const item of library) {
-    const group = groupFor(item, corrections[item.id]);
+    const group = place(item, item.id);
     byGroup.set(group, [...(byGroup.get(group) ?? []), item]);
   }
-  return GROUPS.flatMap((group) => {
-    const items = byGroup.get(group);
-    if (!items) return [];
-    items.sort((a, b) => a.name.localeCompare(b.name));
+  const extrasBy = new Map<string, ViewOnlyEntry[]>();
+  for (const entry of extras) {
+    const group = place(entry);
+    extrasBy.set(group, [...(extrasBy.get(group) ?? []), entry]);
+  }
+  return categories.map((category) => {
+    const items = [...(byGroup.get(category.id) ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
     const count = items.filter((item) => chosen.has(item.id)).length;
     const state =
       count === 0 ? 'none' : count === items.length ? 'all' : 'partial';
-    return [{ group, total: items.length, chosen: count, state, items }];
+    return {
+      group: category.id,
+      section: category.section,
+      name: category.name,
+      total: items.length,
+      chosen: count,
+      state,
+      items,
+      extras: extrasBy.get(category.id) ?? [],
+    };
   });
 }
 

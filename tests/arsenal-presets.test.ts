@@ -5,7 +5,9 @@ import type {
   Preview,
   PreviewItem,
 } from '../src/lib/contracts/arsenal';
+import { GROUPS } from '../src/lib/features/arsenal/groups';
 import {
+  categoriesOf,
   filterChooser,
   familiesOf,
   groupRows,
@@ -71,9 +73,41 @@ describe('groupRows', () => {
     expect(mixed?.state).toBe('partial');
   });
 
-  it('leaves out a group the provider has no capability in', () => {
-    const groups = groupRows(library, new Set(), {}).map((row) => row.group);
-    expect(groups).not.toContain('security');
+  it('lists every category, empty ones too, each section together and Other last', () => {
+    const rows = groupRows(library, new Set(), {});
+    const security = rows.find((row) => row.group === 'security');
+    expect(security).toMatchObject({ total: 0, section: 'after' });
+    expect(rows.at(-1)?.group).toBe('other');
+    const sections = rows.map((row) => row.section);
+    // A section never comes back once another one started.
+    const seen = sections.filter((section, i) => section !== sections[i - 1]);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it('puts the owner categories at the end of their section and keeps their capabilities', () => {
+    const custom = [
+      { id: 'u_00000000000000ab', name: 'Clientes', section: 'build' as const },
+    ];
+    const rows = groupRows(
+      library,
+      new Set(),
+      { 'cap-frontend-design': 'u_00000000000000ab' },
+      categoriesOf(custom),
+    );
+    const index = rows.findIndex((row) => row.group === 'u_00000000000000ab');
+    expect(rows[index]).toMatchObject({
+      name: 'Clientes',
+      section: 'build',
+      total: 1,
+    });
+    expect(rows[index + 1]?.section).not.toBe('build');
+    // Without the category, the correction is unknown and shows in Other.
+    const gone = groupRows(library, new Set(), {
+      'cap-frontend-design': 'u_00000000000000ab',
+    });
+    expect(
+      gone.find((row) => row.group === 'other')?.items.map((i) => i.name),
+    ).toContain('frontend-design');
   });
 
   it('lets an owner correction win over the rules, and shows an unknown group as Other', () => {
@@ -300,23 +334,8 @@ describe('planKey', () => {
   });
 });
 
-const ORDER = [
-  'models',
-  'security',
-  'debug',
-  'content',
-  'motion',
-  'design',
-  'study',
-  'decide',
-  'research',
-  'review',
-  'docs',
-  'planning',
-  'build',
-  'system',
-  'other',
-];
+const ORDER: readonly string[] = GROUPS;
+
 function groupIndex(group: string): number {
   return ORDER.indexOf(group);
 }

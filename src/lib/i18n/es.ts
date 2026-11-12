@@ -2311,6 +2311,43 @@ export const ES: Readonly<Record<string, string>> = {
   Conflicting: 'En conflicto',
   Unsupported: 'No compatible',
   'Models and rules': 'Modelos y reglas',
+  'Fixing bugs': 'Depuración',
+  "Integrations":
+    "Integraciones",
+  "Automations":
+    "Automatizaciones",
+  "Rules the agent always follows: standing instructions read when every session starts.":
+    "Reglas que el agente cumple siempre: instrucciones fijas que lee al arrancar cada sesión.",
+  "Model profiles (astra, luna, sol) that choose which model and effort a task runs with.":
+    "Perfiles de modelo (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.",
+  "MCP servers: connections to outside tools such as Notion, a browser or library docs.":
+    "Servidores MCP: conexiones a herramientas de afuera como Notion, un navegador o la documentación de una librería.",
+  "Hooks that run by themselves at moments of the session and are not about security.":
+    "Hooks que corren solos en momentos de la sesión y no son de seguridad.",
+  "How it works":
+    "Cómo trabaja",
+  "Before building":
+    "Antes de construir",
+  "After":
+    "Después",
+  "Environment":
+    "Entorno",
+  "Category name":
+    "Nombre de la categoría",
+  "Save":
+    "Guardar",
+  "Delete {name}? Its {n} capabilities go back to their default category.":
+    "¿Borrar {name}? Sus {n} capacidades vuelven a su categoría automática.",
+  "Not selectable yet":
+    "Todavía no se elige",
+  "Nothing here yet.":
+    "Todavía no hay nada acá.",
+  "New category":
+    "Nueva categoría",
+  "The category could not be deleted. Try again.":
+    "No se pudo borrar la categoría. Probá de nuevo.",
+  "That name cannot be used: it is empty, longer than 40 characters, or already in this section.":
+    "Ese nombre no sirve: está vacío, tiene más de 40 caracteres o ya existe en esta sección.",
   'Rules the agent always follows, and the Codex model profiles (astra, luna, sol) that choose which model and effort a task runs with.':
     'Reglas que el agente cumple siempre, y los perfiles de modelo de Codex (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.',
   'Checks for security problems: audits, threat reviews and guards against dangerous commands.':
