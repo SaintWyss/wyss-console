@@ -1652,4 +1652,28 @@ export const ES: Readonly<Record<string, string>> = {
     'Revisa objetivo, workspace, orden DAG, proveedor, efectos, prompts, presupuesto y vencimiento. Confirmar permite solo el plan exacto anterior.',
   'See the full plan and exact inputs': 'Ver plan completo y entradas exactas',
   'Confirm and send to the coordinator': 'Confirmar y enviar al coordinador',
+  'Local runs': 'Ejecuciones locales',
+  'Durable metadata only. No prompts or provider output in the local log.':
+    'Solo metadatos durables. Sin prompts ni salida de proveedor en el registro local.',
+  'Reading local log…': 'Leyendo registro local…',
+  'No runs recorded.': 'No hay ejecuciones registradas.',
+  digest: 'digest',
+  '{provider} · {effect} · attempts {count}':
+    '{provider} · {effect} · intentos {count}',
+  'The turn ended. Inspect the workspace before marking the step completed.':
+    'El turno terminó. Inspecciona el workspace antes de marcar el paso completado.',
+  'Uncertain result or coordinator restarted. The turn is not resent. Confirm evidence before closing this step.':
+    'Resultado incierto o coordinador reiniciado. No se reenvía el turno. Confirma evidencia antes de cerrar este paso.',
+  'Choose and observe workspace': 'Elegir y observar workspace',
+  'Confirm output after reviewing the current revision':
+    'Confirmar salida tras revisar la revisión actual',
+  'Observed revision': 'Revisión observada',
+  'Observed workspace': 'Workspace observado',
+  'I confirm it completed · review current revision':
+    'Confirmo que completó · revisar revisión actual',
+  'I confirm it had no effect · close as failed':
+    'Confirmo que no tuvo efecto · cerrar como fallido',
+  'I confirm cancellation': 'Confirmo cancelación',
+  Pause: 'Pausar',
+  'Stop/cancel': 'Detener/cancelar',
 };

@@ -1270,18 +1270,17 @@
       <section class="m6-panel" aria-labelledby="runs-title">
         <div class="m6-panel-head">
           <div>
-            <h3 id="runs-title">Ejecuciones locales</h3>
+            <h3 id="runs-title">{t('Local runs')}</h3>
             <p>
-              Solo metadatos durables. Sin prompts ni salida de proveedor en el
-              registro local.
+              {t(
+                'Durable metadata only. No prompts or provider output in the local log.',
+              )}
             </p>
           </div>
         </div>
         {#if runs.length === 0}
           <p class="m6-empty">
-            {loadingRuns
-              ? 'Leyendo registro local…'
-              : 'No hay ejecuciones registradas.'}
+            {loadingRuns ? t('Reading local log…') : t('No runs recorded.')}
           </p>
         {:else}
           <div class="m6-runs">
@@ -1295,7 +1294,7 @@
                     <p><code>{run.run_id}</code></p>
                   </div>
                   <span class="m6-meta"
-                    >r{run.revision} · digest
+                    >r{run.revision} · {t('digest')}
                     <code>{run.plan_digest.slice(0, 12)}…</code></span
                   >
                 </header>
@@ -1307,7 +1306,11 @@
                     <li>
                       <div>
                         <strong>{statusText(step.state)}</strong><span>
-                          {step.provider} · {step.effect} · intentos {step.attempt_count}</span
+                          {t('{provider} · {effect} · attempts {count}', {
+                            provider: step.provider,
+                            effect: step.effect,
+                            count: step.attempt_count,
+                          })}</span
                         >{#if step.failure}<small
                             >{statusText(step.failure)}</small
                           >{/if}
@@ -1315,15 +1318,16 @@
                       {#if step.state === 'verifying'}
                         <div class="m6-recovery">
                           <p>
-                            El turno terminó. Inspecciona el workspace antes de
-                            marcar el paso completado.
+                            {t(
+                              'The turn ended. Inspect the workspace before marking the step completed.',
+                            )}
                           </p>
                           <button
                             class="m6-button"
                             type="button"
                             disabled={busy}
                             onclick={() => void chooseRunWorkspace(run)}
-                            >Elegir y observar workspace</button
+                            >{t('Choose and observe workspace')}</button
                           >
                           {#if runWorkspaceRoots[run.run_id]}<button
                               class="m6-button"
@@ -1335,10 +1339,13 @@
                                   step.step_id,
                                   runWorkspaceRoots[run.run_id],
                                 )}
-                              >Confirmar salida tras revisar la revisión actual</button
+                              >{t(
+                                'Confirm output after reviewing the current revision',
+                              )}</button
                             >{/if}
                           {#if observedWorkspace[run.run_id]}<small
-                              >Revisión observada <code
+                              >{t('Observed revision')}
+                              <code
                                 >{observedWorkspace[run.run_id]
                                   .workspace_revision}</code
                               ></small
@@ -1347,16 +1354,16 @@
                       {:else if step.state === 'needs_review'}
                         <div class="m6-recovery">
                           <p>
-                            Resultado incierto o coordinador reiniciado. No se
-                            reenvía el turno. Confirma evidencia antes de cerrar
-                            este paso.
+                            {t(
+                              'Uncertain result or coordinator restarted. The turn is not resent. Confirm evidence before closing this step.',
+                            )}
                           </p>
                           <button
                             class="m6-button"
                             type="button"
                             disabled={busy}
                             onclick={() => void chooseRunWorkspace(run)}
-                            >Elegir y observar workspace</button
+                            >{t('Choose and observe workspace')}</button
                           >
                           {#if runWorkspaceRoots[run.run_id]}
                             <button
@@ -1369,7 +1376,9 @@
                                   step.step_id,
                                   'confirmed_completed',
                                 )}
-                              >Confirmo que completó · revisar revisión actual</button
+                              >{t(
+                                'I confirm it completed · review current revision',
+                              )}</button
                             >
                           {/if}
                           <button
@@ -1382,7 +1391,9 @@
                                 step.step_id,
                                 'confirmed_no_effect',
                               )}
-                            >Confirmo que no tuvo efecto · cerrar como fallido</button
+                            >{t(
+                              'I confirm it had no effect · close as failed',
+                            )}</button
                           >
                           <button
                             class="m6-button danger"
@@ -1393,15 +1404,16 @@
                                 run,
                                 step.step_id,
                                 'confirmed_cancelled',
-                              )}>Confirmo cancelación</button
+                              )}>{t('I confirm cancellation')}</button
                           >
                           {#if observedWorkspace[run.run_id]}<small
-                              >Workspace observado <code
+                              >{t('Observed workspace')}
+                              <code
                                 >{observedWorkspace[
                                   run.run_id
                                 ].workspace_id.slice(0, 12)}…</code
                               >
-                              · revisión
+                              · {t('revision')}
                               <code
                                 >{observedWorkspace[run.run_id]
                                   .workspace_revision}</code
@@ -1418,21 +1430,21 @@
                       type="button"
                       disabled={busy}
                       onclick={() => void updateRun(run.run_id, 'pause')}
-                      >Pausar</button
+                      >{t('Pause')}</button
                     >{/if}
                   {#if run.state === 'paused'}<button
                       class="m6-button"
                       type="button"
                       disabled={busy}
                       onclick={() => void updateRun(run.run_id, 'resume')}
-                      >Reanudar</button
+                      >{t('Resume')}</button
                     >{/if}
                   {#if ['running', 'paused', 'pausing', 'cancelling'].includes(run.state)}<button
                       class="m6-button danger"
                       type="button"
                       disabled={busy || run.state === 'cancelling'}
                       onclick={() => void updateRun(run.run_id, 'stop')}
-                      >Detener/cancelar</button
+                      >{t('Stop/cancel')}</button
                     >{/if}
                 </footer>
               </article>
