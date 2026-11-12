@@ -949,18 +949,18 @@
     <div>
       <h2>Pipelines</h2>
       <p class="m6-muted">
-        OL3 supervisado · DAG finito · concurrencia Managed fijada en 1
+        {t('OL3 supervised · finite DAG · Managed concurrency pinned at 1')}
       </p>
     </div>
     <button
       class="m6-button"
       type="button"
       disabled={busy || loadingRuns}
-      onclick={() => void refreshRuns()}>Actualizar</button
+      onclick={() => void refreshRuns()}>{t('Refresh')}</button
     >
   </header>
 
-  <div class="m6-tabs" role="tablist" aria-label="Coordinación">
+  <div class="m6-tabs" role="tablist" aria-label={t('Coordination')}>
     <button
       class:active={tab === 'pipelines'}
       role="tab"
@@ -969,7 +969,7 @@
       tabindex={tab === 'pipelines' ? 0 : -1}
       onkeydown={(event) => tabKey(event, 0)}
       aria-selected={tab === 'pipelines'}
-      onclick={() => (tab = 'pipelines')}>Plan y ejecuciones</button
+      onclick={() => (tab = 'pipelines')}>{t('Plan and runs')}</button
     >
     <button
       class:active={tab === 'handoff'}
@@ -1001,31 +1001,33 @@
       <section class="m6-panel" aria-labelledby="plan-title">
         <div class="m6-panel-head">
           <div>
-            <h3 id="plan-title">Crear un plan revisable</h3>
+            <h3 id="plan-title">{t('Create a reviewable plan')}</h3>
             <p>
-              Los prompts permanecen en memoria volátil hasta que el dueño
-              revisa y confirma el digest.
+              {t(
+                'Prompts stay in volatile memory until the owner reviews and confirms the digest.',
+              )}
             </p>
           </div>
         </div>
         <div class="m6-form">
           <label
-            >Workspace
+            >{t('Workspace')}
             <span class="m6-inline"
               ><input
                 readonly
                 value={planWorkspaceRoot}
-                placeholder="Elige una carpeta"
+                placeholder={t('Choose a folder')}
               /><button
                 class="m6-button"
                 type="button"
-                onclick={() => void pickPlanWorkspace()}>Elegir…</button
+                onclick={() => void pickPlanWorkspace()}>{t('Choose…')}</button
               ></span
             >
           </label>
           {#if planWorkspace}<p class="m6-meta">
-              Workspace <code>{planWorkspace.workspace_id.slice(0, 16)}…</code>
-              · revisión
+              {t('Workspace')}
+              <code>{planWorkspace.workspace_id.slice(0, 16)}…</code>
+              · {t('revision')}
               <code>{planWorkspace.workspace_revision.slice(0, 16)}…</code>
             </p>{/if}
           <label
@@ -1036,14 +1038,14 @@
             /></label
           >
           <label
-            >Objetivo<input
+            >{t('Goal')}<input
               bind:value={objective}
               maxlength="2048"
               oninput={invalidatePlanReview}
             /></label
           >
           <label
-            >Presupuesto total en minutos<input
+            >{t('Total budget in minutes')}<input
               type="number"
               min="1"
               max="60"
@@ -1056,11 +1058,11 @@
           >
           {#if budgetInvalid}
             <p id="plan-budget-error" class="m6-alert" role="alert">
-              El presupuesto debe ser un número entero entre 1 y 60 minutos.
+              {t('The budget must be a whole number between 1 and 60 minutes.')}
             </p>
           {/if}
           <div class="m6-section-title">
-            <h4>Pasos · máximo 16</h4>
+            <h4>{t('Steps · maximum 16')}</h4>
             <button
               class="m6-button"
               type="button"
@@ -1068,13 +1070,14 @@
               onclick={() => {
                 steps = [...steps, initialStep()];
                 invalidatePlanReview();
-              }}>Añadir paso</button
+              }}>{t('Add step')}</button
             >
           </div>
           {#each steps as step, index (step.step_id)}
             <article class="m6-step-editor">
               <header>
-                <strong>Paso {index + 1}</strong><button
+                <strong>{t('Step {number}', { number: index + 1 })}</strong
+                ><button
                   class="m6-button subtle"
                   type="button"
                   disabled={steps.length <= 1}
@@ -1088,11 +1091,11 @@
                         ),
                       }));
                     invalidatePlanReview();
-                  }}>Quitar</button
+                  }}>{t('Remove')}</button
                 >
               </header>
               <label
-                >Proveedor
+                >{t('Provider')}
                 <select
                   value={step.provider}
                   onchange={(event) =>
@@ -1105,22 +1108,22 @@
                     >{t('Managed Codex · F8 authority')}</option
                   >
                   <option value="managed_claude"
-                    >Managed Claude · adapter bloqueado</option
+                    >{t('Managed Claude · adapter blocked')}</option
                   >
                   <option value="native_codex"
-                    >Native Codex · bloqueado por frontera</option
+                    >{t('Native Codex · blocked by trust boundary')}</option
                   >
                   <option value="native_claude"
-                    >Native Claude · bloqueado por frontera</option
+                    >{t('Native Claude · blocked by trust boundary')}</option
                   >
                   <option value="hermes_planner"
-                    >Hermes planner · bloqueado</option
+                    >{t('Hermes planner · blocked')}</option
                   >
                 </select>
               </label>
               {#if step.provider === 'managed_codex' || step.provider === 'managed_claude'}
                 <label
-                  >Sesión Managed
+                  >{t('Managed session')}
                   <select
                     value={step.managed_session_id}
                     onchange={(event) =>
@@ -1128,17 +1131,17 @@
                         managed_session_id: event.currentTarget.value,
                       })}
                   >
-                    <option value="">Selecciona una sesión lista</option>
+                    <option value="">{t('Select a ready session')}</option>
                     {#each sessionOptions as session (session.id)}<option
                         value={session.id}
                         >{session.id.slice(0, 8)} · {session.runtime.profile ??
-                          'perfil no reportado'} · {session.runtime.workspace ??
-                          'workspace del binding'}</option
+                          t('profile not reported')} · {session.runtime
+                          .workspace ?? t('binding workspace')}</option
                       >{/each}
                   </select>
                 </label>
                 <label
-                  >Efecto
+                  >{t('Effect')}
                   <select
                     value={step.effect}
                     onchange={(event) =>
@@ -1147,25 +1150,32 @@
                           .value as StepDraft['effect'],
                       })}
                   >
-                    <option value="managed_inference">Managed inference</option>
+                    <option value="managed_inference"
+                      >{t('Managed inference')}</option
+                    >
                     <option value="managed_local_tools"
-                      >Managed local tools · aprobación F8 por acción</option
+                      >{t(
+                        'Managed local tools · F8 approval per action',
+                      )}</option
                     >
                   </select>
                 </label>
               {:else if step.provider === 'native_codex' || step.provider === 'native_claude'}
                 <p class="m6-blocked">
-                  BLOCKED_TRUST_BOUNDARY · no se lanzará un proceso Native desde
-                  OL3.
+                  {t(
+                    'BLOCKED_TRUST_BOUNDARY · no Native process will be launched from OL3.',
+                  )}
                 </p>
               {:else}
                 <p class="m6-blocked">
-                  BLOCKED_PROVIDER · el planner no tiene autoridad de ejecución.
+                  {t(
+                    'BLOCKED_PROVIDER · the planner has no execution authority.',
+                  )}
                 </p>
               {/if}
               {#if index > 0}
                 <fieldset>
-                  <legend>Dependencias</legend>
+                  <legend>{t('Dependencies')}</legend>
                   {#each steps.slice(0, index) as predecessor (predecessor.step_id)}
                     <label class="m6-check"
                       ><input
@@ -1182,13 +1192,16 @@
                                 ),
                           })}
                       />
-                      Paso {steps.findIndex(
-                        (candidate) =>
-                          candidate.step_id === predecessor.step_id,
-                      ) + 1}
+                      {t('Step {number}', {
+                        number:
+                          steps.findIndex(
+                            (candidate) =>
+                              candidate.step_id === predecessor.step_id,
+                          ) + 1,
+                      })}
                       {predecessor.required
-                        ? '(obligatorio)'
-                        : '(opcional)'}</label
+                        ? t('(required)')
+                        : t('(optional)')}</label
                     >
                   {/each}
                 </fieldset>
@@ -1201,43 +1214,46 @@
                     updateStep(step.step_id, {
                       required: event.currentTarget.checked,
                     })}
-                /> Paso obligatorio</label
+                />
+                {t('Required step')}</label
               >
               <label
-                >Entrada exacta del paso<textarea
+                >{t('Exact step input')}<textarea
                   rows="4"
                   maxlength="8192"
                   bind:value={step.prompt}
                   oninput={invalidatePlanReview}
-                  placeholder="Describe el trabajo de este paso. El texto no concede autoridad ni aprobaciones."
-                ></textarea></label
+                  placeholder={t(
+                    "Describe this step's work. The text grants no authority or approvals.",
+                  )}></textarea></label
               >
             </article>
           {/each}
           <p class="m6-note">
-            M6 fija un turno Managed global a la vez. Native full-account,
-            Claude adapter y Hermes planner permanecen visibles pero bloqueados.
+            {t(
+              'M6 keeps one Managed turn running globally at a time. Native full-account, Claude adapter and Hermes planner stay visible but blocked.',
+            )}
           </p>
           <button
             class="m6-button primary"
             type="button"
             disabled={busy}
             onclick={() => void reviewCurrentPlan()}
-            >Revisar el plan completo</button
+            >{t('Review the full plan')}</button
           >
         </div>
         {#if reviewedPlan && planReview}
-          <div class="m6-review" aria-label="Plan revisado">
+          <div class="m6-review" aria-label={t('Reviewed plan')}>
             <h4>
-              Revisión explícita · digest <code>{planReview.digest}</code>
+              {t('Explicit review · digest')} <code>{planReview.digest}</code>
             </h4>
             <p>
-              Revisa objetivo, workspace, orden DAG, proveedor, efectos,
-              prompts, presupuesto y vencimiento. Confirmar permite solo el plan
-              exacto anterior.
+              {t(
+                'Review goal, workspace, DAG order, provider, effects, prompts, budget and expiry. Confirming allows only the exact plan shown above.',
+              )}
             </p>
             <details>
-              <summary>Ver plan completo y entradas exactas</summary>
+              <summary>{t('See the full plan and exact inputs')}</summary>
               <pre>{JSON.stringify(reviewedPlan, null, 2)}</pre>
             </details>
             <button
@@ -1245,7 +1261,7 @@
               type="button"
               disabled={busy}
               onclick={() => void confirmPlan()}
-              >Confirmar y enviar al coordinador</button
+              >{t('Confirm and send to the coordinator')}</button
             >
           </div>
         {/if}

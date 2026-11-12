@@ -1598,4 +1598,58 @@ export const ES: Readonly<Record<string, string>> = {
   'Human entered': 'Ingresado por humano',
   'Provider reported': 'Reportado por el proveedor',
   'Provider output · untrusted': 'Salida del proveedor · no confiable',
+  'OL3 supervised · finite DAG · Managed concurrency pinned at 1':
+    'OL3 supervisado · DAG finito · concurrencia Managed fijada en 1',
+  Coordination: 'Coordinación',
+  'Plan and runs': 'Plan y ejecuciones',
+  'Create a reviewable plan': 'Crear un plan revisable',
+  'Prompts stay in volatile memory until the owner reviews and confirms the digest.':
+    'Los prompts permanecen en memoria volátil hasta que el dueño revisa y confirma el digest.',
+  'Choose a folder': 'Elige una carpeta',
+  'Choose…': 'Elegir…',
+  revision: 'revisión',
+  'Project ID (label, not path)': 'Project ID (etiqueta, no ruta)',
+  Goal: 'Objetivo',
+  'Total budget in minutes': 'Presupuesto total en minutos',
+  'The budget must be a whole number between 1 and 60 minutes.':
+    'El presupuesto debe ser un número entero entre 1 y 60 minutos.',
+  'Steps · maximum 16': 'Pasos · máximo 16',
+  'Add step': 'Añadir paso',
+  'Step {number}': 'Paso {number}',
+  Remove: 'Quitar',
+  Provider: 'Proveedor',
+  'Managed Claude · adapter blocked': 'Managed Claude · adapter bloqueado',
+  'Native Codex · blocked by trust boundary':
+    'Native Codex · bloqueado por frontera',
+  'Native Claude · blocked by trust boundary':
+    'Native Claude · bloqueado por frontera',
+  'Hermes planner · blocked': 'Hermes planner · bloqueado',
+  'Managed session': 'Sesión Managed',
+  'Select a ready session': 'Selecciona una sesión lista',
+  'profile not reported': 'perfil no reportado',
+  'binding workspace': 'workspace del binding',
+  Effect: 'Efecto',
+  'Managed inference': 'Managed inference',
+  'Managed local tools · F8 approval per action':
+    'Managed local tools · aprobación F8 por acción',
+  'BLOCKED_TRUST_BOUNDARY · no Native process will be launched from OL3.':
+    'BLOCKED_TRUST_BOUNDARY · no se lanzará un proceso Native desde OL3.',
+  'BLOCKED_PROVIDER · the planner has no execution authority.':
+    'BLOCKED_PROVIDER · el planner no tiene autoridad de ejecución.',
+  Dependencies: 'Dependencias',
+  '(required)': '(obligatorio)',
+  '(optional)': '(opcional)',
+  'Required step': 'Paso obligatorio',
+  'Exact step input': 'Entrada exacta del paso',
+  "Describe this step's work. The text grants no authority or approvals.":
+    'Describe el trabajo de este paso. El texto no concede autoridad ni aprobaciones.',
+  'M6 keeps one Managed turn running globally at a time. Native full-account, Claude adapter and Hermes planner stay visible but blocked.':
+    'M6 fija un turno Managed global a la vez. Native full-account, Claude adapter y Hermes planner permanecen visibles pero bloqueados.',
+  'Review the full plan': 'Revisar el plan completo',
+  'Reviewed plan': 'Plan revisado',
+  'Explicit review · digest': 'Revisión explícita · digest',
+  'Review goal, workspace, DAG order, provider, effects, prompts, budget and expiry. Confirming allows only the exact plan shown above.':
+    'Revisa objetivo, workspace, orden DAG, proveedor, efectos, prompts, presupuesto y vencimiento. Confirmar permite solo el plan exacto anterior.',
+  'See the full plan and exact inputs': 'Ver plan completo y entradas exactas',
+  'Confirm and send to the coordinator': 'Confirmar y enviar al coordinador',
 };
