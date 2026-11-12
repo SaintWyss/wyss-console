@@ -1,5 +1,6 @@
 import type { Delegation } from '../../desktop/native-client';
 import type { StateMark, StateTone } from '../arsenal/catalogue';
+import { msg } from '../../i18n/msg';
 
 /** How a delegated agent's status is drawn: tone and symbol, beside its word. */
 export function delegationMark(status: string): StateMark {
@@ -60,12 +61,12 @@ export interface TallyEntry {
 
 /** Each status counted under its own word; tones only color them. */
 const TALLY: { status: string; label: string }[] = [
-  { status: 'running', label: 'running' },
-  { status: 'succeeded', label: 'done' },
-  { status: 'failed', label: 'failed' },
-  { status: 'timed_out', label: 'timed out' },
-  { status: 'interrupted', label: 'interrupted' },
-  { status: 'cancelled', label: 'cancelled' },
+  { status: 'running', label: msg('running') },
+  { status: 'succeeded', label: msg('done') },
+  { status: 'failed', label: msg('failed') },
+  { status: 'timed_out', label: msg('timed out') },
+  { status: 'interrupted', label: msg('interrupted') },
+  { status: 'cancelled', label: msg('cancelled') },
 ];
 const KNOWN = new Set(TALLY.map((entry) => entry.status));
 
@@ -83,7 +84,7 @@ export function delegationTally(
   }));
   entries.push({
     ...delegationMark('unknown'),
-    label: 'other',
+    label: msg('other'),
     count: count((s) => !KNOWN.has(s)),
   });
   return entries.filter((entry) => entry.count > 0);

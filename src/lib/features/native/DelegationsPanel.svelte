@@ -9,6 +9,8 @@
     delegationMark,
     delegationTally,
   } from './delegations';
+  import { t } from '../../i18n/index.svelte';
+  import { msg } from '../../i18n/msg';
 
   /** Agents that orchestrator sessions delegated work to, read from the terminal host. */
   let {
@@ -32,18 +34,18 @@
     claude_code: 'Claude Code',
   };
   const STATUS: Record<string, string> = {
-    running: 'Running',
-    succeeded: 'Done',
-    failed: 'Failed',
-    cancelled: 'Cancelled',
-    timed_out: 'Timed out',
-    interrupted: 'Interrupted',
+    running: msg('Running'),
+    succeeded: msg('Done'),
+    failed: msg('Failed'),
+    cancelled: msg('Cancelled'),
+    timed_out: msg('Timed out'),
+    interrupted: msg('Interrupted'),
   };
   const CHECK: Record<string, string> = {
-    verified: 'configuration verified',
-    mismatch: 'configuration did not match',
-    pending: 'configuration not checked yet',
-    unavailable: 'configuration not verifiable',
+    verified: msg('configuration verified'),
+    mismatch: msg('configuration did not match'),
+    pending: msg('configuration not checked yet'),
+    unavailable: msg('configuration not verifiable'),
   };
 
   const groups = $derived(delegationGroups(delegations));
@@ -82,16 +84,16 @@
     });
 </script>
 
-<section aria-label="Delegated agents" class="delegations">
+<section aria-label={t('Delegated agents')} class="delegations">
   <div class="delegations-head">
-    <h3 class="native-heading">Delegated agents</h3>
+    <h3 class="native-heading">{t('Delegated agents')}</h3>
     {#if delegations.length > 0}
       <p class="delegations-tally" aria-live="polite">
         {#each tally as entry (entry.label)}
           <span class="badge" data-tone={entry.tone}
             ><span aria-hidden="true">{entry.symbol}</span>
             {entry.count}
-            {entry.label}</span
+            {t(entry.label)}</span
           >
         {/each}
       </p>
@@ -99,25 +101,28 @@
   </div>
   {#if failed}
     <p class="native-warning" role="alert">
-      The terminal host did not list delegated agents.
+      {t('The terminal host did not list delegated agents.')}
     </p>
   {:else if delegations.length === 0}
     <p class="delegations-empty">
-      None yet. A Claude Code or Codex session started with delegation on can
-      give a task to the other one.
+      {t(
+        'None yet. A Claude Code or Codex session started with delegation on can give a task to the other one.',
+      )}
     </p>
   {/if}
   {#each groups as group (group.key)}
     <div class="delegation-group">
       <p class="delegation-parent">
         <span class="mono"
-          >From {PROVIDER[group.provider] ?? group.provider} session {group.parent.slice(
-            0,
-            8,
-          )}</span
+          >{t('From {provider} session {id}', {
+            provider: PROVIDER[group.provider] ?? group.provider,
+            id: group.parent.slice(0, 8),
+          })}</span
         >
         <span class="delegation-parent-count"
-          >{group.items.length} agent{group.items.length === 1 ? '' : 's'}</span
+          >{group.items.length === 1
+            ? t('{count} agent', { count: group.items.length })
+            : t('{count} agents', { count: group.items.length })}</span
         >
       </p>
       <ul class="delegation-list">
@@ -128,7 +133,7 @@
               <strong class="delegation-title">{d.title}</strong>
               <span class="badge" data-tone={mark.tone}
                 ><span aria-hidden="true">{mark.symbol}</span>
-                {STATUS[d.status] ?? d.status}</span
+                {STATUS[d.status] ? t(STATUS[d.status]) : d.status}</span
               >
             </div>
             <p class="delegation-route">
@@ -138,43 +143,53 @@
               <span class="mono">{d.model} · {d.effort}</span>
             </p>
             <dl class="delegation-facts">
-              <dt>Time</dt>
+              <dt>{t('Time')}</dt>
               <dd>
                 {when(d.created_at)}{d.ended_at
                   ? ` – ${when(d.ended_at)}`
-                  : ' · running'} · {d.steps} completed step(s)
+                  : ` · ${t('running')}`} · {t('{n} completed step(s)', {
+                  n: d.steps,
+                })}
               </dd>
-              <dt>Check</dt>
+              <dt>{t('Check')}</dt>
               <dd>
-                {CHECK[d.verification.state] ?? d.verification.state}
+                {CHECK[d.verification.state]
+                  ? t(CHECK[d.verification.state])
+                  : d.verification.state}
                 {#if d.verification.model}
-                  · Observed: {d.verification.model} · {d.verification.effort ??
-                    'effort not reported'}
+                  · {t('Observed:')}
+                  {d.verification.model} · {d.verification.effort ??
+                    t('effort not reported')}
                 {/if}
               </dd>
               {#if d.preset || d.selection}
-                <dt>Arsenal</dt>
+                <dt>{t('Arsenal')}</dt>
                 <dd>
-                  {#if d.preset}Preset: {d.preset}{/if}
+                  {#if d.preset}{t('Preset: {name}', { name: d.preset })}{/if}
                   {#if d.preset && d.selection}
                     ·
                   {/if}
-                  {#if d.selection}Selection: {d.selection}{/if}
+                  {#if d.selection}{t('Selection: {name}', {
+                      name: d.selection,
+                    })}{/if}
                 </dd>
               {/if}
-              <dt>Skills</dt>
+              <dt>{t('Skills')}</dt>
               <dd>
                 {d.applied.skills.length > 0
                   ? d.applied.skills
                       .map((s) => `${s.name} r${s.revision ?? '?'}`)
                       .join(', ')
-                  : 'none of your own'} · {d.applied.switched_off} installed skill(s)
-                switched off
+                  : t('none of your own')} · {t(
+                  '{n} installed skill(s) switched off',
+                  { n: d.applied.switched_off },
+                )}
               </dd>
               {#if d.artifacts.length > 0}
-                <dt>Files</dt>
+                <dt>{t('Files')}</dt>
                 <dd>
-                  {d.artifacts.map((a) => a.path).join(', ')} in
+                  {d.artifacts.map((a) => a.path).join(', ')}
+                  {t('in')}
                   <code>{d.workspace}</code>
                 </dd>
               {/if}
@@ -187,7 +202,7 @@
             {#if d.error}<p class="native-warning">{d.error}</p>{/if}
             {#if d.result}
               <details class="delegation-details">
-                <summary>Result</summary>
+                <summary>{t('Result')}</summary>
                 <pre class="delegation-result">{d.result}</pre>
               </details>
             {/if}
@@ -195,17 +210,18 @@
               <div class="delegation-actions">
                 {#if confirming === d.id}
                   <span class="delegation-confirm" role="status"
-                    >Stop this agent? Its unfinished work is lost.</span
+                    >{t('Stop this agent? Its unfinished work is lost.')}</span
                   >
                   <button
                     type="button"
                     class="action danger"
-                    onclick={() => stop(d.id)}>Stop agent</button
+                    onclick={() => stop(d.id)}>{t('Stop agent')}</button
                   >
                   <button
                     type="button"
                     class="action"
-                    onclick={() => (confirming = null)}>Keep running</button
+                    onclick={() => (confirming = null)}
+                    >{t('Keep running')}</button
                   >
                 {:else}
                   <button
@@ -213,7 +229,7 @@
                     class="action"
                     disabled={stopping === d.id}
                     onclick={() => (confirming = d.id)}
-                    >{stopping === d.id ? 'Stopping…' : 'Cancel'}</button
+                    >{stopping === d.id ? t('Stopping…') : t('Cancel')}</button
                   >
                 {/if}
               </div>

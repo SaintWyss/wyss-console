@@ -35,6 +35,7 @@ import {
   START_UNRECORDED,
   switchHint,
 } from '../src/lib/features/native/present';
+import { delegationTally } from '../src/lib/features/native/delegations';
 import {
   detailLines,
   failureText,
@@ -300,6 +301,18 @@ it('draws the native profile and session sentences in Spanish', () => {
   expect(t(switchHint('claude_code'))).toBe(
     'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.',
   );
+});
+
+it('draws the delegation tally words in Spanish, counted in English too', () => {
+  const tally = delegationTally([
+    { status: 'running' },
+    { status: 'succeeded' },
+  ] as unknown as Parameters<typeof delegationTally>[0]);
+  const words = () => tally.map((entry) => `${entry.count} ${t(entry.label)}`);
+  setLanguage('es');
+  expect(words()).toEqual(['1 en curso', '1 terminado(s)']);
+  setLanguage('en');
+  expect(words()).toEqual(['1 running', '1 done']);
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {
