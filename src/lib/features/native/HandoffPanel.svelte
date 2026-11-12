@@ -3,6 +3,7 @@
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { NativeController, NativeState } from './controller';
   import { AGENT_LABEL, profilesFor } from './present';
+  import { t } from '../../i18n/index.svelte';
 
   let {
     session,
@@ -88,49 +89,55 @@
 
 <section
   class="native-card native-handoff"
-  aria-label="Hand off to another agent"
+  aria-label={t('Hand off to another agent')}
 >
-  <h3>Hand off {session.agent_name}’s work</h3>
+  <h3>{t('Hand off {agent}’s work', { agent: session.agent_name })}</h3>
   <p class="native-note">
-    This starts a <strong>new</strong> session of the agent you choose, in the
-    same folder, with the text below as its first message. It is not a transfer:
-    the new agent has only this text and the files, not {session.agent_name}’s
-    context, and nothing is moved or ended. Read it and change it before
-    starting. Secrets found in it were removed.
+    {t('This starts a')} <strong>{t('new')}</strong>
+    {t(
+      'session of the agent you choose, in the same folder, with the text below as its first message. It is not a transfer: the new agent has only this text and the files, not {agent}’s context, and nothing is moved or ended. Read it and change it before starting. Secrets found in it were removed.',
+      { agent: session.agent_name },
+    )}
   </p>
   <p class="native-warning" role="note">
-    Hermes Native remains available as a separate interactive provider. It is
-    omitted here because its pinned CLI does not expose a verified reviewed
-    first-message interface without entering an effectful one-shot mode.
+    {t(
+      'Hermes Native remains available as a separate interactive provider. It is omitted here because its pinned CLI does not expose a verified reviewed first-message interface without entering an effectful one-shot mode.',
+    )}
   </p>
   {#if loading}
     <p class="sessions-status" role="status" aria-busy="true">
-      Preparing the brief…
+      {t('Preparing the brief…')}
     </p>
   {:else}
     {#if !screen}
       <p class="native-warning">
-        The screen of that session is no longer held, so the brief has the
-        repository state only.
+        {t(
+          'The screen of that session is no longer held, so the brief has the repository state only.',
+        )}
       </p>
     {/if}
     <div class="native-field">
-      <label for="handoff-text">Brief (Markdown, starts with “# ”)</label>
+      <label for="handoff-text">{t('Brief (Markdown, starts with “# ”)')}</label
+      >
       <textarea id="handoff-text" rows="16" bind:value={text}></textarea>
       {#if tooLong}<p class="native-warning">
-          Longer than 16 KiB: shorten it.
+          {t('Longer than 16 KiB: shorten it.')}
         </p>{/if}
     </div>
     <div class="native-field">
-      <label for="handoff-target">Start</label>
+      <label for="handoff-target">{t('Start')}</label>
       <div class="native-row">
         <select id="handoff-target" bind:value={target}>
           {#each agents as a (a.agent_id)}
             <option value={a.agent_id}>{a.name}</option>
           {/each}
         </select>
-        <select id="handoff-profile" aria-label="Profile" bind:value={profile}>
-          <option value={null}>No profile — as configured</option>
+        <select
+          id="handoff-profile"
+          aria-label={t('Profile')}
+          bind:value={profile}
+        >
+          <option value={null}>{t('No profile — as configured')}</option>
           {#each profiles as p (p.id)}
             <option value={p.id}>{p.body.name}</option>
           {/each}
@@ -139,10 +146,12 @@
     </div>
     {#if profile && previewFailed}
       <p class="native-warning" role="status">
-        Could not verify this profile preview. Refresh Native before starting.
+        {t(
+          'Could not verify this profile preview. Refresh Native before starting.',
+        )}
       </p>
     {:else if preview}
-      <ul class="native-preview" aria-label="What the profile does">
+      <ul class="native-preview" aria-label={t('What the profile does')}>
         {#each preview.applied as line (line)}<li>{line}</li>{/each}
         {#each preview.with_cost as line (line)}<li class="cost">
             {line}
@@ -163,8 +172,8 @@
         onclick={start}
       >
         {native.starting
-          ? 'Starting…'
-          : `Start ${AGENT_LABEL[target]} with this brief`}
+          ? t('Starting…')
+          : t('Start {agent} with this brief', { agent: AGENT_LABEL[target] })}
       </button>
       <button
         type="button"
@@ -172,9 +181,11 @@
         disabled={loading || tooLong}
         onclick={() => controller.saveBrief(text)}
       >
-        Save to a file…
+        {t('Save to a file…')}
       </button>
-      <button type="button" class="action" onclick={onclose}>Cancel</button>
+      <button type="button" class="action" onclick={onclose}
+        >{t('Cancel')}</button
+      >
     </div>
   {/if}
 </section>

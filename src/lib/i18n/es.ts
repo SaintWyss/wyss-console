@@ -1750,4 +1750,27 @@ export const ES: Readonly<Record<string, string>> = {
   'Profile exported.': 'Perfil exportado.',
   'Profile imported. It grants nothing: read what it asks for before using it.':
     'Perfil importado. No otorga nada: leé lo que pide antes de usarlo.',
+
+  // Native sessions: the handoff panel (HandoffPanel)
+  'Hand off to another agent': 'Traspasar el trabajo a otro agente',
+  'Hand off {agent}’s work': 'Traspasar el trabajo de {agent}',
+  'This starts a': 'Esto inicia una',
+  new: 'nueva',
+  'session of the agent you choose, in the same folder, with the text below as its first message. It is not a transfer: the new agent has only this text and the files, not {agent}’s context, and nothing is moved or ended. Read it and change it before starting. Secrets found in it were removed.':
+    'sesión del agente que elegís, en la misma carpeta, con el texto de abajo como primer mensaje. No es un traspaso: el agente nuevo tiene solo este texto y los archivos, no el contexto de {agent}, y no se mueve ni se termina nada. Leelo y cambialo antes de iniciar. Los secretos que había en él se quitaron.',
+  'Hermes Native remains available as a separate interactive provider. It is omitted here because its pinned CLI does not expose a verified reviewed first-message interface without entering an effectful one-shot mode.':
+    'Hermes Native sigue disponible como proveedor interactivo aparte. Acá se omite porque su CLI fijada no expone una interfaz de primer mensaje verificada y revisada sin entrar en un modo de una sola ejecución con efectos.',
+  'Preparing the brief…': 'Preparando el brief…',
+  'The screen of that session is no longer held, so the brief has the repository state only.':
+    'La pantalla de esa sesión ya no se conserva, así que el brief tiene solo el estado del repositorio.',
+  'Brief (Markdown, starts with “# ”)': 'Brief (Markdown, empieza con “# ”)',
+  'Longer than 16 KiB: shorten it.': 'Más de 16 KiB: acortalo.',
+  Start: 'Iniciar',
+  'No profile — as configured': 'Sin perfil — según la configuración',
+  'Could not verify this profile preview. Refresh Native before starting.':
+    'No se pudo verificar la vista previa de este perfil. Actualizá Native antes de iniciar.',
+  'What the profile does': 'Qué hace el perfil',
+  'Starting…': 'Iniciando…',
+  'Start {agent} with this brief': 'Iniciar {agent} con este brief',
+  'Save to a file…': 'Guardar en un archivo…',
 };
