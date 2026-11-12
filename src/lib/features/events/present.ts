@@ -7,6 +7,7 @@ import type {
 } from '../../contracts/events';
 import type { SessionFailureCode } from '../../contracts/sessions';
 import type { TimeFormat } from '../../contracts/settings';
+import { msg, type Phrase } from '../../i18n/msg';
 import type { RuntimeTone } from '../../shell/runtime';
 import { TURN_REASON } from '../agent/present';
 import { APPROVAL_REASON } from '../approvals/present';
@@ -15,12 +16,12 @@ import type { EventFilter, EventScope, EventsStart } from './controller';
 /** Presentation only: nothing here is read back as state. */
 
 export const FILTER_LABEL: Record<EventFilter, string> = {
-  all: 'All',
-  sessions: 'Sessions',
-  runtime: 'Runtime',
-  turns: 'Turns',
-  approvals: 'Approvals',
-  security: 'Security',
+  all: msg('All'),
+  sessions: msg('Sessions'),
+  runtime: msg('Runtime'),
+  turns: msg('Turns'),
+  approvals: msg('Approvals'),
+  security: msg('Security'),
 };
 const FILTER_CATEGORY: Partial<Record<EventFilter, EventCategory>> = {
   sessions: 'session',
@@ -30,12 +31,12 @@ const FILTER_CATEGORY: Partial<Record<EventFilter, EventCategory>> = {
 };
 
 export const CATEGORY_LABEL: Record<EventCategory, string> = {
-  session: 'Session',
-  runtime: 'Runtime',
-  turn: 'Turn',
-  approval: 'Approval',
-  lease: 'Lease',
-  authority: 'Authority',
+  session: msg('Session'),
+  runtime: msg('Runtime'),
+  turn: msg('Turn'),
+  approval: msg('Approval'),
+  lease: msg('Lease'),
+  authority: msg('Authority'),
 };
 
 /**
@@ -47,9 +48,9 @@ export const DISPOSITION: Record<
   { tone: RuntimeTone; label: string }
 > = {
   normal: { tone: 'idle', label: '' },
-  attention: { tone: 'warn', label: 'Needs a look' },
-  failure: { tone: 'error', label: 'Failed' },
-  security: { tone: 'error', label: 'Isolation' },
+  attention: { tone: 'warn', label: msg('Needs a look') },
+  failure: { tone: 'error', label: msg('Failed') },
+  security: { tone: 'error', label: msg('Isolation') },
 };
 
 /** The loaded events a filter and a scope leave. Other events are not read for it. */
@@ -72,28 +73,35 @@ export function shownEvents(
 }
 
 const SCOPE: Record<(typeof LEASE_SCOPES)[number], string> = {
-  session_create: 'bind a workspace',
-  session_resume: 'attach to Codex',
-  turn_start: 'start a turn',
-  command_execute: 'run approved commands',
-  file_change: 'apply approved file changes',
+  session_create: msg('bind a workspace'),
+  session_resume: msg('attach to Codex'),
+  turn_start: msg('start a turn'),
+  command_execute: msg('run approved commands'),
+  file_change: msg('apply approved file changes'),
 };
 const EXIT: Record<(typeof RUNTIME_EXITS)[number], string> = {
-  unavailable: 'Codex was not available to start.',
-  spawn_failed: 'The authority could not launch Codex.',
-  transport_failed: 'The connection to Codex failed.',
-  handshake_timeout: 'Codex did not answer in time when it started.',
-  protocol_failed: 'Codex did not speak the protocol the authority expects.',
-  server_request:
+  unavailable: msg('Codex was not available to start.'),
+  spawn_failed: msg('The authority could not launch Codex.'),
+  transport_failed: msg('The connection to Codex failed.'),
+  handshake_timeout: msg('Codex did not answer in time when it started.'),
+  protocol_failed: msg(
+    'Codex did not speak the protocol the authority expects.',
+  ),
+  server_request: msg(
     'Codex asked for something this runtime is not allowed to answer.',
-  runtime_rejected: 'Codex refused the configuration it was started with.',
-  catalog_rejected: 'Codex refused the model catalog it was started with.',
-  child_exited: 'The Codex process ended.',
-  audit_unavailable: 'The authority could not record what Codex was doing.',
-  inference_isolation_violation:
+  ),
+  runtime_rejected: msg('Codex refused the configuration it was started with.'),
+  catalog_rejected: msg('Codex refused the model catalog it was started with.'),
+  child_exited: msg('The Codex process ended.'),
+  audit_unavailable: msg(
+    'The authority could not record what Codex was doing.',
+  ),
+  inference_isolation_violation: msg(
     'Codex acted outside what its isolation allows, and the authority stopped it.',
-  safety_unproven:
+  ),
+  safety_unproven: msg(
     'The authority could not prove the isolation of the runtime, and did not let it run.',
+  ),
 };
 
 /** What was recorded, in one line. Only what the record itself says. */
@@ -101,181 +109,297 @@ export function eventTitle(event: EventRow): string {
   const { facts } = event;
   switch (event.kind) {
     case 'session_prepared':
-      return 'Managed session prepared';
+      return msg('Managed session prepared');
     case 'session_closed':
-      return 'Managed session closed';
+      return msg('Managed session closed');
     case 'session_bound':
-      return 'Session bound to a workspace';
+      return msg('Session bound to a workspace');
     case 'session_attached':
-      return 'Session attached to Codex';
+      return msg('Session attached to Codex');
     case 'binding_indeterminate':
-      return 'Workspace binding outcome unknown';
+      return msg('Workspace binding outcome unknown');
     case 'binding_abandoned':
-      return 'Uncertain binding attempt discarded';
+      return msg('Uncertain binding attempt discarded');
     case 'runtime_desired':
       return facts.desired === 'running'
-        ? 'Codex runtime start accepted'
+        ? msg('Codex runtime start accepted')
         : facts.desired === 'stopped'
-          ? 'Codex runtime stop accepted'
-          : 'Codex runtime request accepted';
+          ? msg('Codex runtime stop accepted')
+          : msg('Codex runtime request accepted');
     case 'runtime_ready':
-      return 'Codex runtime ready';
+      return msg('Codex runtime ready');
     case 'runtime_exited':
-      if (event.disposition === 'security') return 'Codex runtime contained';
+      if (event.disposition === 'security')
+        return msg('Codex runtime contained');
       return facts.expected === true
-        ? 'Codex runtime stopped'
-        : 'Codex runtime ended unexpectedly';
+        ? msg('Codex runtime stopped')
+        : msg('Codex runtime ended unexpectedly');
     case 'turn_admitted':
-      return 'Managed turn admitted';
+      return msg('Managed turn admitted');
     case 'turn_running':
-      return 'Managed turn running';
+      return msg('Managed turn running');
     case 'turn_cancel_requested':
-      return 'Turn cancellation requested';
+      return msg('Turn cancellation requested');
     case 'turn_completed':
-      return 'Managed turn completed';
+      return msg('Managed turn completed');
     case 'turn_interrupted':
-      return 'Managed turn interrupted';
+      return msg('Managed turn interrupted');
     case 'turn_failed':
-      return 'Managed turn failed';
+      return msg('Managed turn failed');
     case 'turn_indeterminate':
-      return 'Managed turn outcome unknown';
+      return msg('Managed turn outcome unknown');
     case 'approval_requested':
       return facts.approval_kind === 'command_execution'
-        ? 'Command approval requested'
+        ? msg('Command approval requested')
         : facts.approval_kind === 'file_change'
-          ? 'File change approval requested'
-          : 'Approval requested';
+          ? msg('File change approval requested')
+          : msg('Approval requested');
     case 'approval_accepted':
-      return 'Approval accepted';
+      return msg('Approval accepted');
     case 'approval_confirmed':
-      return 'Approved action confirmed by Codex';
+      return msg('Approved action confirmed by Codex');
     case 'approval_declined':
-      return 'Approval denied';
+      return msg('Approval denied');
     case 'approval_cancelled':
-      return 'Approval cancelled';
+      return msg('Approval cancelled');
     case 'approval_expired':
-      return 'Approval expired undecided';
+      return msg('Approval expired undecided');
     case 'approval_invalidated':
-      return 'Approval no longer applies';
+      return msg('Approval no longer applies');
     case 'approval_indeterminate':
-      return 'Approval outcome unknown';
+      return msg('Approval outcome unknown');
     case 'lease_granted':
-      return 'Execution lease granted';
+      return msg('Execution lease granted');
     case 'lease_renewed':
-      return 'Execution lease renewed';
+      return msg('Execution lease renewed');
     case 'lease_revoked':
-      return 'Execution lease revoked';
+      return msg('Execution lease revoked');
     case 'lease_expired':
-      return 'Execution lease expired';
+      return msg('Execution lease expired');
     case 'other':
-      return 'Authority event';
+      return msg('Authority event');
   }
+}
+
+/** Phrases drawn as one list joined with a comma. Each part is translated where it is drawn. */
+function listOf(parts: readonly Phrase[]): Phrase {
+  return {
+    text: parts.map((_, index) => `{part${index}}`).join(', '),
+    values: Object.fromEntries(
+      parts.map((part, index) => [`part${index}`, part]),
+    ),
+  };
+}
+
+/**
+ * What an approval is about, as the sentence needs it: the noun with its article, and the
+ * same thing once it is approved. Spanish takes the article and the gender from the noun.
+ */
+function subjectOf(approvalKind: EventRow['facts']['approval_kind']): {
+  about: Phrase;
+  approved: Phrase;
+} {
+  if (approvalKind === 'command_execution')
+    return {
+      about: { text: msg('a command') },
+      approved: { text: msg('the approved command') },
+    };
+  if (approvalKind === 'file_change')
+    return {
+      about: { text: msg('a file change') },
+      approved: { text: msg('the approved file change') },
+    };
+  return {
+    about: { text: msg('an action') },
+    approved: { text: msg('the approved action') },
+  };
 }
 
 /**
  * What the record says beyond its title, in a sentence or two. A reason is the
  * authority's own; nothing is inferred about what led to what.
  */
-export function eventDetail(event: EventRow): string {
+export function eventDetail(event: EventRow): Phrase {
   const { facts } = event;
   switch (event.category) {
     case 'turn': {
       if (event.kind === 'turn_admitted')
-        return 'The authority admitted the turn under an execution lease. What was asked of Codex is not part of the record.';
+        return {
+          text: msg(
+            'The authority admitted the turn under an execution lease. What was asked of Codex is not part of the record.',
+          ),
+        };
       if (event.kind === 'turn_running')
-        return 'Codex took the turn and started working on it.';
+        return { text: msg('Codex took the turn and started working on it.') };
       const reason = facts.turn_reason ? TURN_REASON[facts.turn_reason] : '';
       if (event.kind === 'turn_cancel_requested')
-        return reason || 'A cancel of the turn was recorded.';
-      return reason || 'The authority recorded how the turn ended.';
+        return { text: reason || msg('A cancel of the turn was recorded.') };
+      return {
+        text: reason || msg('The authority recorded how the turn ended.'),
+      };
     }
     case 'approval': {
-      const about =
-        facts.approval_kind === 'command_execution'
-          ? 'a command'
-          : facts.approval_kind === 'file_change'
-            ? 'a file change'
-            : 'an action';
+      const { about, approved } = subjectOf(facts.approval_kind);
       if (event.kind === 'approval_requested')
-        return `Codex proposed ${about} and the authority held it for a decision. The proposal itself is not part of the record.`;
+        return {
+          text: msg(
+            'Codex proposed {about} and the authority held it for a decision. The proposal itself is not part of the record.',
+          ),
+          values: { about },
+        };
       if (event.kind === 'approval_accepted')
-        return `The approval of ${about} was accepted and the answer was sent to Codex.`;
+        return {
+          text: msg(
+            'The approval of {about} was accepted and the answer was sent to Codex.',
+          ),
+          values: { about },
+        };
       if (event.kind === 'approval_confirmed')
-        return `Codex reported what it did with the approved ${about.replace(/^an? /, '')}.`;
+        return {
+          text: msg('Codex reported what it did with {approved}.'),
+          values: { approved },
+        };
       if (event.kind === 'approval_declined')
-        return `The approval of ${about} was denied. Nothing was run or changed for it.`;
+        return {
+          text: msg(
+            'The approval of {about} was denied. Nothing was run or changed for it.',
+          ),
+          values: { about },
+        };
       const reason = facts.approval_reason
         ? APPROVAL_REASON[facts.approval_reason]
         : '';
-      return reason || 'The authority recorded how the approval ended.';
+      return {
+        text: reason || msg('The authority recorded how the approval ended.'),
+      };
     }
     case 'lease': {
       const scopes =
         facts.scopes && facts.scopes.length > 0
-          ? facts.scopes.map((scope) => SCOPE[scope]).join(', ')
+          ? listOf(facts.scopes.map((scope) => ({ text: SCOPE[scope] })))
           : null;
-      const allowed = scopes ? ` It allowed the session to ${scopes}.` : '';
+      /** The lease's own sentence, then what it allowed when the record says so. */
+      const allowed = (lead: Phrase): Phrase =>
+        scopes
+          ? {
+              text: msg('{lead} It allowed the session to {scopes}.'),
+              values: { lead, scopes },
+            }
+          : lead;
       if (event.kind === 'lease_revoked')
-        return `${facts.revocation === 'session_closed' ? 'The lease ended because its session was closed.' : 'The lease was given back.'}${allowed}`;
+        return allowed({
+          text:
+            facts.revocation === 'session_closed'
+              ? msg('The lease ended because its session was closed.')
+              : msg('The lease was given back.'),
+        });
       if (event.kind === 'lease_expired')
-        return `The lease reached its time limit.${allowed}`;
-      return `The authority ${event.kind === 'lease_renewed' ? 'extended' : 'granted'} a lease for this session.${allowed}`;
+        return allowed({ text: msg('The lease reached its time limit.') });
+      return allowed({
+        text:
+          event.kind === 'lease_renewed'
+            ? msg('The authority extended a lease for this session.')
+            : msg('The authority granted a lease for this session.'),
+      });
     }
-    case 'runtime':
+    case 'runtime': {
       if (event.kind === 'runtime_desired')
-        return 'The authority accepted a request for the managed Codex runtime and recorded what it should be.';
+        return {
+          text: msg(
+            'The authority accepted a request for the managed Codex runtime and recorded what it should be.',
+          ),
+        };
       if (event.kind === 'runtime_ready')
         return facts.runtime_version
-          ? `Codex ${facts.runtime_version} started, was checked and is ready.`
-          : 'Codex started, was checked and is ready.';
-      return (
-        (facts.exit ? EXIT[facts.exit] : 'The Codex process ended.') +
-        (facts.expected === true ? ' The authority meant it to.' : '')
-      );
+          ? {
+              text: msg('Codex {version} started, was checked and is ready.'),
+              values: { version: facts.runtime_version },
+            }
+          : { text: msg('Codex started, was checked and is ready.') };
+      const exit: Phrase = {
+        text: facts.exit ? EXIT[facts.exit] : msg('The Codex process ended.'),
+      };
+      return facts.expected === true
+        ? {
+            text: msg('{exit} The authority meant it to.'),
+            values: { exit },
+          }
+        : exit;
+    }
     case 'session':
       switch (event.kind) {
         case 'session_prepared':
-          return 'A managed session was created. It has no workspace until it is bound.';
+          return {
+            text: msg(
+              'A managed session was created. It has no workspace until it is bound.',
+            ),
+          };
         case 'session_closed':
-          return 'The session was closed. Closing is final.';
+          return { text: msg('The session was closed. Closing is final.') };
         case 'session_bound':
-          return 'The authority bound the session to a project folder. Which folder is not part of the record.';
+          return {
+            text: msg(
+              'The authority bound the session to a project folder. Which folder is not part of the record.',
+            ),
+          };
         case 'session_attached':
-          return 'The session was attached to the Codex runtime that was running.';
+          return {
+            text: msg(
+              'The session was attached to the Codex runtime that was running.',
+            ),
+          };
         case 'binding_indeterminate':
-          return 'The authority could not confirm whether Codex created the workspace binding.';
+          return {
+            text: msg(
+              'The authority could not confirm whether Codex created the workspace binding.',
+            ),
+          };
         default:
-          return 'An uncertain binding attempt was given up on explicitly.';
+          return {
+            text: msg(
+              'An uncertain binding attempt was given up on explicitly.',
+            ),
+          };
       }
     case 'authority':
-      return 'The authority recorded an event of a kind this version of the console does not know. Nothing else of it is shown.';
+      return {
+        text: msg(
+          'The authority recorded an event of a kind this version of the console does not know. Nothing else of it is shown.',
+        ),
+      };
   }
 }
 
 /** What lies before the oldest event shown. */
 export function startMessage(start: EventsStart): string {
   return start === 'beginning'
-    ? 'This is the beginning of the event stream.'
+    ? msg('This is the beginning of the event stream.')
     : start === 'unavailable'
-      ? 'History before this point is unavailable.'
+      ? msg('History before this point is unavailable.')
       : '';
 }
 
 export function eventsReadFailure(code: SessionFailureCode): string {
   return code === 'unavailable'
-    ? 'Events could not be read: the authority did not answer.'
+    ? msg('Events could not be read: the authority did not answer.')
     : code === 'busy'
-      ? 'Events could not be read. The authority is busy; try again in a moment.'
+      ? msg(
+          'Events could not be read. The authority is busy; try again in a moment.',
+        )
       : code === 'changed'
-        ? 'The event history changed while it was being read.'
-        : 'Events could not be read. Nothing is shown rather than something unverified.';
+        ? msg('The event history changed while it was being read.')
+        : msg(
+            'Events could not be read. Nothing is shown rather than something unverified.',
+          );
 }
 export function olderFailure(code: SessionFailureCode): string {
   return code === 'changed'
-    ? 'Older events could not be read: the authority holds another history than the one shown. The newest events were read again.'
+    ? msg(
+        'Older events could not be read: the authority holds another history than the one shown. The newest events were read again.',
+      )
     : code === 'unavailable'
-      ? 'Older events could not be read: the authority did not answer.'
-      : 'Older events could not be read.';
+      ? msg('Older events could not be read: the authority did not answer.')
+      : msg('Older events could not be read.');
 }
 const CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',

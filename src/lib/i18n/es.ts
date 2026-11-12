@@ -1258,4 +1258,200 @@ export const ES: Readonly<Record<string, string>> = {
   'Codex AGENTS.md': 'AGENTS.md de Codex',
   'Codex AGENTS.override.md': 'AGENTS.override.md de Codex',
   'OpenCode AGENTS.md': 'AGENTS.md de OpenCode',
+
+  // Events: the authority's record, the presenter that words each event and the window's labels
+  All: 'Todos',
+  Lease: 'Concesión',
+  Approval: 'Aprobación',
+  'Needs a look': 'Hay que revisar',
+  Isolation: 'Aislamiento',
+  session: 'sesión',
+  '{count} loaded': '{count} cargados',
+  'newest first': 'más recientes primero',
+  '{count} shown': '{count} mostrados',
+  'Newest events': 'Eventos más recientes',
+  'Turn {id}': 'Turno {id}',
+  Clear: 'Quitar',
+  'Filter events': 'Filtrar eventos',
+  'Events, newest first': 'Eventos, más recientes primero',
+  'Event details': 'Detalles del evento',
+  'Events of an earlier stream': 'Eventos de un stream anterior',
+  'Load older': 'Cargar anteriores',
+  'Older events exist and are not loaded.':
+    'Hay eventos anteriores que no están cargados.',
+  'New events available': 'Hay eventos nuevos',
+  'No loaded event matches.': 'Ningún evento cargado coincide.',
+  'Filters apply to the events loaded here, not to all of history.':
+    'Los filtros se aplican a los eventos cargados acá, no a todo el historial.',
+  'Authority offline. Showing previously loaded history: it was read before the connection was lost and nothing newer is known.':
+    'Autoridad sin conexión. Se muestra el historial cargado antes: se leyó antes de que se cortara la conexión y no se sabe nada más nuevo.',
+  'Showing previously loaded history. It is being read again.':
+    'Se muestra el historial cargado antes. Se está leyendo de nuevo.',
+  'The authority restarted. It kept the same event stream: the history below continues, and what it ended on the way is recorded in it.':
+    'La autoridad se reinició. Conservó el mismo stream de eventos: el historial de abajo sigue, y lo que quedó a medio camino consta en él.',
+  "Events are the authority's own record and are read from it. Nothing is shown until it is connected. Your local terminals keep working.":
+    'Los eventos son el registro propio de la autoridad y se leen de ella. No se muestra nada hasta que esté conectada. Tus terminales locales siguen funcionando.',
+  'Reading events…': 'Leyendo eventos…',
+  'No events yet.': 'Todavía no hay eventos.',
+  'The authority records every session, runtime, turn, approval and lease change it commits. Nothing has been recorded in this stream.':
+    'La autoridad registra cada cambio de sesión, runtime, turno, aprobación y concesión que confirma. Todavía no se registró nada en este stream.',
+  'New authority event stream': 'Nuevo stream de eventos de la autoridad',
+  'The events above belong to the stream the authority holds now. The ones below were read from another stream (':
+    'Los eventos de arriba pertenecen al stream que la autoridad tiene ahora. Los de abajo se leyeron de otro stream (',
+  ') and are not continued by them: positions of the two are unrelated.':
+    ') y no continúan en ellos: las posiciones de ambos no tienen relación entre sí.',
+  'Lease until': 'Concesión hasta',
+  Position: 'Posición',
+  'in stream {id}': 'en el stream {id}',
+  'This record was read from a stream the authority no longer holds here. What it is about cannot be opened or read from this authority.':
+    'Este registro se leyó de un stream que la autoridad ya no tiene acá. Aquello a lo que se refiere no se puede abrir ni leer desde esta autoridad.',
+  'This is a record of what happened then. What it is about may have changed since: that is read from the authority where it lives.':
+    'Es un registro de lo que pasó en ese momento. Aquello a lo que se refiere puede haber cambiado desde entonces: eso se lee de la autoridad donde vive.',
+  'Open session': 'Abrir sesión',
+  'Open in Agents': 'Abrir en Agentes',
+  'Show events of this turn': 'Ver eventos de este turno',
+  'Show events of this session': 'Ver eventos de esta sesión',
+  'Check what it is now': 'Ver cómo está ahora',
+  'Open Approvals': 'Abrir Aprobaciones',
+  'Now:': 'Ahora:',
+  'The authority no longer holds what it was about.':
+    'La autoridad ya no tiene aquello a lo que se refería.',
+  'What it is about is shown in Approvals.':
+    'Aquello a lo que se refiere se ve en Aprobaciones.',
+  'Approval detail is no longer available. The record above is still what happened.':
+    'El detalle de la aprobación ya no está disponible. El registro de arriba sigue siendo lo que pasó.',
+  'The approval could not be read from the authority.':
+    'No se pudo leer la aprobación desde la autoridad.',
+  'bind a workspace': 'vincular un workspace',
+  'attach to Codex': 'conectarse a Codex',
+  'start a turn': 'iniciar un turno',
+  'run approved commands': 'correr comandos aprobados',
+  'apply approved file changes': 'aplicar cambios de archivos aprobados',
+  'Codex was not available to start.':
+    'Codex no estuvo disponible para arrancar.',
+  'The authority could not launch Codex.': 'La autoridad no pudo lanzar Codex.',
+  'The connection to Codex failed.': 'Falló la conexión con Codex.',
+  'Codex did not answer in time when it started.':
+    'Codex no respondió a tiempo al arrancar.',
+  'Codex did not speak the protocol the authority expects.':
+    'Codex no habló el protocolo que espera la autoridad.',
+  'Codex asked for something this runtime is not allowed to answer.':
+    'Codex pidió algo que este runtime no puede responder.',
+  'Codex refused the configuration it was started with.':
+    'Codex rechazó la configuración con la que arrancó.',
+  'Codex refused the model catalog it was started with.':
+    'Codex rechazó el catálogo de modelos con el que arrancó.',
+  'The Codex process ended.': 'El proceso de Codex terminó.',
+  'The authority could not record what Codex was doing.':
+    'La autoridad no pudo registrar lo que hacía Codex.',
+  'Codex acted outside what its isolation allows, and the authority stopped it.':
+    'Codex actuó fuera de lo que permite su aislamiento, y la autoridad lo detuvo.',
+  'The authority could not prove the isolation of the runtime, and did not let it run.':
+    'La autoridad no pudo comprobar el aislamiento del runtime, y no lo dejó correr.',
+  'Managed session prepared': 'Sesión Managed preparada',
+  'Managed session closed': 'Sesión Managed cerrada',
+  'Session bound to a workspace': 'Sesión vinculada a un workspace',
+  'Session attached to Codex': 'Sesión conectada a Codex',
+  'Workspace binding outcome unknown':
+    'Resultado del vínculo con el workspace desconocido',
+  'Uncertain binding attempt discarded':
+    'Intento de vínculo incierto descartado',
+  'Codex runtime start accepted': 'Inicio del runtime de Codex aceptado',
+  'Codex runtime stop accepted': 'Detención del runtime de Codex aceptada',
+  'Codex runtime request accepted': 'Pedido al runtime de Codex aceptado',
+  'Codex runtime ready': 'Runtime de Codex listo',
+  'Codex runtime contained': 'Runtime de Codex contenido',
+  'Codex runtime stopped': 'Runtime de Codex detenido',
+  'Codex runtime ended unexpectedly':
+    'El runtime de Codex terminó de forma inesperada',
+  'Managed turn admitted': 'Turno Managed admitido',
+  'Managed turn running': 'Turno Managed en curso',
+  'Turn cancellation requested': 'Se pidió cancelar el turno',
+  'Managed turn completed': 'Turno Managed completado',
+  'Managed turn interrupted': 'Turno Managed interrumpido',
+  'Managed turn failed': 'Turno Managed falló',
+  'Managed turn outcome unknown': 'Resultado del turno Managed desconocido',
+  'Command approval requested': 'Aprobación de comando pedida',
+  'File change approval requested': 'Aprobación de cambio de archivo pedida',
+  'Approved action confirmed by Codex': 'Codex confirmó la acción aprobada',
+  'Approval denied': 'Aprobación denegada',
+  'Execution lease granted': 'Concesión de ejecución otorgada',
+  'Execution lease renewed': 'Concesión de ejecución renovada',
+  'Execution lease revoked': 'Concesión de ejecución revocada',
+  'Execution lease expired': 'Concesión de ejecución vencida',
+  'Authority event': 'Evento de la autoridad',
+  'a command': 'un comando',
+  'the approved command': 'el comando aprobado',
+  'a file change': 'un cambio de archivo',
+  'the approved file change': 'el cambio de archivo aprobado',
+  'an action': 'una acción',
+  'the approved action': 'la acción aprobada',
+  'The authority admitted the turn under an execution lease. What was asked of Codex is not part of the record.':
+    'La autoridad admitió el turno con una concesión de ejecución. Lo que se le pidió a Codex no forma parte del registro.',
+  'Codex took the turn and started working on it.':
+    'Codex tomó el turno y empezó a trabajar en él.',
+  'A cancel of the turn was recorded.':
+    'Se registró una cancelación del turno.',
+  'The authority recorded how the turn ended.':
+    'La autoridad registró cómo terminó el turno.',
+  'Codex proposed {about} and the authority held it for a decision. The proposal itself is not part of the record.':
+    'Codex propuso {about} y la autoridad retuvo esa propuesta para decidir. La propuesta en sí no forma parte del registro.',
+  'The approval of {about} was accepted and the answer was sent to Codex.':
+    'Se aceptó la aprobación de {about} y la respuesta se envió a Codex.',
+  'Codex reported what it did with {approved}.':
+    'Codex informó qué hizo con {approved}.',
+  'The approval of {about} was denied. Nothing was run or changed for it.':
+    'Se denegó la aprobación de {about}. No se ejecutó ni se cambió nada por ella.',
+  'The authority recorded how the approval ended.':
+    'La autoridad registró cómo terminó la aprobación.',
+  '{lead} It allowed the session to {scopes}.':
+    '{lead} Permitió a la sesión {scopes}.',
+  'The lease ended because its session was closed.':
+    'La concesión terminó porque se cerró su sesión.',
+  'The lease was given back.': 'La concesión se devolvió.',
+  'The lease reached its time limit.':
+    'La concesión llegó a su límite de tiempo.',
+  'The authority extended a lease for this session.':
+    'La autoridad extendió una concesión para esta sesión.',
+  'The authority granted a lease for this session.':
+    'La autoridad otorgó una concesión para esta sesión.',
+  'The authority accepted a request for the managed Codex runtime and recorded what it should be.':
+    'La autoridad aceptó un pedido para el runtime de Codex Managed y registró cómo debe quedar.',
+  'Codex {version} started, was checked and is ready.':
+    'Codex {version} se inició, se verificó y está listo.',
+  'Codex started, was checked and is ready.':
+    'Codex se inició, se verificó y está listo.',
+  '{exit} The authority meant it to.': '{exit} La autoridad lo quiso así.',
+  'A managed session was created. It has no workspace until it is bound.':
+    'Se creó una sesión Managed. No tiene workspace hasta que se vincula uno.',
+  'The session was closed. Closing is final.':
+    'La sesión se cerró. Cerrar es definitivo.',
+  'The authority bound the session to a project folder. Which folder is not part of the record.':
+    'La autoridad vinculó la sesión a una carpeta de proyecto. Cuál carpeta no forma parte del registro.',
+  'The session was attached to the Codex runtime that was running.':
+    'La sesión se conectó al runtime de Codex que estaba corriendo.',
+  'The authority could not confirm whether Codex created the workspace binding.':
+    'La autoridad no pudo confirmar si Codex creó el vínculo con el workspace.',
+  'An uncertain binding attempt was given up on explicitly.':
+    'Se abandonó explícitamente un intento de vínculo incierto.',
+  'The authority recorded an event of a kind this version of the console does not know. Nothing else of it is shown.':
+    'La autoridad registró un evento de un tipo que esta versión de la consola no conoce. No se muestra nada más de él.',
+  'This is the beginning of the event stream.':
+    'Este es el comienzo del stream de eventos.',
+  'History before this point is unavailable.':
+    'El historial anterior a este punto no está disponible.',
+  'Events could not be read: the authority did not answer.':
+    'No se pudieron leer los eventos: la autoridad no respondió.',
+  'Events could not be read. The authority is busy; try again in a moment.':
+    'No se pudieron leer los eventos. La autoridad está ocupada; probá de nuevo en un momento.',
+  'The event history changed while it was being read.':
+    'El historial de eventos cambió mientras se leía.',
+  'Events could not be read. Nothing is shown rather than something unverified.':
+    'No se pudieron leer los eventos. No se muestra nada en lugar de algo sin verificar.',
+  'Older events could not be read: the authority holds another history than the one shown. The newest events were read again.':
+    'No se pudieron leer los eventos anteriores: la autoridad tiene otro historial que el que se muestra. Los eventos más recientes se leyeron de nuevo.',
+  'Older events could not be read: the authority did not answer.':
+    'No se pudieron leer los eventos anteriores: la autoridad no respondió.',
+  'Older events could not be read.':
+    'No se pudieron leer los eventos anteriores.',
 };

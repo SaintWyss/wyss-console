@@ -7,6 +7,7 @@
     eventTitle,
     short,
   } from '../events/present';
+  import { t } from '../../i18n/index.svelte';
   import type { F8Controller, F8ViewState } from './controller';
   import { failureText } from './present';
 
@@ -94,18 +95,18 @@
               <time class="event-time" datetime={event.at}
                 >{eventClock(event.at)}</time
               >
-              <span class="event-title">{eventTitle(event)}</span>
+              <span class="event-title">{t(eventTitle(event))}</span>
               {#if event.disposition !== 'normal'}
                 <span
                   class="pill compact"
                   data-tone={DISPOSITION[event.disposition].tone}
                 >
                   <span class="dot" aria-hidden="true"></span>
-                  {DISPOSITION[event.disposition].label}
+                  {t(DISPOSITION[event.disposition].label)}
                 </span>
               {/if}
               <span class="event-meta">
-                {CATEGORY_LABEL[event.category]}
+                {t(CATEGORY_LABEL[event.category])}
                 {#if event.session && !own}
                   · session <span class="mono">{short(event.session)}</span>
                 {/if}

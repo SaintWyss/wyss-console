@@ -12,7 +12,9 @@ import {
   tPhrase,
   type Phrase,
 } from '../src/lib/i18n/index.svelte';
+import type { EventRow } from '../src/lib/contracts/events';
 import { activityLabel } from '../src/lib/features/agent/present';
+import { eventDetail, eventTitle } from '../src/lib/features/events/present';
 import {
   composeImpact,
   failureMessage,
@@ -184,6 +186,61 @@ it('draws the configuration sentences in Spanish, with their nested places', () 
   );
   expect(hidden && tPhrase(hidden.value as Phrase)).toBe(
     'hidden (environment value)',
+  );
+});
+
+it('draws the events sentences in Spanish, with their nested places', () => {
+  const event = (fields: Record<string, unknown>) =>
+    ({ disposition: 'normal', ...fields }) as unknown as EventRow;
+  const proposal = event({
+    kind: 'approval_requested',
+    category: 'approval',
+    facts: { approval_kind: 'file_change' },
+  });
+  const granted = event({
+    kind: 'lease_granted',
+    category: 'lease',
+    facts: { scopes: ['session_resume', 'turn_start'] },
+  });
+  const ready = event({
+    kind: 'runtime_ready',
+    category: 'runtime',
+    facts: { runtime_version: '0.9.1' },
+  });
+  const exited = event({
+    kind: 'runtime_exited',
+    category: 'runtime',
+    facts: { expected: true, exit: 'child_exited' },
+  });
+  setLanguage('es');
+  expect(t(eventTitle(proposal))).toBe(
+    'Aprobación de cambio de archivo pedida',
+  );
+  expect(tPhrase(eventDetail(proposal))).toBe(
+    'Codex propuso un cambio de archivo y la autoridad retuvo esa propuesta para decidir. La propuesta en sí no forma parte del registro.',
+  );
+  expect(tPhrase(eventDetail(granted))).toBe(
+    'La autoridad otorgó una concesión para esta sesión. Permitió a la sesión conectarse a Codex, iniciar un turno.',
+  );
+  expect(tPhrase(eventDetail(ready))).toBe(
+    'Codex 0.9.1 se inició, se verificó y está listo.',
+  );
+  expect(tPhrase(eventDetail(exited))).toBe(
+    'El proceso de Codex terminó. La autoridad lo quiso así.',
+  );
+  setLanguage('en');
+  expect(t(eventTitle(proposal))).toBe('File change approval requested');
+  expect(tPhrase(eventDetail(proposal))).toBe(
+    'Codex proposed a file change and the authority held it for a decision. The proposal itself is not part of the record.',
+  );
+  expect(tPhrase(eventDetail(granted))).toBe(
+    'The authority granted a lease for this session. It allowed the session to attach to Codex, start a turn.',
+  );
+  expect(tPhrase(eventDetail(ready))).toBe(
+    'Codex 0.9.1 started, was checked and is ready.',
+  );
+  expect(tPhrase(eventDetail(exited))).toBe(
+    'The Codex process ended. The authority meant it to.',
   );
 });
 
