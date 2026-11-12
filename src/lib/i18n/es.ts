@@ -1754,4 +1754,53 @@ export const ES: Readonly<Record<string, string>> = {
   'I confirm cancellation': 'Confirmo cancelación',
   Pause: 'Pausar',
   'Stop/cancel': 'Detener/cancelar',
+
+  // Pipelines view: the coordinator's error texts and the session and run messages
+  'The local coordinator is not available.':
+    'El coordinador local no está disponible.',
+  'The request does not match the M6 contract.':
+    'La solicitud no coincide con el contrato M6.',
+  'The plan is not valid or exceeds the finite limits.':
+    'El plan no es válido o supera los límites finitos.',
+  'The handoff is incomplete, expired or changed.':
+    'El handoff está incompleto, vencido o cambió.',
+  'The objective exceeds 2,048 bytes; shorten the text before sealing it.':
+    'El objetivo supera 2.048 bytes; reduce el texto antes de sellarlo.',
+  'The generated message exceeds 8 KiB; shorten the excerpts or questions before sealing it.':
+    'El mensaje generado supera 8 KiB; reduce los extractos o preguntas antes de sellarlo.',
+  'The content changed after the review; review it again.':
+    'El contenido cambió después de la revisión; vuelve a revisarlo.',
+  'Blocked: the Native trust boundary is not proven.':
+    'Bloqueado: la frontera de confianza de Native no está demostrada.',
+  'The provider or host is not allowed for this handoff.':
+    'El proveedor o el host no está admitido para este handoff.',
+  'F8 confirmed the receiver has earlier work or is not prepared as a new session.':
+    'F8 confirmó que el receptor tiene trabajo previo o no está preparado como sesión nueva.',
+  'The F8 evidence cannot prove the receiver is new and has no history.':
+    'No se pudo probar desde la evidencia F8 que el receptor esté nuevo y sin historial.',
+  'The current identity or generation of the source Managed session could not be proven.':
+    'No se pudo probar la identidad o generación actual de la sesión Managed de origen.',
+  'The Managed authority denied the start.':
+    'La autoridad Managed denegó el inicio.',
+  'The Managed resource is busy; no other turn was started.':
+    'El recurso Managed está ocupado; no se inició otro turno.',
+  'The workspace changed or does not match the approved revision.':
+    'El workspace cambió o no coincide con la revisión aprobada.',
+  'The local journal could not save the state.':
+    'El registro local no pudo guardar el estado.',
+  'The Managed authority did not respond; the result may need review.':
+    'La autoridad Managed no respondió; el resultado puede requerir revisión.',
+  'That run was not found.': 'No se encontró esa ejecución.',
+  'The action is not available in the current state.':
+    'La acción no está disponible para el estado actual.',
+  'The review or the run expired.': 'La revisión o la ejecución venció.',
+  'The effect is uncertain and stays stopped for human review.':
+    'El efecto es incierto y queda detenido para revisión humana.',
+  'Operation M6 failed.': 'Falló la operación M6.',
+  'The M6 operation could not be completed.':
+    'No se pudo completar la operación M6.',
+  'Could not read Managed sessions from F8.':
+    'No se pudieron leer sesiones Managed desde F8.',
+  'The Managed authority is inactive; only the observed Native sessions are shown.':
+    'La autoridad Managed está inactiva; se muestran solo las sesiones Native observadas.',
 };

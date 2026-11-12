@@ -12,7 +12,7 @@
     WorkspaceSnapshot,
   } from '../../contracts/orchestration';
   import { chooseWorkspace } from '../../desktop/sessions-client';
-  import { t } from '../../i18n/index.svelte';
+  import { msg, t } from '../../i18n/index.svelte';
   import {
     listRuns,
     OrchestrationCallError,
@@ -160,44 +160,57 @@
   );
 
   const ERROR_TEXT: Record<string, string> = {
-    unavailable: 'El coordinador local no está disponible.',
-    invalid_request: 'La solicitud no coincide con el contrato M6.',
-    invalid_plan: 'El plan no es válido o supera los límites finitos.',
-    invalid_handoff: 'El handoff está incompleto, vencido o cambió.',
-    handoff_objective_too_large:
-      'El objetivo supera 2.048 bytes; reduce el texto antes de sellarlo.',
-    handoff_prompt_too_large:
-      'El mensaje generado supera 8 KiB; reduce los extractos o preguntas antes de sellarlo.',
-    review_stale:
-      'El contenido cambió después de la revisión; vuelve a revisarlo.',
-    trust_boundary_blocked:
-      'Bloqueado: la frontera de confianza de Native no está demostrada.',
-    provider_blocked:
-      'El proveedor o el host no está admitido para este handoff.',
-    receiver_not_fresh:
-      'F8 confirmó que el receptor tiene trabajo previo o no está preparado como sesión nueva.',
-    receiver_freshness_unproven:
-      'No se pudo probar desde la evidencia F8 que el receptor esté nuevo y sin historial.',
-    source_freshness_unproven:
-      'No se pudo probar la identidad o generación actual de la sesión Managed de origen.',
-    permission_denied: 'La autoridad Managed denegó el inicio.',
-    resource_busy: 'El recurso Managed está ocupado; no se inició otro turno.',
-    workspace_conflict:
-      'El workspace cambió o no coincide con la revisión aprobada.',
-    journal_unavailable: 'El registro local no pudo guardar el estado.',
-    authority_unavailable:
-      'La autoridad Managed no respondió; el resultado puede requerir revisión.',
-    unknown_run: 'No se encontró esa ejecución.',
-    invalid_transition: 'La acción no está disponible para el estado actual.',
-    expired: 'La revisión o la ejecución venció.',
-    effect_unknown:
-      'El efecto es incierto y queda detenido para revisión humana.',
+    unavailable: msg('The local coordinator is not available.'),
+    invalid_request: msg('The request does not match the M6 contract.'),
+    invalid_plan: msg('The plan is not valid or exceeds the finite limits.'),
+    invalid_handoff: msg('The handoff is incomplete, expired or changed.'),
+    handoff_objective_too_large: msg(
+      'The objective exceeds 2,048 bytes; shorten the text before sealing it.',
+    ),
+    handoff_prompt_too_large: msg(
+      'The generated message exceeds 8 KiB; shorten the excerpts or questions before sealing it.',
+    ),
+    review_stale: msg('The content changed after the review; review it again.'),
+    trust_boundary_blocked: msg(
+      'Blocked: the Native trust boundary is not proven.',
+    ),
+    provider_blocked: msg(
+      'The provider or host is not allowed for this handoff.',
+    ),
+    receiver_not_fresh: msg(
+      'F8 confirmed the receiver has earlier work or is not prepared as a new session.',
+    ),
+    receiver_freshness_unproven: msg(
+      'The F8 evidence cannot prove the receiver is new and has no history.',
+    ),
+    source_freshness_unproven: msg(
+      'The current identity or generation of the source Managed session could not be proven.',
+    ),
+    permission_denied: msg('The Managed authority denied the start.'),
+    resource_busy: msg(
+      'The Managed resource is busy; no other turn was started.',
+    ),
+    workspace_conflict: msg(
+      'The workspace changed or does not match the approved revision.',
+    ),
+    journal_unavailable: msg('The local journal could not save the state.'),
+    authority_unavailable: msg(
+      'The Managed authority did not respond; the result may need review.',
+    ),
+    unknown_run: msg('That run was not found.'),
+    invalid_transition: msg(
+      'The action is not available in the current state.',
+    ),
+    expired: msg('The review or the run expired.'),
+    effect_unknown: msg(
+      'The effect is uncertain and stays stopped for human review.',
+    ),
   };
 
   function errorText(error: unknown): string {
     return error instanceof OrchestrationCallError
-      ? (ERROR_TEXT[error.code] ?? 'Falló la operación M6.')
-      : 'No se pudo completar la operación M6.';
+      ? (ERROR_TEXT[error.code] ?? msg('Operation M6 failed.'))
+      : msg('The M6 operation could not be completed.');
   }
 
   function showError(error: unknown) {
@@ -217,13 +230,14 @@
     } else {
       managedSessions = [];
       if (f8Active)
-        sessionsError = 'No se pudieron leer sesiones Managed desde F8.';
+        sessionsError = msg('Could not read Managed sessions from F8.');
     }
     nativeSessions =
       nativeResult.status === 'fulfilled' ? nativeResult.value : [];
     if (!f8Active && !sessionsError)
-      sessionsError =
-        'La autoridad Managed está inactiva; se muestran solo las sesiones Native observadas.';
+      sessionsError = msg(
+        'The Managed authority is inactive; only the observed Native sessions are shown.',
+      );
   }
 
   async function refreshRuns() {
@@ -984,11 +998,11 @@
   </div>
 
   {#if runsError}
-    <p class="m6-alert" role="alert">{runsError}</p>
+    <p class="m6-alert" role="alert">{t(runsError)}</p>
   {/if}
 
   {#if lastError}
-    <p class="m6-alert" role="alert">{lastError}</p>
+    <p class="m6-alert" role="alert">{t(lastError)}</p>
   {/if}
 
   {#if tab === 'pipelines'}
@@ -1749,7 +1763,7 @@
               'M5/F8 is inactive. Managed handoff cannot start until the approved authority is active.',
             )}
           </p>{/if}
-        {#if sessionsError}<p class="m6-blocked">{sessionsError}</p>{/if}
+        {#if sessionsError}<p class="m6-blocked">{t(sessionsError)}</p>{/if}
         {#if handoffPreview}
           <div class="m6-review">
             <p>
