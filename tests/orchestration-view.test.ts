@@ -12,6 +12,7 @@ import {
   type ManagedSessionId,
 } from '../src/lib/contracts/identities';
 import { parseUuid } from '../src/lib/contracts/uuid';
+import { setLanguage } from '../src/lib/i18n/index.svelte';
 import type { NativeSession } from '../src/lib/contracts/native';
 import fixture from './fixtures/f8-gui-v1.json';
 
@@ -198,7 +199,7 @@ function desktop(nativeRows: NativeSession[] = []) {
 }
 
 async function beginManagedHandoff() {
-  button('Structured handoff')!.click();
+  button('Traspaso estructurado')!.click();
   await flush();
   const sourcePlane = label('Plano de origen')!.querySelector('select')!;
   sourcePlane.value = 'managed';
@@ -219,12 +220,14 @@ async function beginManagedHandoff() {
 }
 
 beforeEach(() => {
+  setLanguage('es');
   document.body.replaceChildren();
 });
 afterEach(() => {
   if (component) unmount(component);
   component = undefined;
   clearMocks();
+  setLanguage('en');
   document.body.replaceChildren();
 });
 
@@ -328,7 +331,7 @@ it('TS-HAND-04 accepts selected Native context only into a new empty F8 recipien
     props: { visible: true, f8Active: true, onruntimes: () => undefined },
   });
   await flush();
-  button('Structured handoff')!.click();
+  button('Traspaso estructurado')!.click();
   await flush();
   const sourcePlane = label('Plano de origen')!.querySelector('select')!;
   sourcePlane.value = 'native';

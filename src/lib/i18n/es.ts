@@ -2305,4 +2305,264 @@ export const ES: Readonly<Record<string, string>> = {
   'Stop agent': 'Detener agente',
   'Stopping…': 'Deteniendo…',
   Result: 'Resultado',
+  // ---- orchestration ----
+  // Pipelines view: the English fragments inside its Spanish labels
+  'Pipelines and handoff': 'Pipelines y traspaso',
+  'Structured handoff': 'Traspaso estructurado',
+  'Managed Codex · F8 authority': 'Managed Codex · autoridad F8',
+  'Human entered': 'Ingresado por humano',
+  'Provider reported': 'Reportado por el proveedor',
+  'Provider output · untrusted': 'Salida del proveedor · no confiable',
+  'OL3 supervised · finite DAG · Managed concurrency pinned at 1':
+    'OL3 supervisado · DAG finito · concurrencia Managed fijada en 1',
+  Coordination: 'Coordinación',
+  'Plan and runs': 'Plan y ejecuciones',
+  'Create a reviewable plan': 'Crear un plan revisable',
+  'Prompts stay in volatile memory until the owner reviews and confirms the digest.':
+    'Los prompts permanecen en memoria volátil hasta que el dueño revisa y confirma el digest.',
+  'Choose a folder': 'Elige una carpeta',
+  'Choose…': 'Elegir…',
+  revision: 'revisión',
+  'Project ID (label, not path)': 'Project ID (etiqueta, no ruta)',
+  Goal: 'Objetivo',
+  'Total budget in minutes': 'Presupuesto total en minutos',
+  'The budget must be a whole number between 1 and 60 minutes.':
+    'El presupuesto debe ser un número entero entre 1 y 60 minutos.',
+  'Steps · maximum 16': 'Pasos · máximo 16',
+  'Add step': 'Añadir paso',
+  'Step {number}': 'Paso {number}',
+  Remove: 'Quitar',
+  Provider: 'Proveedor',
+  'Managed Claude · adapter blocked': 'Managed Claude · adapter bloqueado',
+  'Native Codex · blocked by trust boundary':
+    'Native Codex · bloqueado por frontera',
+  'Native Claude · blocked by trust boundary':
+    'Native Claude · bloqueado por frontera',
+  'Hermes planner · blocked': 'Hermes planner · bloqueado',
+  'Managed session': 'Sesión Managed',
+  'Select a ready session': 'Selecciona una sesión lista',
+  'profile not reported': 'perfil no reportado',
+  'binding workspace': 'workspace del binding',
+  Effect: 'Efecto',
+  'Managed inference': 'Managed inference',
+  'Managed local tools · F8 approval per action':
+    'Managed local tools · aprobación F8 por acción',
+  'BLOCKED_TRUST_BOUNDARY · no Native process will be launched from OL3.':
+    'BLOCKED_TRUST_BOUNDARY · no se lanzará un proceso Native desde OL3.',
+  'BLOCKED_PROVIDER · the planner has no execution authority.':
+    'BLOCKED_PROVIDER · el planner no tiene autoridad de ejecución.',
+  Dependencies: 'Dependencias',
+  '(required)': '(obligatorio)',
+  '(optional)': '(opcional)',
+  'Required step': 'Paso obligatorio',
+  'Exact step input': 'Entrada exacta del paso',
+  "Describe this step's work. The text grants no authority or approvals.":
+    'Describe el trabajo de este paso. El texto no concede autoridad ni aprobaciones.',
+  'M6 keeps one Managed turn running globally at a time. Native full-account, Claude adapter and Hermes planner stay visible but blocked.':
+    'M6 fija un turno Managed global a la vez. Native full-account, Claude adapter y Hermes planner permanecen visibles pero bloqueados.',
+  'Review the full plan': 'Revisar el plan completo',
+  'Reviewed plan': 'Plan revisado',
+  'Explicit review · digest': 'Revisión explícita · digest',
+  'Review goal, workspace, DAG order, provider, effects, prompts, budget and expiry. Confirming allows only the exact plan shown above.':
+    'Revisa objetivo, workspace, orden DAG, proveedor, efectos, prompts, presupuesto y vencimiento. Confirmar permite solo el plan exacto anterior.',
+  'See the full plan and exact inputs': 'Ver plan completo y entradas exactas',
+  'Confirm and send to the coordinator': 'Confirmar y enviar al coordinador',
+  'Prepare structured handoff v1': 'Preparar handoff estructurado v1',
+  'Source content is selected explicitly; conversation, credentials, permissions and approvals are never inherited.':
+    'El contenido del origen se selecciona explícitamente; nunca se heredan conversación, credenciales, permisos ni aprobaciones.',
+  Source: 'Origen',
+  'Source plane': 'Plano de origen',
+  'Managed source session': 'Sesión Managed de origen',
+  'Select a session to observe generation and workspace':
+    'Selecciona sesión para observar generación y workspace',
+  generation: 'generation',
+  'generation observed {generation}': 'generation observada {generation}',
+  'Native source session': 'Sesión Native de origen',
+  'Select an active Native session': 'Selecciona sesión Native activa',
+  restarts: 'reinicios',
+  'Source workspace': 'Workspace de origen',
+  'Taken from the observed session': 'Se toma de la sesión observada',
+  'Source revision': 'Revisión de origen',
+  'Session ID': 'Session',
+  'Target workspace': 'Workspace de destino',
+  'Choose the receiving folder': 'Elige la carpeta receptora',
+  'Target revision': 'Revisión de destino',
+  'Receiving provider': 'Proveedor receptor',
+  'Managed Codex · admitted by F8': 'Managed Codex · admitido por F8',
+  'Managed Claude · blocked': 'Managed Claude · bloqueado',
+  'Native Codex · blocked, manual copy only':
+    'Native Codex · bloqueado, solo copia manual',
+  'Native Claude · blocked, manual copy only':
+    'Native Claude · bloqueado, solo copia manual',
+  'Each handoff requires a new Managed receiver, with no earlier turns or context. The receiver inherits no permissions.':
+    'Cada handoff requiere un receptor Managed nuevo, sin turnos ni contexto previo. El receptor no hereda permisos.',
+  'Prepare new Managed receiver through F8':
+    'Preparar receptor Managed nuevo mediante F8',
+  'Configure receiver in Runtimes': 'Configurar receptor en Runtimes',
+  'Managed local tools with F8 approval':
+    'Managed local tools con aprobación F8',
+  'BLOCKED_PROVIDER · no Managed Claude adapter admitted by the F8 authority in this M6.':
+    'BLOCKED_PROVIDER · no hay adaptador Managed Claude admitido por la autoridad F8 de este M6.',
+  'Native profile (reference)': 'Perfil Native (referencia)',
+  'BLOCKED_TRUST_BOUNDARY · no Native target will be started automatically. The existing manual flow remains available.':
+    'BLOCKED_TRUST_BOUNDARY · no se iniciará automáticamente un destino Native. El flujo manual existente sigue disponible.',
+  'BLOCKED_PROVIDER · Hermes receives no authority to execute.':
+    'BLOCKED_PROVIDER · Hermes no recibe autoridad para ejecutar.',
+  'Selected content': 'Contenido seleccionado',
+  'Goal confirmed by the owner': 'Objetivo confirmado por el dueño',
+  Provenance: 'Procedencia',
+  'Chosen excerpts (one line per item)':
+    'Extractos elegidos (una línea por elemento)',
+  'File references as relative labels (one per line)':
+    'Referencias de archivo como etiquetas relativas (una por línea)',
+  'Open questions (one per line)': 'Preguntas abiertas (una por línea)',
+  'Seal and review exact bytes': 'Sellar y revisar bytes exactos',
+  Target: 'Destino',
+  target: 'destino',
+  workspace: 'workspace',
+  'Review and delivery': 'Revisión y entrega',
+  'Every quoted text is untrusted input. The digest is confirmed against source, target, revisions and selection.':
+    'Todo texto citado es entrada no confiable. El digest se confirma contra origen, destino, revisiones y selección.',
+  'M5/F8 is inactive. Managed handoff cannot start until the approved authority is active.':
+    'M5/F8 está inactivo. Handoff Managed no puede iniciar hasta que la autoridad aprobada esté activa.',
+  'Confirmed digest': 'Digest confirmado',
+  Handoff: 'Handoff',
+  'Session target': 'Destino de sesión',
+  'proposal without session': 'propuesta sin sesión',
+  'Exact first message, delimited as untrusted context':
+    'Primer mensaje exacto, delimitado como contexto no confiable',
+  'Review the full envelope': 'Revisar sobre completo',
+  Copied: 'Copiado',
+  'Copy reviewed message': 'Copiar mensaje revisado',
+  'BLOCKED_TRUST_BOUNDARY · the digest does not authorize a Native launch; use the manual flow and its local confirmation.':
+    'BLOCKED_TRUST_BOUNDARY · el digest no autoriza el lanzamiento Native; usa el flujo manual y su confirmación local.',
+  'BLOCKED_PROVIDER · the target adapter is not admitted for sending.':
+    'BLOCKED_PROVIDER · el adaptador del destino no está admitido para envío.',
+  'Confirm digest and deliver to the new Managed':
+    'Confirmar digest y entregar al Managed nuevo',
+  'Handoff content is volatile. Complete the selection and workspace to generate the review.':
+    'El contenido del handoff es volátil. Completa selección y workspace para generar la revisión.',
+  Execution: 'Ejecución',
+  'Delivery does not mean the recipient finished correctly.':
+    'La entrega no implica que el destinatario haya terminado correctamente.',
+  'Local runs': 'Ejecuciones locales',
+  'Durable metadata only. No prompts or provider output in the local log.':
+    'Solo metadatos durables. Sin prompts ni salida de proveedor en el registro local.',
+  'Reading local log…': 'Leyendo registro local…',
+  'No runs recorded.': 'No hay ejecuciones registradas.',
+  digest: 'digest',
+  '{provider} · {effect} · attempts {count}':
+    '{provider} · {effect} · intentos {count}',
+  'The turn ended. Inspect the workspace before marking the step completed.':
+    'El turno terminó. Inspecciona el workspace antes de marcar el paso completado.',
+  'Uncertain result or coordinator restarted. The turn is not resent. Confirm evidence before closing this step.':
+    'Resultado incierto o coordinador reiniciado. No se reenvía el turno. Confirma evidencia antes de cerrar este paso.',
+  'Choose and observe workspace': 'Elegir y observar workspace',
+  'Confirm output after reviewing the current revision':
+    'Confirmar salida tras revisar la revisión actual',
+  'Observed revision': 'Revisión observada',
+  'Observed workspace': 'Workspace observado',
+  'I confirm it completed · review current revision':
+    'Confirmo que completó · revisar revisión actual',
+  'I confirm it had no effect · close as failed':
+    'Confirmo que no tuvo efecto · cerrar como fallido',
+  'I confirm cancellation': 'Confirmo cancelación',
+  Pause: 'Pausar',
+  'Stop/cancel': 'Detener/cancelar',
+
+  // Pipelines view: the coordinator's error texts and the session and run messages
+  'The local coordinator is not available.':
+    'El coordinador local no está disponible.',
+  'The request does not match the M6 contract.':
+    'La solicitud no coincide con el contrato M6.',
+  'The plan is not valid or exceeds the finite limits.':
+    'El plan no es válido o supera los límites finitos.',
+  'The handoff is incomplete, expired or changed.':
+    'El handoff está incompleto, vencido o cambió.',
+  'The objective exceeds 2,048 bytes; shorten the text before sealing it.':
+    'El objetivo supera 2.048 bytes; reduce el texto antes de sellarlo.',
+  'The generated message exceeds 8 KiB; shorten the excerpts or questions before sealing it.':
+    'El mensaje generado supera 8 KiB; reduce los extractos o preguntas antes de sellarlo.',
+  'The content changed after the review; review it again.':
+    'El contenido cambió después de la revisión; vuelve a revisarlo.',
+  'Blocked: the Native trust boundary is not proven.':
+    'Bloqueado: la frontera de confianza de Native no está demostrada.',
+  'The provider or host is not allowed for this handoff.':
+    'El proveedor o el host no está admitido para este handoff.',
+  'F8 confirmed the receiver has earlier work or is not prepared as a new session.':
+    'F8 confirmó que el receptor tiene trabajo previo o no está preparado como sesión nueva.',
+  'The F8 evidence cannot prove the receiver is new and has no history.':
+    'No se pudo probar desde la evidencia F8 que el receptor esté nuevo y sin historial.',
+  'The current identity or generation of the source Managed session could not be proven.':
+    'No se pudo probar la identidad o generación actual de la sesión Managed de origen.',
+  'The Managed authority denied the start.':
+    'La autoridad Managed denegó el inicio.',
+  'The Managed resource is busy; no other turn was started.':
+    'El recurso Managed está ocupado; no se inició otro turno.',
+  'The workspace changed or does not match the approved revision.':
+    'El workspace cambió o no coincide con la revisión aprobada.',
+  'The local journal could not save the state.':
+    'El registro local no pudo guardar el estado.',
+  'The Managed authority did not respond; the result may need review.':
+    'La autoridad Managed no respondió; el resultado puede requerir revisión.',
+  'That run was not found.': 'No se encontró esa ejecución.',
+  'The action is not available in the current state.':
+    'La acción no está disponible para el estado actual.',
+  'The review or the run expired.': 'La revisión o la ejecución venció.',
+  'The effect is uncertain and stays stopped for human review.':
+    'El efecto es incierto y queda detenido para revisión humana.',
+  'Operation M6 failed.': 'Falló la operación M6.',
+  'The M6 operation could not be completed.':
+    'No se pudo completar la operación M6.',
+  'Could not read Managed sessions from F8.':
+    'No se pudieron leer sesiones Managed desde F8.',
+  'The Managed authority is inactive; only the observed Native sessions are shown.':
+    'La autoridad Managed está inactiva; se muestran solo las sesiones Native observadas.',
+
+  // Pipelines view: plan review, the Native source and the effect confirmation
+  'The budget must be a whole number from 1 to 60 minutes.':
+    'El presupuesto debe ser un número entero entre 1 y 60 minutos.',
+  'Complete the workspace, objective, steps, dependencies and sessions before reviewing.':
+    'Completa el workspace, objetivo, pasos, dependencias y sesiones antes de revisar.',
+  'The Native session is no longer active; refresh and select a running session.':
+    'La sesión Native ya no está activa; actualiza y selecciona una sesión en ejecución.',
+  'Select the workspace and confirm the current revision before declaring an effect completed.':
+    'Selecciona el workspace y confirma la revisión actual antes de declarar un efecto completado.',
+
+  // Pipelines view: the managed receiver preparation and its status
+  'First prepare a new Managed session for this handoff.':
+    'Primero prepara una sesión nueva Managed para este handoff.',
+  'Select a target workspace and enable F8 Managed before preparing the receiver.':
+    'Selecciona workspace de destino y habilita F8 Managed antes de preparar el receptor.',
+  'New Managed session prepared. Authorize its binding, runtime and lease from Runtimes.':
+    'Sesión Managed nueva preparada. Autoriza su binding, runtime y lease desde Runtimes.',
+  'New receiver {id}': 'Receptor nuevo {id}',
+  'F8 did not confirm the preparation. No other session is created with a different intent; retry the same request.':
+    'F8 no confirmó la preparación. No se crea otra sesión con un intent diferente; vuelve a intentar el mismo pedido.',
+  'Could not prepare the Managed receiver through F8.':
+    'No se pudo preparar el receptor Managed mediante F8.',
+  'A new Managed session, active F8 or a target workspace is missing.':
+    'Falta una sesión nueva Managed, F8 activo o workspace destino.',
+  'The receiver was not created for this handoff. Prepare a new Managed session.':
+    'El receptor no fue creado para este handoff. Prepara una sesión Managed nueva.',
+  '{id} · generation {generation} · {profile} · lease {lease}':
+    '{id} · generation {generation} · {profile} · lease {lease}',
+  'unknown profile': 'perfil desconocido',
+  absent: 'ausente',
+  'New receiver, without history, attached to the workspace and enabled by the F8 turn_start lease.':
+    'Receptor nuevo, sin historial, adjunto al workspace y habilitado por la lease F8 turn_start.',
+  'Receiver not admitted yet. In Runtimes, configure the requested profile, bind the target workspace and grant a turn_start lease; the handoff will not be sent until everything is confirmed.':
+    'Receptor aún no admitido. En Runtimes, configura el perfil solicitado, enlaza el workspace destino y concede una lease turn_start; no se enviará el handoff hasta confirmar todo.',
+  'The receiver could not be observed through F8; it is not assumed to be prepared.':
+    'No se pudo observar el receptor desde F8; no se asume que esté preparado.',
+  'Prepare a new Managed receiver for this handoff first.':
+    'Prepara primero un receptor Managed nuevo para este handoff.',
+
+  // Pipelines view: the handoff review and the clipboard
+  'Complete source, target, session, objective and review both workspace revisions.':
+    'Completa origen, destino, sesión, objetivo y revisa ambas revisiones de workspace.',
+  'BLOCKED: the Native target requires an accepted trust boundary. The text can be copied for the existing manual flow.':
+    'BLOCKED: el destino Native requiere una frontera de confianza aceptada. El texto se puede copiar para el flujo manual existente.',
+  'The clipboard is not available; select and copy the reviewed text.':
+    'El portapapeles no está disponible; selecciona y copia el texto revisado.',
 };
