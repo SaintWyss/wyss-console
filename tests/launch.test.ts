@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isFullAccess,
+  LaunchRefusal,
   openLaunch,
   type LaunchDeps,
 } from '../src/lib/features/terminal/launch';
@@ -44,12 +45,18 @@ const session = (
   agent: 'codex',
   profile: 'Full access (bypass)',
   before: ['scan'],
+  preset: null,
   ...over,
 });
 function deps(
   launch: Launch,
   before = [{ command: 'scan', result: 'ok' }],
-  { selection = null as string | null, canApply = true, canStart = true } = {},
+  {
+    selection = null as string | null,
+    canApply = true,
+    canStart = true,
+    presetId = 'sel-preset' as string | null,
+  } = {},
 ) {
   const reply = { session: { id: 's1' } } as unknown as StartReply;
   const d: LaunchDeps = {
@@ -57,6 +64,7 @@ function deps(
     runBefore: vi.fn(async () => before),
     profiles: vi.fn(async () => PROFILES),
     remembered: vi.fn(async () => selection),
+    presetNamed: vi.fn(async () => presetId),
     plan: vi.fn(
       async () =>
         ({
@@ -128,6 +136,41 @@ describe('openLaunch', () => {
     expect(opened.notes).toHaveLength(1);
     expect(shown(opened.notes[0])).toContain('exit 7');
     expect(d.start).toHaveBeenCalled();
+  });
+
+  it('the preset a launch names wins over the one its folder remembers', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selection: 'sel-remembered',
+    });
+    await openLaunch('codex', d);
+    expect(d.presetNamed).toHaveBeenCalledWith('Estudio', 'codex');
+    expect(d.remembered).not.toHaveBeenCalled();
+    expect(d.plan).toHaveBeenCalledWith('sel-preset', 'codex', '/home/me');
+  });
+
+  it('a launch with no preset keeps the one its folder remembers', async () => {
+    const { d } = deps(session(), undefined, { selection: 'sel-remembered' });
+    await openLaunch('codex', d);
+    expect(d.presetNamed).not.toHaveBeenCalled();
+    expect(d.plan).toHaveBeenCalledWith('sel-remembered', 'codex', '/home/me');
+  });
+
+  it('a preset with no name for this agent stops the launch before anything runs, and says which', async () => {
+    const { d } = deps(session({ preset: 'Missing' }), undefined, {
+      presetId: null,
+    });
+    const refusal = await openLaunch('codex', d).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(LaunchRefusal);
+    expect((refusal as Error).message).toContain('Missing');
+    // The sentence and its values reach the view, which draws them through t().
+    const { template, values } = refusal as LaunchRefusal;
+    expect(template).toContain('{name}');
+    expect(values).toEqual({ name: 'Missing' });
+    expect(d.runBefore).not.toHaveBeenCalled();
+    expect(d.plan).not.toHaveBeenCalled();
+    expect(d.start).not.toHaveBeenCalled();
   });
 
   it('a profile that does not exist for the agent stops before anything runs', async () => {

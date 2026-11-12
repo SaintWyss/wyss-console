@@ -625,6 +625,10 @@ mod tests {
             "allow-launch-list",
             "allow-launch-get",
             "allow-launch-before",
+            // Saved launches (arsenal-UI-SPEC, phase D): a session launch written from
+            // Workspace, and the removal of one the window saved. Neither takes a command.
+            "allow-launch-save",
+            "allow-launch-delete",
             // The host that holds the terminals past the window (F9).
             "allow-host-terminals",
             "allow-host-info",

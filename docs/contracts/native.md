@@ -30,8 +30,16 @@ The accepted launch design (formerly ADR0059) uses per-user TOML files, reread w
 At most 64 sorted TOML candidates are processed, 64 KiB per file, with validated
 filename grammar. The current implementation collects all matching directory entries
 before that processing limit; this is not a hard directory-enumeration memory bound. A file selects either commands
-(at most 16, each at most 4096 Unicode scalar values; one line, no controls) or a Native agent and optional profile, never Managed.
+(at most 16, each at most 4096 Unicode scalar values; one line, no controls) or a Native agent with an optional profile and an optional `preset`, never Managed.
 The backend parser in `src-tauri/src/launch.rs` owns exact keys and validation.
+
+`preset` is the name of an Arsenal preset of that agent's provider. A launch that names one
+applies it instead of the preset its folder remembers; a name with no preset for the agent
+refuses the start before anything runs. Workspace saves a session launch (`launch_save`: name,
+folder, agent, profile, preset; never `commands` or `before`; written through a private temporary
+file and a rename, mode `0600`, never through a link). An existing file of that name answers
+`exists` until the owner asks to replace it. `launch_delete` removes only a launch with no
+`before` line and no commands.
 
 Optional preparation has at most eight lines, run separately through `/bin/sh`, with a
 30-second deadline, process-group cleanup and discarded output. Failure is reported and

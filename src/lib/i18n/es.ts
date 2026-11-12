@@ -834,4 +834,20 @@ export const ES: Readonly<Record<string, string>> = {
   'Discard changes': 'Descartar cambios',
   'Keep editing': 'Seguir editando',
   'Unsaved changes': 'Cambios sin guardar',
+  // ---- launch ----
+  'Save as launch…': 'Guardar como lanzamiento…',
+  'Save as launch': 'Guardar como lanzamiento',
+  'Launch name': 'Nombre del lanzamiento',
+  'No profile — as configured': 'Sin perfil — como está configurado',
+  'None — all installed skills': 'Ninguno — todas las skills instaladas',
+  'A launch with that name exists.': 'Ya hay un lanzamiento con ese nombre.',
+  Replace: 'Reemplazar',
+  'Save launch': 'Guardar lanzamiento',
+  'The launch could not be saved.': 'No se pudo guardar el lanzamiento.',
+  'Launch saved as “{name}”. Find it in Launch ▾.':
+    'Lanzamiento guardado como “{name}”. Está en Launch ▾.',
+  'No profile named “{name}” for this agent. Create it in Profiles, or change the launch file.':
+    'No hay un perfil llamado “{name}” para este agente. Créalo en Perfiles o cambia el archivo del lanzamiento.',
+  'No preset named “{name}” for this agent. Create it in Arsenal, or change the launch file.':
+    'No hay un preset llamado “{name}” para este agente. Créalo en Arsenal o cambia el archivo del lanzamiento.',
 };

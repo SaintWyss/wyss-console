@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 fn places() -> Places {
     let root = fs::canonicalize(std::env::temp_dir())
@@ -41,6 +42,7 @@ fn a_missing_folder_is_made_once_with_the_shipped_launches() {
             agent: a,
             profile,
             before,
+            ..
         } = &launch.kind
         else {
             panic!("{launch:?}")
@@ -265,4 +267,228 @@ fn what_a_before_command_leaves_running_is_stopped_when_it_ends() {
         !marker.exists(),
         "a background child outlived its before line"
     );
+}
+
+/// What the desktop holds in these tests: profiles and presets, each for one agent.
+struct Fake {
+    profiles: Vec<(&'static str, &'static str)>,
+    presets: Vec<(&'static str, &'static str)>,
+}
+
+impl Known for Fake {
+    fn profiles(&self, agent: &str) -> Result<Vec<String>, String> {
+        Ok(self
+            .profiles
+            .iter()
+            .filter(|(a, _)| *a == agent)
+            .map(|(_, n)| n.to_string())
+            .collect())
+    }
+    fn presets(&self, agent: &str) -> Result<Vec<String>, String> {
+        Ok(self
+            .presets
+            .iter()
+            .filter(|(a, _)| *a == agent)
+            .map(|(_, n)| n.to_string())
+            .collect())
+    }
+}
+
+fn fake() -> Fake {
+    Fake {
+        profiles: vec![
+            ("claude_code", "Full access (bypass)"),
+            ("codex", "Estudio"),
+        ],
+        presets: vec![("claude_code", "Estudio"), ("codex", "Codex base")],
+    }
+}
+
+fn request(value: serde_json::Value) -> SaveRequest {
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn a_saved_launch_is_private_names_its_preset_and_reads_back_the_same() {
+    let places = places();
+    let work = places.home.join("work").display().to_string();
+    let saved = save(
+        &places,
+        &request(json!({
+            "name": "Estudiar UTN", "directory": work, "agent": "claude_code",
+            "profile": "Full access (bypass)", "preset": "Estudio",
+        })),
+        &fake(),
+    )
+    .unwrap();
+    assert_eq!(saved.id, "estudiar-utn");
+    assert_eq!(saved.name, "Estudiar UTN");
+    assert_eq!(
+        saved.kind,
+        Kind::Session {
+            agent: "claude_code".into(),
+            profile: Some("Full access (bypass)".into()),
+            before: vec![],
+            preset: Some("Estudio".into()),
+        }
+    );
+    let path = places.folder.join("estudiar-utn.toml");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("directory = \"~/work\""), "{text}");
+    assert!(
+        !text.contains("commands") && !text.contains("before"),
+        "{text}"
+    );
+    assert_eq!(get(&places, "estudiar-utn").unwrap(), saved);
+    let stray: Vec<String> = fs::read_dir(&places.folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".tmp"))
+        .collect();
+    assert!(stray.is_empty(), "{stray:?}");
+    let listed = list(&places).unwrap();
+    assert!(listed.refused.is_empty(), "{:?}", listed.refused);
+    assert!(listed.launches.iter().any(|l| l.id == "estudiar-utn"));
+}
+
+#[test]
+fn a_save_is_checked_against_the_desktop_and_writes_nothing_when_refused() {
+    let places = places();
+    let work = places.home.join("work").display().to_string();
+    let nowhere = places.home.join("nowhere").display().to_string();
+    let cases = [
+        (json!({"name": "x", "directory": work, "agent": "bash"}), "claude_code or codex"),
+        (json!({"name": "a\nb", "directory": work, "agent": "codex"}), "one line"),
+        (json!({"name": "x".repeat(61), "directory": work, "agent": "codex"}), "1–60"),
+        (json!({"name": "!!!", "directory": work, "agent": "codex"}), "letter or digit"),
+        (json!({"name": "x", "directory": "work", "agent": "codex"}), "absolute"),
+        (json!({"name": "x", "directory": nowhere, "agent": "codex"}), "not found"),
+        (json!({"name": "x", "directory": work, "agent": "codex", "profile": "Full access (bypass)"}), "no profile named"),
+        (json!({"name": "x", "directory": work, "agent": "claude_code", "preset": "Codex base"}), "no preset named"),
+        (json!({"name": "x", "directory": work, "agent": "codex", "profile": ""}), "profile must be"),
+    ];
+    for (value, why) in cases {
+        match save(&places, &request(value.clone()), &fake()) {
+            Err(SaveRefusal::Invalid(text)) => assert!(text.contains(why), "{value}: {text}"),
+            other => panic!("{value}: {other:?}"),
+        }
+    }
+    assert!(!places.folder.exists(), "a refused save wrote something");
+}
+
+#[test]
+fn an_existing_launch_is_refused_until_the_window_asks_to_replace_it() {
+    let places = places();
+    let base = json!({
+        "name": "Mismo", "directory": places.home.join("work").display().to_string(),
+        "agent": "codex",
+    });
+    save(&places, &request(base.clone()), &fake()).unwrap();
+    assert_eq!(
+        save(&places, &request(base.clone()), &fake()).unwrap_err(),
+        SaveRefusal::Exists
+    );
+    let mut again = base;
+    again["preset"] = json!("Codex base");
+    again["replace"] = json!(true);
+    let replaced = save(&places, &request(again), &fake()).unwrap();
+    assert!(matches!(
+        replaced.kind,
+        Kind::Session { preset: Some(ref p), .. } if p == "Codex base"
+    ));
+}
+
+#[test]
+fn a_save_never_writes_through_a_link() {
+    let places = places();
+    seed(&places.folder).unwrap();
+    let victim = places.home.join("victim.txt");
+    fs::write(&victim, "keep").unwrap();
+    std::os::unix::fs::symlink(&victim, places.folder.join("linked.toml")).unwrap();
+    let refusal = save(
+        &places,
+        &request(json!({
+            "name": "Linked", "directory": places.home.display().to_string(),
+            "agent": "codex", "replace": true,
+        })),
+        &fake(),
+    );
+    assert!(
+        matches!(&refusal, Err(SaveRefusal::Invalid(t)) if t.contains("not a plain file")),
+        "{refusal:?}"
+    );
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+}
+
+#[test]
+fn the_window_cannot_send_a_command_or_a_before_line_to_save() {
+    let base = json!({"name": "x", "directory": "~", "agent": "codex"});
+    for (key, value) in [
+        ("commands", json!(["rm -rf ~"])),
+        ("before", json!(["id"])),
+        ("kind", json!("commands")),
+        ("session", json!({})),
+    ] {
+        let mut tampered = base.clone();
+        tampered[key] = value;
+        assert!(
+            serde_json::from_value::<SaveRequest>(tampered.clone()).is_err(),
+            "{tampered}"
+        );
+    }
+}
+
+#[test]
+fn a_file_name_is_lowercase_ascii_with_dashes_and_at_most_forty() {
+    assert_eq!(slug("Estudio Ñandú — Güemes 2026!"), "estudio-nandu-guemes-2026");
+    assert_eq!(slug("  --Codex--  "), "codex");
+    let long = slug(&"abc ".repeat(20));
+    assert!(long.len() <= 40 && !long.ends_with('-'), "{long}");
+    assert_eq!(slug("¿¡?!"), "");
+}
+
+#[test]
+fn only_a_launch_saved_from_workspace_can_be_deleted_here() {
+    let places = places();
+    save(
+        &places,
+        &request(json!({
+            "name": "Temporal", "directory": places.home.display().to_string(), "agent": "codex",
+        })),
+        &fake(),
+    )
+    .unwrap();
+    delete(&places, "temporal").unwrap();
+    assert!(!places.folder.join("temporal.toml").exists());
+    // The shipped Codex launch names a `before` line: the owner's file, kept.
+    let refused = delete(&places, "codex").unwrap_err();
+    assert!(refused.contains("edit the others"), "{refused}");
+    assert!(places.folder.join("codex.toml").exists());
+    write(&places, "typed.toml", "name = \"Typed\"\ncommands = [\"ls\"]\n");
+    assert!(delete(&places, "typed").is_err());
+    assert!(places.folder.join("typed.toml").exists());
+    assert!(delete(&places, "../codex").is_err());
+}
+
+#[test]
+fn a_session_names_its_preset_and_an_empty_name_is_refused() {
+    let places = places();
+    write(
+        &places,
+        "with.toml",
+        "name = \"With\"\n[session]\nagent = \"codex\"\npreset = \"Codex base\"\n",
+    );
+    assert!(matches!(
+        get(&places, "with").unwrap().kind,
+        Kind::Session { preset: Some(ref p), .. } if p == "Codex base"
+    ));
+    write(
+        &places,
+        "empty.toml",
+        "name = \"Empty\"\n[session]\nagent = \"codex\"\npreset = \"\"\n",
+    );
+    let why = get(&places, "empty").unwrap_err();
+    assert!(why.contains("preset must be"), "{why}");
 }

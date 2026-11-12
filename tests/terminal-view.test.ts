@@ -282,6 +282,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-launch-list',
     'allow-launch-get',
     'allow-launch-before',
+    'allow-launch-save',
+    'allow-launch-delete',
     // The host that holds the terminals past the window (F9): what it holds, whether it is
     // a host process, and a redraw of a program's screen after a window attaches.
     'allow-host-terminals',
@@ -389,11 +391,16 @@ it('preserves narrow IPC capabilities and production script/network restrictions
   // returned, a session or a profile of the desktop's own registry, and so they are
   // allowed words like stop, restart, profile and export; the words that would mean the
   // window can run something of its own stay forbidden for them below.
+  // Third exception, deliberate and bounded (arsenal-UI-SPEC, phase D): saving a launch. The
+  // window names an agent of the closed catalogue, a folder the desktop checks, a profile and
+  // a preset the desktop lists, and a name. No command, no `before` line, no path of its own;
+  // the file written is the session launch the reader already takes (launch_tests.rs).
   for (const permission of capability.permissions.filter(
     (p: string) =>
       p !== 'allow-configuration-export' &&
       p !== 'allow-configuration-document-export' &&
       p !== 'allow-configuration-template-export' &&
+      p !== 'allow-launch-save' &&
       !p.startsWith('allow-native-'),
   ))
     expect(permission).not.toMatch(

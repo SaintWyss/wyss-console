@@ -16,6 +16,8 @@ export interface LaunchDeps {
   profiles(): Promise<Profile[]>;
   /** The Arsenal selection the folder's last terminal of this agent started with. */
   remembered(project: string, agent: AgentId): Promise<string | null>;
+  /** The selection id of the preset with this name for this agent; null when there is none. */
+  presetNamed(name: string, agent: AgentId): Promise<string | null>;
   plan(
     selection: string,
     agent: AgentId,
@@ -47,6 +49,24 @@ export interface LaunchDeps {
 export interface LaunchNote {
   text: string;
   values?: Record<string, string | number>;
+}
+
+/**
+ * A launch that cannot start: the window's own sentence and its values, so the view can draw it
+ * through t() in the language in force. The message is the English sentence with the values in.
+ */
+export class LaunchRefusal extends Error {
+  constructor(
+    readonly template: string,
+    readonly values: Record<string, string> = {},
+  ) {
+    super(
+      Object.entries(values).reduce(
+        (text, [name, value]) => text.replace(`{${name}}`, value),
+        template,
+      ),
+    );
+  }
 }
 
 export interface Opened {
@@ -116,13 +136,30 @@ export async function openLaunch(
   if (launch.profile) {
     const profile = profileFor(await deps.profiles(), launch.profile, agent);
     if (!profile)
-      throw new Error(
-        `No profile named “${launch.profile}” for this agent. Create it in Profiles, or change the launch file.`,
+      throw new LaunchRefusal(
+        msg(
+          'No profile named “{name}” for this agent. Create it in Profiles, or change the launch file.',
+        ),
+        { name: launch.profile },
       );
     profileId = profile.id;
   }
+  // The preset the launch names wins over the one its folder remembers. A name with no preset
+  // for this agent stops the launch before anything runs, with the reason.
+  let selection: string | null;
+  if (launch.preset) {
+    selection = await deps.presetNamed(launch.preset, agent);
+    if (!selection)
+      throw new LaunchRefusal(
+        msg(
+          'No preset named “{name}” for this agent. Create it in Arsenal, or change the launch file.',
+        ),
+        { name: launch.preset },
+      );
+  } else {
+    selection = await deps.remembered(directory, agent);
+  }
   // The selection is planned before anything runs, so a plan that fails stops the launch whole.
-  const selection = await deps.remembered(directory, agent);
   const plan = selection ? await deps.plan(selection, agent, directory) : null;
   const arsenal: ArsenalStart | null = plan
     ? {

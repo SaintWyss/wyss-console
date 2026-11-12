@@ -5,6 +5,8 @@
   import DelegationsPanel from './DelegationsPanel.svelte';
   import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
+  import { LaunchError, saveLaunch } from '../../desktop/launch-client';
+  import { t } from '../../i18n/index.svelte';
   import type { Binding } from '../../contracts/arsenal';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
@@ -273,6 +275,71 @@
   }
   const profileName = (id: string) =>
     native.profiles.find((p) => p.id === id)?.body.name ?? 'profile';
+
+  // Save as launch… (arsenal-UI-SPEC, phase D): the choices on this card, written as a session
+  // launch that Launch ▾ lists. The desktop checks the profile and the preset again.
+  let launchForm = $state<{
+    name: string;
+    busy: boolean;
+    exists: boolean;
+    failure: string | null;
+  } | null>(null);
+  let launchSaved = $state<string | null>(null);
+  // The preset is the Arsenal choice when there is one; a choice still being computed saves nothing.
+  const launchPreset = $derived(
+    arsenalChoice === null || arsenalChoice.pending
+      ? null
+      : arsenalChoice.plan.selection_name,
+  );
+  const launchProfile = $derived(
+    profile
+      ? (native.profiles.find((p) => p.id === profile)?.body.name ?? null)
+      : null,
+  );
+  function openLaunchForm() {
+    if (!launchAgent || !project) return;
+    launchSaved = null;
+    launchForm = {
+      name: `${AGENT_LABEL[launchAgent]} · ${folderName(project)}`,
+      busy: false,
+      exists: false,
+      failure: null,
+    };
+  }
+  // A launch names a Claude Code or a Codex session: the agents Arsenal applies presets to.
+  const launchAgent = $derived(
+    agent === 'claude_code' || agent === 'codex' ? agent : null,
+  );
+  async function saveAsLaunch(replace: boolean) {
+    const form = launchForm;
+    const chosen = launchAgent;
+    if (!form || !chosen || !project || form.busy || !form.name.trim()) return;
+    form.busy = true;
+    form.exists = false;
+    form.failure = null;
+    try {
+      const saved = await saveLaunch({
+        name: form.name.trim(),
+        directory: project,
+        agent: chosen,
+        profile: launchProfile,
+        preset: launchPreset,
+        replace,
+      });
+      launchForm = null;
+      launchSaved = saved.name;
+    } catch (error) {
+      if (error instanceof LaunchError && error.code === 'exists')
+        form.exists = true;
+      else
+        form.failure =
+          error instanceof LaunchError && error.reasons[0]
+            ? error.reasons[0]
+            : t('The launch could not be saved.');
+    } finally {
+      form.busy = false;
+    }
+  }
 </script>
 
 <section
@@ -565,6 +632,15 @@
           </div>
           <button
             type="button"
+            class="action"
+            disabled={!launchAgent ||
+              !project ||
+              native.starting ||
+              !!launchForm}
+            onclick={openLaunchForm}>{t('Save as launch…')}</button
+          >
+          <button
+            type="button"
             class="action primary"
             disabled={!canStart}
             title={launcher.shell?.through_shell
@@ -577,6 +653,64 @@
               : `Start ${agent ? AGENT_LABEL[agent] : 'agent'}`}
           </button>
         </div>
+        {#if launchForm && launchAgent && project}
+          <div
+            class="launch-save"
+            role="group"
+            aria-label={t('Save as launch')}
+          >
+            <label class="launch-save-name" for="launch-save-name"
+              >{t('Launch name')}</label
+            >
+            <input
+              id="launch-save-name"
+              type="text"
+              maxlength="60"
+              bind:value={launchForm.name}
+              disabled={launchForm.busy}
+            />
+            <p class="event-meta">
+              {AGENT_LABEL[launchAgent]} · {folderName(project)} · {launchProfile ??
+                t('No profile — as configured')} · {launchPreset ??
+                t('None — all installed skills')}
+            </p>
+            {#if launchForm.exists}
+              <p class="native-warning" role="alert">
+                {t('A launch with that name exists.')}
+              </p>
+            {/if}
+            {#if launchForm.failure}
+              <p class="native-warning" role="alert">{launchForm.failure}</p>
+            {/if}
+            <div class="launch-footer">
+              <button
+                type="button"
+                class="action"
+                onclick={() => (launchForm = null)}>{t('Cancel')}</button
+              >
+              <button
+                type="button"
+                class="action primary"
+                disabled={!launchForm.name.trim() ||
+                  launchForm.busy ||
+                  arsenalChoice?.pending === true}
+                onclick={() => saveAsLaunch(launchForm?.exists === true)}
+                >{launchForm.exists
+                  ? t('Replace')
+                  : launchForm.busy
+                    ? t('Saving…')
+                    : t('Save launch')}</button
+              >
+            </div>
+          </div>
+        {/if}
+        {#if launchSaved}
+          <p class="event-meta" role="status">
+            {t('Launch saved as “{name}”. Find it in Launch ▾.', {
+              name: launchSaved,
+            })}
+          </p>
+        {/if}
       </section>
 
       <div class="native-side">

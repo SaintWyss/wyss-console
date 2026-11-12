@@ -25,7 +25,12 @@
   import type { Profile } from '../../contracts/native';
   import { arsenalClient } from '../../desktop/arsenal-client';
   import { BYPASS_WARNING, failureText } from '../native/present';
-  import { isFullAccess, openLaunch, type LaunchNote } from './launch';
+  import {
+    isFullAccess,
+    LaunchRefusal,
+    openLaunch,
+    type LaunchNote,
+  } from './launch';
   import { applyOrder, loadOrder, moveLaunch, saveOrder } from './launch-order';
   import { msg, t } from '../../i18n/index.svelte';
   let {
@@ -59,9 +64,11 @@
   let launchProfiles = $state<Profile[]>([]);
   let launchBusy = $state<string | null>(null);
   let launchNote = $state<LaunchNote[] | null>(null);
-  let launchError = $state<{ text: string; translatable: boolean } | null>(
-    null,
-  );
+  let launchError = $state<{
+    text: string;
+    translatable: boolean;
+    values?: Record<string, string>;
+  } | null>(null);
   let launchOrder = $state<string[]>(loadOrder());
   let reordering = $state(false);
   const ordered = $derived(
@@ -108,7 +115,17 @@
   export function split(dir: 'row' | 'col') {
     if (activeId) manager?.split(activeId, dir);
   }
-  function explain(error: unknown): { text: string; translatable: boolean } {
+  function explain(error: unknown): {
+    text: string;
+    translatable: boolean;
+    values?: Record<string, string>;
+  } {
+    if (error instanceof LaunchRefusal)
+      return {
+        text: error.template,
+        translatable: true,
+        values: error.values,
+      };
     const e = error as {
       code?: string;
       reasons?: string[];
@@ -147,6 +164,12 @@
         profiles: readProfiles,
         remembered: (project, agent) =>
           arsenalClient.projectSelection(project, agent).catch(() => null),
+        presetNamed: async (name, agent) => {
+          const named = (await arsenalClient.selections()).filter(
+            (s) => s.name === name && s.provider === agent,
+          );
+          return named.length === 1 ? named[0].id : null;
+        },
         plan: (selection, agent, project) =>
           arsenalClient.terminalPlan(selection, agent, project),
         preview: (agent, profile, arsenal) =>
@@ -485,7 +508,9 @@
     </dl>
   {/if}
   {#if launchError}<p role="alert" class="workspace-error">
-      {launchError.translatable ? t(launchError.text) : launchError.text}
+      {launchError.translatable
+        ? t(launchError.text, launchError.values)
+        : launchError.text}
     </p>{/if}
   {#if launchNote}<p role="status" class="launch-note">
       {#each launchNote as note, index (index)}{index > 0 ? ' ' : ''}{t(

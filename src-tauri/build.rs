@@ -177,6 +177,8 @@ fn main() {
             "launch_list",
             "launch_get",
             "launch_before",
+            "launch_save",
+            "launch_delete",
             "host_terminals",
             "host_info",
             "terminal_redraw",

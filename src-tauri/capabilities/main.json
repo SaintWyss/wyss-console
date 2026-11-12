@@ -103,6 +103,8 @@
     "allow-launch-list",
     "allow-launch-get",
     "allow-launch-before",
+    "allow-launch-save",
+    "allow-launch-delete",
     "allow-host-terminals",
     "allow-host-info",
     "allow-terminal-redraw",

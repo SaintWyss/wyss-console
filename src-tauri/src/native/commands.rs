@@ -62,7 +62,7 @@ fn agent_word(agent: AgentId) -> &'static str {
 
 /// Protocol-1 hosts gain M9 through explicitly additive operations. The old operation names
 /// remain legacy projections so an M1-M6 window never deserializes a new closed AgentId.
-fn call_extended_or_legacy(
+pub(crate) fn call_extended_or_legacy(
     link: &HostLink,
     extended: &str,
     legacy: &str,
