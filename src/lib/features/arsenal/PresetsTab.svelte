@@ -90,10 +90,10 @@
     value: 'all' | 'skill' | 'agent' | 'rule';
     label: string;
   }[] = [
-    { value: 'all', label: msg('All') },
+    { value: 'rule', label: msg('Rules') },
     { value: 'skill', label: msg('Skills') },
     { value: 'agent', label: msg('Agents') },
-    { value: 'rule', label: msg('Rules') },
+    { value: 'all', label: msg('All') },
   ];
   /** What each type is, shown under the type filter. */
   const KIND_HELP: Record<'all' | 'skill' | 'agent' | 'rule', string> = {

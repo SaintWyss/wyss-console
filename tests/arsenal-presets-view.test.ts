@@ -213,6 +213,16 @@ describe('Presets screen', () => {
     expect(withRules.root.textContent).not.toContain('frontend-design');
   });
 
+  it('lists the type filters with Rules first', () => {
+    const { root } = render(stateWith());
+    flushSync();
+    expect(
+      [...root.querySelectorAll('.filters .chips:first-of-type .chip')].map(
+        (node) => text(node),
+      ),
+    ).toEqual(['Rules', 'Skills', 'Agents', 'All']);
+  });
+
   it('explains the selected type under the filters, and what Move to group does', () => {
     const rule = item('invariantes', { kind: 'rule' });
     const { root } = render(stateWith({ library: [frontend, rule] }));
