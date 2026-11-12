@@ -723,11 +723,62 @@
 </div>
 
 <style>
+  /* Presets run as one strip on top; below, the chooser takes the width and
+     the composition panel stays beside it. */
   .presets {
     display: grid;
-    grid-template-columns: minmax(0, 220px) minmax(0, 1fr) minmax(0, 320px);
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+    grid-template-areas:
+      'list list'
+      'chooser composition';
+    gap: 12px 16px;
     align-items: start;
+  }
+  .presets-list {
+    grid-area: list;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 12px;
+  }
+  .presets-list h3 {
+    margin: 0;
+  }
+  .presets-list .preset-rows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .presets-list .preset-row {
+    width: auto;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .presets-list .preset-row[aria-current='true'] {
+    border-bottom-color: var(--accent);
+  }
+  .presets-list .muted,
+  .presets-list .preset-actions {
+    margin: 0;
+  }
+  .presets-chooser {
+    grid-area: chooser;
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+  .presets-composition {
+    grid-area: composition;
+  }
+  @media (max-width: 900px) {
+    .presets {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'list' 'composition' 'chooser';
+    }
+    .presets-composition {
+      position: static;
+    }
   }
   section,
   aside {

@@ -3308,8 +3308,6 @@ export const ES: Readonly<Record<string, string>> = {
   'Importing…': 'Importando…',
   'Already imported': 'Ya importada',
   'Import as new revision': 'Importar como revisión nueva',
-  'Capabilities installed on this machine':
-    'Capacidades instaladas en esta computadora',
   'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.':
     'Instalada no quiere decir importada. Un preset llega a una terminal solo cuando la iniciás con él desde Workspace.',
   'Arsenal sections': 'Secciones de Arsenal',

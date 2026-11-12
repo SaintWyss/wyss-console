@@ -278,41 +278,30 @@
   hidden={!visible}
   inert={!visible}
 >
-  <div class="sessions-toolbar arsenal-head">
-    <div class="sessions-heading">
-      <h2>Arsenal</h2>
-      <p class="sessions-count">
-        {t('Capabilities installed on this machine')}
-      </p>
+  <div class="arsenal-head">
+    <h2>Arsenal</h2>
+    <div class="arsenal-provider" role="radiogroup" aria-label={t('Provider')}>
+      {#each PROVIDER_OPTIONS as option (option)}
+        <button
+          class="action arsenal-provider-option"
+          type="button"
+          role="radio"
+          aria-checked={provider === option}
+          tabindex={provider === option ? 0 : -1}
+          disabled={installed(option) === false}
+          onclick={() => chooseProvider(option)}
+          >{PROVIDER_LABEL[option]}{#if installed(option) === false}
+            <span class="arsenal-provider-note">{t('Not installed')}</span
+            >{/if}</button
+        >
+      {/each}
     </div>
     <button
-      class="action"
+      class="action arsenal-refresh"
       type="button"
       disabled={arsenal.phase === 'loading' || busy}
       onclick={() => controller.refresh()}>{t('Refresh')}</button
     >
-  </div>
-  <p class="configuration-note">
-    {t(
-      'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.',
-    )}
-  </p>
-
-  <div class="arsenal-provider" role="radiogroup" aria-label={t('Provider')}>
-    {#each PROVIDER_OPTIONS as option (option)}
-      <button
-        class="action arsenal-provider-option"
-        type="button"
-        role="radio"
-        aria-checked={provider === option}
-        tabindex={provider === option ? 0 : -1}
-        disabled={installed(option) === false}
-        onclick={() => chooseProvider(option)}
-        >{PROVIDER_LABEL[option]}{#if installed(option) === false}
-          <span class="arsenal-provider-note">{t('Not installed')}</span
-          >{/if}</button
-      >
-    {/each}
   </div>
   <div class="arsenal-tabs" role="tablist" aria-label={t('Arsenal sections')}>
     {#each TABS as tab, index (tab.id)}
@@ -328,6 +317,11 @@
         onkeydown={(event) => onTab(event, index)}>{t(tab.label)}</button
       >
     {/each}
+    <p class="arsenal-scope-note">
+      {t(
+        'Installed does not mean imported. A selection reaches a terminal only when you start one with it from Workspace.',
+      )}
+    </p>
   </div>
 
   <div class="arsenal-body">
@@ -1178,12 +1172,33 @@
     padding-bottom: 16px;
   }
   /* Sections are tabs, drawn as tabs: an underline on the open one, not a row of buttons. */
+  /* One header row: title, provider, Refresh. The page starts working at the second row. */
+  .arsenal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px 16px;
+    flex-wrap: wrap;
+  }
+  .arsenal-head h2 {
+    margin: 0;
+  }
+  .arsenal-refresh {
+    margin-left: auto;
+  }
   .arsenal-tabs {
     display: flex;
+    align-items: flex-end;
     gap: 2px;
     flex-wrap: wrap;
-    margin-top: 4px;
+    margin-top: 8px;
     border-bottom: 1px solid var(--line);
+  }
+  .arsenal-scope-note {
+    flex: 1 1 280px;
+    margin: 0 0 8px 12px;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-align: right;
   }
   .arsenal-tab {
     position: relative;
@@ -1222,6 +1237,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+  .arsenal-subtabs {
     margin: 8px 0;
   }
   .arsenal-provider-option[aria-checked='true'],

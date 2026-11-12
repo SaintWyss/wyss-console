@@ -86,22 +86,17 @@ La firma visual es el panel de composición: una ficha de equipo en mono, con un
 Qué domina: el panel de composición (derecha). Qué se lee después: los grupos con su cuenta. Qué hace reconocible la pantalla: los medidores de cinco celdas y los totales en mono.
 
 ```
-Arsenal                                    [ Claude Code | Codex ]            [Refresh]
- Presets   Library   Activity
-┌ Presets ──────────┐ ┌ Choose ───────────────────────────────┐ ┌ How it is put together ──┐
-│ + New preset      │ │ [Search…]  (All)(Skills)(Agents)(Rules)│ │ Name [Estudio          ] │
-│ ▌Estudio      6   │ │ Family: (All)(GSD)(gstack)             │ │ Claude Code              │
-│  frontend     1   │ │ ▾ [–] Design and interface       3/12  │ │ ■■■□□ Design          3  │
-│  gsap-react   2   │ │    [x] frontend-design                 │ │ ■□□□□ Docs            1  │
-│                   │ │        Visual direction for new UI     │ │ ■■□□□ Study           2  │
-│                   │ │        Skill · ✓ Supported             │ │ ──────────────────────── │
-│                   │ │    [ ] image-to-code                   │ │ 6 on · 37 off            │
-│                   │ │ ▸ [ ] Debugging                  0/5   │ │ [x] Keep GSD Core (41)   │
-│                   │ │ ▸ [x] Study and knowledge        4/4   │ │ ! 1 conflict             │
-│                   │ │ ▸ [ ] Other                      0/9   │ │ How it starts            │
-│                   │ │                                        │ │ Claude Code starts with… │
-│                   │ │                                        │ │ [Save preset] [Discard]  │
-└───────────────────┘ └────────────────────────────────────────┘ └──────────────────────────┘
+Arsenal  [ Claude Code | Codex ]                                             [Refresh]
+ Presets   Library   Activity          Installed does not mean imported. A selection…
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ Presets [+ New preset]   Estudio 6   frontend 1   gsap-react 2   [Duplicate][Delete]│
+└───────────────────────────────────────────────────────────────────────────────────┘
+ Choose                                                  ┌ How it is put together ──┐
+ [Search…]  (Rules)(Skills)(Agents)(All)                 │ Name [Estudio          ] │
+ Family: (All)(GSD)(gstack)                              │ ■■■□□ Design          3  │
+ ▾ [–] Design and interface                        3/12  │ 6 on · 37 off            │
+    [x] frontend-design                                  │ [Save preset] [Discard]  │
+ ▸ [ ] Debugging                                    0/5  └──────────────────────────┘
 ```
 
 Workspace, tarjeta de inicio (cambia solo la fila de skills y el pie):
@@ -117,7 +112,7 @@ Saved launches
 
 ## Spacing
 
-Escala de 4 px de `interface.md`. Columnas a ≥ 1280 px: lista de presets 220 px, selector `minmax(0, 1fr)`, composición 320 px, separación 16 px. Filas de capacidad: `min-height: 44px`, padding 8×12 px, separación 6 px. Cabecera de grupo: `min-height: 40px`. Celdas del medidor: 8 px con 2 px entre ellas. `box-sizing: border-box` en todo; ninguna altura fija.
+Escala de 4 px de `interface.md`. Cabecera en una fila (título, provider, Refresh); la nota de alcance va en la fila de pestañas. Presets en una franja horizontal arriba; debajo, selector `minmax(0, 1fr)` sin borde y composición 340 px, separación 16 px. Bajo 900 px: una columna, composición antes del selector. Filas de capacidad: `min-height: 44px`, padding 8×12 px, separación 6 px. Cabecera de grupo: `min-height: 40px`. Celdas del medidor: 8 px con 2 px entre ellas. `box-sizing: border-box` en todo; ninguna altura fija.
 
 ## Typography
 
