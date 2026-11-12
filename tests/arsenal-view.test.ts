@@ -104,6 +104,8 @@ function discoverWith(
 function controllerMock() {
   return {
     setTab: vi.fn(),
+    checkDraft: vi.fn(),
+    moveGroup: vi.fn(),
     choose: vi.fn(),
     importCandidate: vi.fn(),
     discover: vi.fn(),
@@ -426,7 +428,7 @@ describe('Arsenal composites and terminals', () => {
   it('lists what terminals started with, applied or not, and never as verified', () => {
     const { root } = render(
       stateWith({
-        tab: 'terminals',
+        tab: 'activity',
         bindings: [
           {
             session_id: 'a'.repeat(32),
@@ -450,5 +452,82 @@ describe('Arsenal composites and terminals', () => {
     expect(shown).toContain('Use not observed');
     expect(shown).toContain('not qualified for Claude Code 2.1.314');
     expect(shown).not.toContain('Verified');
+  });
+});
+
+describe('Arsenal sections', () => {
+  const sourcesWith = (
+    sources: { source: string; state: 'read' | 'absent' | 'unreadable' }[],
+  ) =>
+    ({ ...discoverWith([]), sources }) as NonNullable<ArsenalState['discover']>;
+  const radio = (root: Element, name: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+      (button) => text(button).startsWith(name),
+    )!;
+
+  it('has three tabs, Presets, Library and Activity, and opens on Presets', () => {
+    const { root } = render(stateWith({ tab: 'presets' }));
+    expect(
+      [...root.querySelectorAll('[role="tab"]')].map((tab) => text(tab)),
+    ).toEqual(['Presets', 'Library', 'Activity']);
+    expect(
+      root.querySelector('#arsenal-tab-presets')?.getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(text(root)).toContain('New preset');
+  });
+
+  it('keeps Library selected while Discover or Composites is open, and switches between them through the controller', () => {
+    const controller = controllerMock();
+    const { root } = render(
+      stateWith({ tab: 'discover', discover: discoverWith([]) }),
+      controller,
+    );
+    expect(
+      root.querySelector('#arsenal-tab-library')?.getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(
+      root
+        .querySelector('#arsenal-section-discover')
+        ?.getAttribute('aria-current'),
+    ).toBe('true');
+    root
+      .querySelector<HTMLButtonElement>('#arsenal-section-composites')!
+      .click();
+    expect(controller.setTab).toHaveBeenCalledWith('composites');
+  });
+
+  it('disables a provider the scan found no source for, and says Not installed', () => {
+    const { root } = render(
+      stateWith({
+        tab: 'presets',
+        discover: sourcesWith([
+          { source: 'claude_user_skills', state: 'read' },
+          { source: 'codex_user_skills', state: 'absent' },
+          { source: 'codex_home_skills', state: 'absent' },
+        ]),
+      }),
+    );
+    expect(radio(root, 'Codex').disabled).toBe(true);
+    expect(text(radio(root, 'Codex'))).toContain('Not installed');
+    expect(radio(root, 'Claude Code').disabled).toBe(false);
+  });
+
+  it('keeps every provider enabled until a scan has answered', () => {
+    const { root } = render(stateWith({ tab: 'presets', discover: null }));
+    expect(radio(root, 'Codex').disabled).toBe(false);
+    expect(radio(root, 'Claude Code').disabled).toBe(false);
+  });
+
+  it('chooses the provider the tabs work on, and says which one is chosen', () => {
+    const { root } = render(stateWith({ tab: 'presets' }));
+    expect(radio(root, 'Claude Code').getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    radio(root, 'Codex').click();
+    flushSync();
+    expect(radio(root, 'Codex').getAttribute('aria-checked')).toBe('true');
+    expect(radio(root, 'Claude Code').getAttribute('aria-checked')).toBe(
+      'false',
+    );
   });
 });

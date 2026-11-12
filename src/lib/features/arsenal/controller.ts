@@ -25,7 +25,7 @@ import { planKey } from './presets';
 const GROUP_NOT_SAVED = msg('Could not be saved. Nothing changed.');
 
 export type ArsenalTab =
-  'library' | 'discover' | 'composites' | 'presets' | 'terminals';
+  'library' | 'discover' | 'composites' | 'presets' | 'activity';
 
 export interface Notice {
   tone: 'ok' | 'error';
@@ -102,7 +102,7 @@ export interface ArsenalState {
  */
 export class ArsenalController {
   private state: ArsenalState = {
-    tab: 'library',
+    tab: 'presets',
     phase: 'idle',
     library: [],
     opened: null,
@@ -147,7 +147,12 @@ export class ArsenalController {
   setVisible(visible: boolean) {
     if (this.disposed || visible === this.visible) return;
     this.visible = visible;
-    if (visible) void this.refresh();
+    if (visible) {
+      void this.refresh();
+      if (this.state.tab === 'presets') void this.loadPresets();
+      // The scan says which providers are installed and which composites exist for presets.
+      if (this.state.discover === null) void this.discover();
+    }
     this.watchSync(visible);
   }
 
@@ -200,7 +205,7 @@ export class ArsenalController {
   setTab(tab: ArsenalTab) {
     this.set({ tab, notice: null });
     if (tab === 'presets') void this.loadPresets();
-    if (tab === 'terminals') void this.loadBindings();
+    if (tab === 'activity') void this.loadBindings();
     if (
       (tab === 'discover' || tab === 'composites') &&
       this.state.discover === null

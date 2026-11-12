@@ -44,9 +44,13 @@
   const TABS: { id: ArsenalTab; label: string }[] = [
     { id: 'presets', label: 'Presets' },
     { id: 'library', label: 'Library' },
+    { id: 'activity', label: 'Activity' },
+  ];
+  /** The sections of the Library tab. Discover and Composites are also controller tabs. */
+  const LIBRARY_SECTIONS: { id: ArsenalTab; label: string }[] = [
+    { id: 'library', label: 'Imported' },
     { id: 'discover', label: 'Discover' },
     { id: 'composites', label: 'Composites' },
-    { id: 'terminals', label: 'Terminals' },
   ];
   const PROVIDER_OPTIONS = PROVIDERS;
   const PROVIDER_LABEL: Record<ArsenalProvider, string> = {
@@ -172,6 +176,13 @@
     ) ?? null,
   );
   const busy = $derived(arsenal.busy !== null);
+  const inLibrary = $derived(
+    arsenal.tab === 'library' ||
+      arsenal.tab === 'discover' ||
+      arsenal.tab === 'composites',
+  );
+  /** The tab the top bar shows as selected: Discover and Composites belong to Library. */
+  const activeTop = $derived<ArsenalTab>(inLibrary ? 'library' : arsenal.tab);
   const eligibleCount = $derived(
     arsenal.discover?.candidates.filter(
       (candidate) =>
@@ -186,6 +197,18 @@
       : null,
   );
 
+  /**
+   * Whether the last scan read a source of this provider. `null` until a scan has answered, so
+   * the switch stays enabled rather than claim anything the window has not seen.
+   */
+  function installed(option: ArsenalProvider): boolean | null {
+    const sources = arsenal.discover?.sources;
+    if (!sources) return null;
+    const prefix = option === 'claude_code' ? 'claude_' : 'codex_';
+    return sources.some(
+      (entry) => entry.source.startsWith(prefix) && entry.state === 'read',
+    );
+  }
   function nameOfCandidate(id: string): string {
     return (
       arsenal.discover?.candidates.find((candidate) => candidate.id === id)
@@ -257,10 +280,6 @@
     you start one with it from Workspace.
   </p>
 
-  {#if arsenal.sync?.enabled}
-    <SyncLine sync={arsenal.sync} onsyncnow={() => controller.syncNow()} />
-  {/if}
-
   <div class="arsenal-provider" role="radiogroup" aria-label="Provider">
     {#each PROVIDER_OPTIONS as option (option)}
       <button
@@ -269,7 +288,10 @@
         role="radio"
         aria-checked={provider === option}
         tabindex={provider === option ? 0 : -1}
-        onclick={() => (provider = option)}>{PROVIDER_LABEL[option]}</button
+        disabled={installed(option) === false}
+        onclick={() => (provider = option)}
+        >{PROVIDER_LABEL[option]}{#if installed(option) === false}
+          <span class="arsenal-provider-note">Not installed</span>{/if}</button
       >
     {/each}
   </div>
@@ -280,9 +302,9 @@
         class="action arsenal-tab"
         type="button"
         role="tab"
-        aria-selected={arsenal.tab === tab.id}
+        aria-selected={activeTop === tab.id}
         aria-controls="arsenal-panel-{tab.id}"
-        tabindex={arsenal.tab === tab.id ? 0 : -1}
+        tabindex={activeTop === tab.id ? 0 : -1}
         onclick={() => controller.setTab(tab.id)}
         onkeydown={(event) => onTab(event, index)}>{tab.label}</button
       >
@@ -309,6 +331,21 @@
       </p>
     {:else if arsenal.phase === 'failed'}
       <p role="alert">The library did not load completely. Try Refresh.</p>
+    {/if}
+
+    {#if inLibrary}
+      <div class="arsenal-subtabs" role="group" aria-label="Library sections">
+        {#each LIBRARY_SECTIONS as section (section.id)}
+          <button
+            id="arsenal-section-{section.id}"
+            class="action"
+            type="button"
+            aria-current={arsenal.tab === section.id ? 'true' : undefined}
+            onclick={() => controller.setTab(section.id)}
+            >{section.label}</button
+          >
+        {/each}
+      </div>
     {/if}
 
     {#if arsenal.tab === 'library'}
@@ -525,7 +562,7 @@
       <div
         id="arsenal-panel-discover"
         role="tabpanel"
-        aria-labelledby="arsenal-tab-discover"
+        aria-labelledby="arsenal-section-discover"
         class="arsenal-panel"
       >
         <div class="arsenal-filters">
@@ -825,7 +862,7 @@
       <div
         id="arsenal-panel-composites"
         role="tabpanel"
-        aria-labelledby="arsenal-tab-composites"
+        aria-labelledby="arsenal-section-composites"
         class="arsenal-panel"
       >
         <p class="configuration-note">
@@ -910,13 +947,19 @@
       </div>
     {/if}
 
-    {#if arsenal.tab === 'terminals'}
+    {#if arsenal.tab === 'activity'}
       <div
-        id="arsenal-panel-terminals"
+        id="arsenal-panel-activity"
         role="tabpanel"
-        aria-labelledby="arsenal-tab-terminals"
+        aria-labelledby="arsenal-tab-activity"
         class="arsenal-panel"
       >
+        {#if arsenal.sync?.enabled}
+          <SyncLine
+            sync={arsenal.sync}
+            onsyncnow={() => controller.syncNow()}
+          />
+        {/if}
         <p class="configuration-note">
           What each terminal started with, recorded right after its start from
           the host's own session record. Applied means the host launched it with
@@ -1043,6 +1086,27 @@
   }
   .arsenal-tab:focus-visible {
     outline-offset: -2px;
+  }
+  .arsenal-provider,
+  .arsenal-subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .arsenal-provider-option[aria-checked='true'],
+  .arsenal-subtabs [aria-current='true'] {
+    background: var(--accent-soft);
+    font-weight: 600;
+  }
+  .arsenal-provider-option:disabled {
+    color: var(--muted);
+  }
+  .arsenal-provider-note {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--muted);
   }
   .arsenal-pin {
     display: inline-flex;
