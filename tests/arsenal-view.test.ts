@@ -81,6 +81,10 @@ function stateWith(overrides: Partial<ArsenalState>): ArsenalState {
     chosenDetail: null,
     bindings: [],
     sync: null,
+    groups: {},
+    movingGroup: null,
+    groupFailure: null,
+    plan: null,
     ...overrides,
   };
 }

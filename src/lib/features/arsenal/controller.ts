@@ -17,7 +17,12 @@ import {
   ArsenalCallError,
   type ArsenalClient,
 } from '../../desktop/arsenal-client';
+import { msg } from '../../i18n/msg';
 import { failureMessage, importMessage } from './messages';
+import { planKey } from './presets';
+
+/** The sentence a refused group move shows on its row. */
+const GROUP_NOT_SAVED = msg('Could not be saved. Nothing changed.');
 
 export type ArsenalTab =
   | 'library'
@@ -30,6 +35,16 @@ export type ArsenalTab =
 export interface Notice {
   tone: 'ok' | 'error';
   text: string;
+}
+
+/**
+ * What the desktop would resolve a draft to, asked for without saving it. `preview` is `null`
+ * while the answer is pending, and when the check failed (`failed`).
+ */
+export interface DraftPlan {
+  key: string;
+  preview: Preview | null;
+  failed: boolean;
 }
 
 /** One bulk import run: what each entry did, and what stayed out and why. */
@@ -75,6 +90,14 @@ export interface ArsenalState {
   bindings: Binding[];
   /** Synchronization with the owner's other computers; `null` until it was read once. */
   sync: SyncStatus | null;
+  /** The owner's group corrections, by capability identity. Kept on this computer. */
+  groups: Record<string, string>;
+  /** The capability whose group move is being saved, if any. */
+  movingGroup: string | null;
+  /** A group move that was refused, shown on that capability's row. */
+  groupFailure: { identity: string; text: string } | null;
+  /** The check of the draft preset; `null` when there is nothing to check. */
+  plan: DraftPlan | null;
 }
 
 /**
@@ -101,9 +124,15 @@ export class ArsenalController {
     preview: null,
     bindings: [],
     sync: null,
+    groups: {},
+    movingGroup: null,
+    groupFailure: null,
+    plan: null,
   };
   private visible = false;
   private disposed = false;
+  /** The key of the draft whose answer is still wanted: an answer for any other key is dropped. */
+  private planRequest: string | null = null;
 
   constructor(
     private readonly publish: (state: ArsenalState) => void,
@@ -471,10 +500,7 @@ export class ArsenalController {
       this.set({
         busy: null,
         preview,
-        notice: {
-          tone: 'ok',
-          text: `Saved selection ${input.name.trim()}. It is not applied.`,
-        },
+        notice: { tone: 'ok', text: msg('Preset saved') },
       });
       await this.loadSelections();
       return true;
@@ -516,6 +542,64 @@ export class ArsenalController {
       this.set({ bindings: await this.client.bindings() });
     } catch (error) {
       this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+    }
+  }
+
+  /** Reads the owner's group corrections. They are kept on this computer and never synchronized. */
+  async loadGroups() {
+    try {
+      this.set({ groups: await this.client.groups() });
+    } catch (error) {
+      this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+    }
+  }
+
+  /**
+   * Moves a capability to a group, or back to its automatic group (`null`). Its row shows
+   * "Saving…" meanwhile. A refused move leaves the corrections as they were and says so on the row.
+   */
+  async moveGroup(identity: string, group: string | null) {
+    this.set({ movingGroup: identity, groupFailure: null });
+    try {
+      await this.client.moveGroup(identity, group);
+    } catch {
+      this.set({
+        movingGroup: null,
+        groupFailure: { identity, text: GROUP_NOT_SAVED },
+      });
+      return;
+    }
+    this.set({ movingGroup: null });
+    await this.loadGroups();
+  }
+
+  /**
+   * Asks the desktop what a draft would resolve to, without saving it. Only the answer to the
+   * latest key is kept. A draft with nothing chosen is not checked. `force` asks again for a key
+   * that already has an answer or failed (the "Try again" action).
+   */
+  async checkDraft(
+    provider: ArsenalProvider,
+    items: Item[],
+    composites: string[],
+    force = false,
+  ) {
+    if (items.length === 0) {
+      this.planRequest = null;
+      this.set({ plan: null });
+      return;
+    }
+    const key = planKey(provider, items, composites);
+    if (!force && this.planRequest === key && this.state.plan !== null) return;
+    this.planRequest = key;
+    this.set({ plan: { key, preview: null, failed: false } });
+    try {
+      const preview = await this.client.planPreset(provider, items, composites);
+      if (this.planRequest === key)
+        this.set({ plan: { key, preview, failed: false } });
+    } catch {
+      if (this.planRequest === key)
+        this.set({ plan: { key, preview: null, failed: true } });
     }
   }
 }

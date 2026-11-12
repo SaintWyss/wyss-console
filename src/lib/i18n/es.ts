@@ -764,4 +764,7 @@ export const ES: Readonly<Record<string, string>> = {
     'El host no confirmó la última entrada: puede que haya llegado al programa o no. No se volvió a enviar, y la entrada que seguía esperando se descartó. Revisá la pantalla antes de seguir escribiendo.',
   'That input was not sent: with what is already waiting it is more than a terminal holds (64 KiB). Nothing of it reached the program; what was waiting before it still goes.':
     'Esa entrada no se envió: con lo que ya está esperando, supera lo que cabe en una terminal (64 KiB). Nada de ella llegó al programa; lo que esperaba antes sigue su curso.',
+  // Arsenal: presets and group corrections
+  'Preset saved': 'Preset guardado',
+  'Could not be saved. Nothing changed.': 'No se pudo guardar. No cambió nada.',
 };
