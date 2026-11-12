@@ -1820,4 +1820,268 @@ export const ES: Readonly<Record<string, string>> = {
   'Its runtime, workspace, execution lease, conversation, models and history are shown here, exactly as the authority holds them.':
     'Su runtime, workspace, concesión de ejecución, conversación, modelos e historial se muestran acá, tal como los tiene la autoridad.',
   'Session sections': 'Secciones de la sesión',
+  // ---- m3 ----
+  // Availability, usage, approvals and refusals the presenter hands over
+  Available: 'Disponible',
+  Unverified: 'Sin verificar',
+  Blocked: 'Bloqueado',
+  Unsupported: 'No compatible',
+  'final figures from the provider': 'cifras finales del proveedor',
+  'the provider reported an error': 'el proveedor informó un error',
+  'interrupted: streaming figures only':
+    'interrumpido: solo cifras de streaming',
+  'the provider reported nothing': 'el proveedor no informó nada',
+  running: 'en curso',
+  '5-hour window': 'Ventana de 5 horas',
+  '7-day window': 'Ventana de 7 días',
+  '7-day window (Opus)': 'Ventana de 7 días (Opus)',
+  '7-day window (Sonnet)': 'Ventana de 7 días (Sonnet)',
+  Overage: 'Excedente',
+  'Waiting for your decision': 'Esperando tu decisión',
+  'Accepted — running': 'Aceptada — en ejecución',
+  Done: 'Hecho',
+  'Declined — nothing ran': 'Rechazada — no se ejecutó nada',
+  'Cancelled — nothing ran': 'Cancelada — no se ejecutó nada',
+  'Could not be done — nothing changed': 'No se pudo hacer — no cambió nada',
+  'Unknown whether it happened — it will not be repeated':
+    'No se sabe si pasó — no se va a repetir',
+  'Refused before asking you': 'Rechazada antes de consultarte',
+  'A fixture runtime is already running.':
+    'Ya hay un runtime simulado corriendo.',
+  'There is no running fixture runtime.':
+    'No hay ningún runtime simulado corriendo.',
+  'The runtime is not ready for a prompt.':
+    'El runtime todavía no está listo para un mensaje.',
+  'The prompt is empty or too long.':
+    'El mensaje está vacío o es demasiado largo.',
+  'No turn is running.': 'No hay ningún turno en curso.',
+  'That action is not waiting for a decision.':
+    'Esa acción no está esperando una decisión.',
+  'That is not a decision.': 'Eso no es una decisión.',
+  'The worker refused the decision; it is not retried.':
+    'El worker rechazó la decisión; no se reintenta.',
+  'The runtime refused the turn.': 'El runtime rechazó el turno.',
+  'The runtime could not be started.': 'No se pudo iniciar el runtime.',
+  'That profile does not exist.': 'Ese perfil no existe.',
+  'The decision this needs has not been accepted.':
+    'La decisión que hace falta no se aceptó.',
+  'The window could not reach the service.':
+    'La ventana no pudo llegar al servicio.',
+
+  // Reasons the projection carries, in words
+  'The decision on Claude Managed security and authentication has not been accepted.':
+    'No se aceptó la decisión sobre seguridad y autenticación de Claude Managed.',
+  'The authority’s store only accepts Codex runtimes; holding a Claude runtime needs a store change the owner has not approved.':
+    'El almacén de la autoridad solo acepta runtimes de Codex; tener un runtime de Claude necesita un cambio de almacén que el dueño no aprobó.',
+  'No authorized run against the real provider has been recorded for this profile.':
+    'No hay registro de una corrida autorizada contra el proveedor real para este perfil.',
+  'How a provider key would reach a Claude runtime has not been decided; keys stay sealed and none is delivered.':
+    'Todavía no se decidió cómo llegaría la clave del proveedor a un runtime de Claude; las claves siguen selladas y no se entrega ninguna.',
+  'No reviewer other than the author has inspected this runtime and its network confinement.':
+    'Ningún revisor distinto del autor revisó este runtime ni su aislamiento de red.',
+  'Choosing a model or reasoning effort for a Managed turn needs a decision the owner has not accepted.':
+    'Elegir un modelo o un esfuerzo de razonamiento para un turno Managed necesita una decisión que el dueño no aceptó.',
+  'The privacy and retention policy for a usage history has not been accepted.':
+    'No se aceptó la política de privacidad y retención del historial de uso.',
+  'No Claude Agent SDK installation was named for this Console.':
+    'No se indicó ninguna instalación del Claude Agent SDK para esta Consola.',
+  'The protocol-2 authority is not connected.':
+    'La autoridad de protocolo 2 no está conectada.',
+  'This platform has no accepted evidence.':
+    'Esta plataforma no tiene evidencia aceptada.',
+  'The installation is being checked.': 'Se está verificando la instalación.',
+  'The SDK version is not the one this build was qualified against.':
+    'La versión del SDK no es la que se calificó para esta build.',
+  'The bundled Claude Code version is not the qualified one.':
+    'La versión de Claude Code incluida no es la calificada.',
+  'The bundled Claude Code executable is not the pinned one.':
+    'El ejecutable de Claude Code incluido no es el fijado.',
+  'A file of the SDK installation does not match what pip recorded.':
+    'Un archivo de la instalación del SDK no coincide con lo que registró pip.',
+  'The SDK installation holds a file no package vouches for.':
+    'La instalación del SDK tiene un archivo que ningún paquete respalda.',
+  'An administrator’s Claude Code policy exists on this machine; it can add hooks and tools no option turns off.':
+    'Hay una política de Claude Code del administrador en esta máquina; puede agregar hooks y herramientas que ninguna opción apaga.',
+  'The credential file is not private, plain and non-empty.':
+    'El archivo de credenciales no es privado, plano ni vacío.',
+  'A path of the installation is not safe to use.':
+    'Una ruta de la instalación no es segura para usar.',
+  'The named folder is not an isolated Python virtual environment.':
+    'La carpeta indicada no es un entorno virtual de Python aislado.',
+
+  // History settings and the provider profile cards
+  'Keep a local usage history': 'Guardar un historial de uso local',
+  'Why it cannot be turned on': 'Por qué no se puede activar',
+  Off: 'Desactivado',
+  Recording: 'Guardando',
+  'Partial: a storage problem stopped it':
+    'Parcial: un problema de almacenamiento lo detuvo',
+  'It is off by default and nothing is stored while it is off. If you turn it on it keeps provider-reported counters and limits only: no prompts, no answers, no reasoning, no commands, no paths and no account names. At most {records} records or {days} days, whichever comes first, and what it removes is counted. It is a separate file; it never touches the audit trail or the vault.':
+    'Está desactivado por defecto y, mientras esté desactivado, no se guarda nada. Si lo activás, guarda solo contadores y límites que informa el proveedor: nada de mensajes, respuestas, razonamiento, comandos, rutas ni nombres de cuenta. Como máximo {records} registros o {days} días, lo que pase antes, y lo que se quita se cuenta. Es un archivo aparte; nunca toca el registro de auditoría ni la bóveda.',
+  Export: 'Exportar',
+  'Delete the history': 'Borrar el historial',
+  'Provider profiles': 'Perfiles del proveedor',
+  'No build verified on this machine.':
+    'No hay build verificado en esta máquina.',
+  'Why it is not available': 'Por qué no está disponible',
+  Evidence: 'Evidencia',
+  'Fixtures:': 'Simulado:',
+  'Real provider:': 'Proveedor real:',
+  'Start it from Runtimes; this view does not start anything.':
+    'Iniciala desde Runtimes; esta vista no inicia nada.',
+  passed: 'aprobado',
+  'not run': 'sin correr',
+  'not applicable': 'no aplica',
+
+  // The providers view: the installation line, the stale and empty states, the sections
+  'Managed profiles': 'Perfiles Managed',
+  'Claude Agent SDK {sdk} (Claude Code {cli}) verified':
+    'Claude Agent SDK {sdk} (Claude Code {cli}) verificado',
+  'checking the Claude installation…': 'revisando la instalación de Claude…',
+  'Claude installation refused: {reason}':
+    'instalación de Claude rechazada: {reason}',
+  'no Claude installation named': 'no se indicó ninguna instalación de Claude',
+  'Reading the providers…': 'Leyendo los proveedores…',
+  'What is shown was read earlier and may have changed; no action is offered from it.':
+    'Lo que se muestra se leyó antes y puede haber cambiado; desde acá no se ofrece ninguna acción.',
+  'The provider state could not be read.':
+    'No se pudo leer el estado del proveedor.',
+  'Claude runtime (fixture)': 'Runtime de Claude (simulado)',
+  'A profile can start only when it is available. “Blocked” names the decision or evidence that is missing; fixtures never stand in for a run against the real provider.':
+    'Un perfil solo puede iniciarse cuando está disponible. “Bloqueado” indica la decisión o la evidencia que falta; los simulados nunca reemplazan una corrida contra el proveedor real.',
+  'Model and effort': 'Modelo y esfuerzo',
+  'Usage and limits': 'Uso y límites',
+  'Usage history': 'Historial de uso',
+
+  // The model facts: what is offered, configured, requested and reported, and the reroute and effort lines
+  'No Claude runtime is running, so there are no model facts to show. A listed model is offered, not entitled, and a request is not proof of use: when a runtime runs, this view keeps what is offered, configured, requested and reported in use apart.':
+    'No hay ningún runtime de Claude corriendo, así que no hay datos del modelo para mostrar. Un modelo listado se ofrece, no está habilitado, y un pedido no prueba que se use: cuando un runtime corre, esta vista mantiene separados lo ofrecido, lo configurado, lo pedido y lo informado en uso.',
+  Offered: 'Ofrecidos',
+  Configured: 'Configurado',
+  Requested: 'Pedido',
+  'The provider’s own list · revision {revision} · {freshness} · taken {time}':
+    'Lista propia del proveedor · revisión {revision} · {freshness} · tomada {time}',
+  fresh: 'fresca',
+  stale: 'vieja',
+  incomplete: 'incompleta',
+  'Models offered': 'Modelos ofrecidos',
+  Default: 'Predeterminado',
+  'Efforts it lists: {efforts}': 'Esfuerzos que lista: {efforts}',
+  'Offered is not entitled: nothing here says this account may use a model.':
+    'Lo ofrecido no es habilitación: nada de acá dice que esta cuenta pueda usar un modelo.',
+  'Not listed yet.': 'Todavía no hay lista.',
+  'Effort: {effort}': 'Esfuerzo: {effort}',
+  'the provider default': 'el predeterminado del proveedor',
+  'Nothing was pinned when the runtime started: the provider’s default.':
+    'No se fijó nada al arrancar el runtime: el predeterminado del proveedor.',
+  'For turn {turn} · generation {generation}':
+    'Para el turno {turn} · generación {generation}',
+  'No model was requested for the latest turn.':
+    'No se pidió ningún modelo para el último turno.',
+  'The provider has not named a model yet.':
+    'El proveedor todavía no nombró ningún modelo.',
+  'Model for the next turn': 'Modelo para el próximo turno',
+  'The provider’s default': 'El predeterminado del proveedor',
+  'Reasoning effort': 'Esfuerzo de razonamiento',
+  'Fixed when the runtime starts': 'Fijo al arrancar el runtime',
+  'Why model selection is off':
+    'Por qué la selección de modelo está desactivada',
+  'Claude’s SDK can change the model for a turn, but reads the effort once, when its runtime starts. A request that cannot be honored is refused; it is never replaced by another model.':
+    'El SDK de Claude puede cambiar el modelo de un turno, pero lee el esfuerzo una sola vez, al arrancar su runtime. Un pedido que no se puede cumplir se rechaza; nunca se reemplaza por otro modelo.',
+  'No model was requested for this turn.':
+    'No se pidió ningún modelo para este turno.',
+  'The provider has not named the model that answered.':
+    'El proveedor no nombró el modelo que respondió.',
+  'The provider named the model that was requested.':
+    'El proveedor nombró el modelo que se pidió.',
+  'Requested {requested}; the provider named {reported}.':
+    'Se pidió {requested}; el proveedor nombró {reported}.',
+  'No effort was requested.': 'No se pidió ningún esfuerzo.',
+  'Requested {value}. Nothing shows the provider received it.':
+    'Se pidió {value}. Nada muestra que el proveedor lo haya recibido.',
+  '{value} was in the request the provider received. That is not proof it took effect.':
+    '{value} estaba en el pedido que recibió el proveedor. Eso no prueba que haya tenido efecto.',
+  'The provider reported {value}.': 'El proveedor informó {value}.',
+
+  // The usage panel: the running totals, the turns, the limits and the SDK estimate
+  Input: 'Entrada',
+  Output: 'Salida',
+  'Cache write': 'Escritura de caché',
+  'Cache read': 'Lectura de caché',
+  Reasoning: 'Razonamiento',
+  allowed: 'permitido',
+  'allowed warning': 'permitido con advertencia',
+  rejected: 'rechazado',
+  'not reported': 'sin dato',
+  'in {count}': 'entrada {count}',
+  'out {count}': 'salida {count}',
+  'cache write {count}': 'escritura de caché {count}',
+  'cache read {count}': 'lectura de caché {count}',
+  'reasoning {count}': 'razonamiento {count}',
+  'at least {sum} ({count} turn did not report)':
+    'al menos {sum} ({count} turno no informó)',
+  'at least {sum} ({count} turns did not report)':
+    'al menos {sum} ({count} turnos no informaron)',
+  'No usage reported yet. A figure appears only when the provider reports it; one it did not report is shown as “not reported”, never as zero.':
+    'Todavía no se informó uso. Una cifra aparece solo cuando el proveedor la informa; una que no informó se muestra como “sin dato”, nunca como cero.',
+  'Running totals': 'Totales acumulados',
+  'Running totals over {count} turn, as Claude reported them. Nothing is added across providers or sessions.':
+    'Totales acumulados de {count} turno, tal como los informó Claude. No se suma nada entre proveedores ni sesiones.',
+  'Running totals over {count} turns, as Claude reported them. Nothing is added across providers or sessions.':
+    'Totales acumulados de {count} turnos, tal como los informó Claude. No se suma nada entre proveedores ni sesiones.',
+  'Usage per turn': 'Uso por turno',
+  'Answered by {models} (named by the provider)':
+    'Respondió {models} (nombrado por el proveedor)',
+  'Limits the provider reported': 'Límites que informó el proveedor',
+  'Utilization not reported': 'Uso sin dato',
+  '{percent} % used': '{percent} % usado',
+  'reset time not reported': 'hora de reinicio sin dato',
+  'resets {time}': 'se reinicia {time}',
+  'An allowance, not a price. Reported {time}.':
+    'Es un cupo, no un precio. Informado {time}.',
+  'Estimate computed by the SDK': 'Estimación calculada por el SDK',
+  'The Agent SDK adds a price estimate of its own to each result. It is not billing and not your subscription’s allowance, and this Console holds no price table to check it.':
+    'El Agent SDK agrega una estimación de precio propia a cada resultado. No es facturación ni el cupo de tu suscripción, y esta Consola no tiene una tabla de precios para verificarla.',
+  '{count} provider request checked · tools offered: {tools}':
+    '{count} pedido al proveedor revisado · herramientas ofrecidas: {tools}',
+  '{count} provider requests checked · tools offered: {tools}':
+    '{count} pedidos al proveedor revisados · herramientas ofrecidas: {tools}',
+
+  // The fixture console: the simulated runtime, its conversation, its held actions and the prompt
+  Refused: 'Rechazado',
+  Accept: 'Aceptar',
+  Decline: 'Rechazar',
+  starting: 'iniciando',
+  completed: 'completado',
+  failed: 'fallido',
+  interrupted: 'interrumpido',
+  '{label}. It drives the real Claude Agent SDK against a mock provider on this machine. Nothing here is leased, fenced or recorded by the authority, and no real provider is contacted.':
+    '{label}. Maneja el Claude Agent SDK real contra un proveedor simulado en esta máquina. Nada de acá tiene concesión, fencing ni lo registra la autoridad, y no se contacta ningún proveedor real.',
+  'Start Claude Inference': 'Iniciar Claude Inference',
+  'Start Claude Local tools': 'Iniciar Claude Local tools',
+  'Stop the runtime': 'Detener el runtime',
+  'The runtime was refused and stopped before it could be used':
+    'El runtime fue rechazado y se detuvo antes de poder usarse',
+  'The runtime failed and was stopped': 'El runtime falló y se detuvo',
+  ': {detail}': ': {detail}',
+  Conversation: 'Conversación',
+  'Send a prompt to the runtime.': 'Mandá un mensaje al runtime.',
+  'Start a runtime to talk to it.': 'Iniciá un runtime para hablar con él.',
+  'File change proposed by Claude': 'Cambio de archivo propuesto por Claude',
+  'Command proposed by Claude': 'Comando propuesto por Claude',
+  'Runs in': 'Corre en',
+  ', with no network.': ', sin red.',
+  'This action is not one this window can show completely, so it cannot be accepted.':
+    'Esta ventana no puede mostrar esta acción completa, así que no se puede aceptar.',
+  'The fingerprint the decision is bound to':
+    'La huella a la que queda atada la decisión',
+  'fingerprint {fingerprint}…': 'huella {fingerprint}…',
+  'Nobody can say whether this happened. It will not be run again; check the workspace before asking for anything similar.':
+    'Nadie puede decir si esto pasó. No se va a volver a ejecutar; revisá el workspace antes de pedir algo parecido.',
+  Prompt: 'Mensaje',
+  'Ask Claude something': 'Preguntale algo a Claude',
+  'Start a runtime first': 'Iniciá un runtime primero',
+  Send: 'Enviar',
+  'Cancel the turn': 'Cancelar el turno',
+  'Turn {state}': 'Turno {state}',
 };

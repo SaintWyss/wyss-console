@@ -33,6 +33,17 @@ import {
   failureText,
   outcomeText,
 } from '../src/lib/features/configuration/present';
+import {
+  APPROVAL_STATE_LABEL,
+  AVAILABILITY_LABEL,
+  effortLine,
+  REFUSAL_LABEL,
+  reasonText,
+  rerouteLine,
+  running,
+  tokenLine,
+  WINDOW_LABEL,
+} from '../src/lib/features/m3/present';
 import { parseModelCatalogue } from '../src/lib/contracts/models';
 import catalogues from './fixtures/model-catalogue-v1.json';
 
@@ -268,6 +279,76 @@ it('draws the managed-runtime row and lease sentences in Spanish, with their pla
   setLanguage('en');
   expect(tPhrase(row)).toBe('Ready · generation 2 · Local Tools');
   expect(tPhrase(lease)).toBe('Expires in 5 min');
+});
+
+it('draws the model reroute and effort sentences in Spanish, with their places', () => {
+  const rerouted = rerouteLine({
+    state: 'rerouted',
+    requested: 'claude-sonnet-5-5',
+    reported: ['claude-haiku-5-5'],
+  });
+  const effort = effortLine({ state: 'provider_reported', value: 'high' });
+  setLanguage('es');
+  expect(tPhrase(rerouted)).toBe(
+    'Se pidió claude-sonnet-5-5; el proveedor nombró claude-haiku-5-5.',
+  );
+  expect(tPhrase(effort)).toBe('El proveedor informó high.');
+  setLanguage('en');
+  expect(tPhrase(rerouted)).toBe(
+    'Requested claude-sonnet-5-5; the provider named claude-haiku-5-5.',
+  );
+  expect(tPhrase(effort)).toBe('The provider reported high.');
+});
+
+it('draws the usage counts and running totals in Spanish, with their places', () => {
+  const usageTokens = {
+    input: 1200,
+    output: null,
+    cache_creation: null,
+    cache_read: 40,
+    reasoning: 0,
+  };
+  const partial = { sum: 11, reported_turns: 2, unreported_turns: 1 };
+  const several = { sum: 30, reported_turns: 1, unreported_turns: 2 };
+  setLanguage('es');
+  expect(tJoin(tokenLine(usageTokens))).toBe(
+    'entrada 1,200 · salida sin dato · escritura de caché sin dato · lectura de caché 40 · razonamiento 0',
+  );
+  expect(tPhrase(running(partial))).toBe('al menos 11 (1 turno no informó)');
+  expect(tPhrase(running(several))).toBe(
+    'al menos 30 (2 turnos no informaron)',
+  );
+  setLanguage('en');
+  expect(tJoin(tokenLine(usageTokens))).toBe(
+    'in 1,200 · out not reported · cache write not reported · cache read 40 · reasoning 0',
+  );
+  expect(tPhrase(running(partial))).toBe('at least 11 (1 turn did not report)');
+  expect(tPhrase(running(several))).toBe(
+    'at least 30 (2 turns did not report)',
+  );
+});
+
+it('draws the m3 labels, reasons and refusals in Spanish, and keeps the English', () => {
+  setLanguage('es');
+  expect(t(AVAILABILITY_LABEL.blocked.label)).toBe('Bloqueado');
+  expect(t(WINDOW_LABEL.five_hour)).toBe('Ventana de 5 horas');
+  expect(t(APPROVAL_STATE_LABEL.indeterminate.label)).toBe(
+    'No se sabe si pasó — no se va a repetir',
+  );
+  expect(t(REFUSAL_LABEL.unreachable)).toBe(
+    'La ventana no pudo llegar al servicio.',
+  );
+  expect(t(reasonText('sdk_not_configured'))).toBe(
+    'No se indicó ninguna instalación del Claude Agent SDK para esta Consola.',
+  );
+  // A code the presenter does not know is shown as it arrived.
+  expect(t(reasonText('unknown_code'))).toBe('unknown_code');
+  setLanguage('en');
+  expect(t(AVAILABILITY_LABEL.blocked.label)).toBe('Blocked');
+  expect(t(WINDOW_LABEL.five_hour)).toBe('5-hour window');
+  expect(t(reasonText('sdk_not_configured'))).toBe(
+    'No Claude Agent SDK installation was named for this Console.',
+  );
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {

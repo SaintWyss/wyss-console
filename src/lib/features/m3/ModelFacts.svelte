@@ -4,6 +4,7 @@
     ModelFactsInfo,
     ProviderReportInfo,
   } from '../../contracts/m3';
+  import { msg, t, tPhrase } from '../../i18n/index.svelte';
   import { effortLine, localTime, reasonText, rerouteLine } from './present';
 
   let {
@@ -14,79 +15,99 @@
     selection: FeatureInfo;
   } = $props();
   const facts = $derived<ModelFactsInfo | null>(report?.model ?? null);
+  const FRESHNESS: Record<string, string> = {
+    fresh: msg('fresh'),
+    stale: msg('stale'),
+  };
 </script>
 
 <div class="m3-facts" data-testid="model-facts">
   {#if !facts}
     <p class="composer-note">
-      No Claude runtime is running, so there are no model facts to show. A
-      listed model is offered, not entitled, and a request is not proof of use:
-      when a runtime runs, this view keeps what is offered, configured,
-      requested and reported in use apart.
+      {t(
+        'No Claude runtime is running, so there are no model facts to show. A listed model is offered, not entitled, and a request is not proof of use: when a runtime runs, this view keeps what is offered, configured, requested and reported in use apart.',
+      )}
     </p>
   {:else}
     <div class="m3-four">
       <section aria-labelledby="mf-offered">
-        <h5 id="mf-offered">Offered</h5>
+        <h5 id="mf-offered">{t('Offered')}</h5>
         {#if facts.offered}
           <p class="m3-meta" data-testid="offered-source">
-            The provider’s own list · revision {facts.offered.revision} ·
-            {facts.offered.freshness} · taken {localTime(
-              facts.offered.observed_at,
+            {t(
+              'The provider’s own list · revision {revision} · {freshness} · taken {time}',
+              {
+                revision: facts.offered.revision,
+                freshness: t(FRESHNESS[facts.offered.freshness]),
+                time: localTime(facts.offered.observed_at),
+              },
             )}
-            {#if !facts.offered.complete}· incomplete{/if}
+            {#if !facts.offered.complete}· {t('incomplete')}{/if}
           </p>
-          <ul class="rt-model-list" aria-label="Models offered">
+          <ul class="rt-model-list" aria-label={t('Models offered')}>
             {#each facts.offered.entries as e (e.model_id)}
               <li class="rt-model">
                 <p class="rt-model-name">
                   {e.alias ?? e.model_id}
                   {#if e.is_default}<span class="pill compact" data-tone="ok"
-                      ><span class="dot" aria-hidden="true"></span>Default</span
+                      ><span class="dot" aria-hidden="true"></span>{t(
+                        'Default',
+                      )}</span
                     >{/if}
                 </p>
                 <p class="rt-model-id mono">{e.model_id}</p>
                 <p class="m3-meta">
-                  Efforts it lists: {e.efforts.join(', ') || 'none'}
+                  {t('Efforts it lists: {efforts}', {
+                    efforts: e.efforts.join(', ') || t('none'),
+                  })}
                 </p>
               </li>
             {/each}
           </ul>
           <p class="m3-meta" data-testid="not-entitlement">
-            Offered is not entitled: nothing here says this account may use a
-            model.
+            {t(
+              'Offered is not entitled: nothing here says this account may use a model.',
+            )}
           </p>
         {:else}
-          <p class="m3-meta">Not listed yet.</p>
+          <p class="m3-meta">{t('Not listed yet.')}</p>
         {/if}
       </section>
       <section aria-labelledby="mf-configured">
-        <h5 id="mf-configured">Configured</h5>
+        <h5 id="mf-configured">{t('Configured')}</h5>
         {#if facts.configured}
           <p class="mono">{facts.configured.model}</p>
           <p class="m3-meta">
-            Effort: {facts.configured.effort ?? 'the provider default'}
+            {t('Effort: {effort}', {
+              effort: facts.configured.effort ?? t('the provider default'),
+            })}
           </p>
         {:else}
           <p class="m3-meta">
-            Nothing was pinned when the runtime started: the provider’s default.
+            {t(
+              'Nothing was pinned when the runtime started: the provider’s default.',
+            )}
           </p>
         {/if}
       </section>
       <section aria-labelledby="mf-requested">
-        <h5 id="mf-requested">Requested</h5>
+        <h5 id="mf-requested">{t('Requested')}</h5>
         {#if facts.requested}
           <p class="mono">{facts.requested.resolved_model}</p>
           <p class="m3-meta">
-            For turn {facts.requested.turn_id.slice(0, 8)} · generation
-            {facts.requested.generation}
+            {t('For turn {turn} · generation {generation}', {
+              turn: facts.requested.turn_id.slice(0, 8),
+              generation: facts.requested.generation,
+            })}
           </p>
         {:else}
-          <p class="m3-meta">No model was requested for the latest turn.</p>
+          <p class="m3-meta">
+            {t('No model was requested for the latest turn.')}
+          </p>
         {/if}
       </section>
       <section aria-labelledby="mf-reported">
-        <h5 id="mf-reported">Reported in use</h5>
+        <h5 id="mf-reported">{t('Reported in use')}</h5>
         {#if facts.reported_in_use.length > 0}
           <ul class="rt-chips">
             {#each facts.reported_in_use as m (m)}<li class="mono">
@@ -94,14 +115,14 @@
               </li>{/each}
           </ul>
         {:else}
-          <p class="m3-meta">The provider has not named a model yet.</p>
+          <p class="m3-meta">{t('The provider has not named a model yet.')}</p>
         {/if}
         <p
           class="m3-meta"
           data-testid="reroute"
           data-state={facts.reroute.state}
         >
-          {rerouteLine(facts.reroute)}
+          {tPhrase(rerouteLine(facts.reroute))}
         </p>
       </section>
     </div>
@@ -110,35 +131,35 @@
       data-testid="effort-evidence"
       data-state={facts.effort.state}
     >
-      {effortLine(facts.effort)}
+      {tPhrase(effortLine(facts.effort))}
     </p>
   {/if}
 
   <div class="m3-select" data-testid="model-selection">
     <label>
-      <span class="mode-name">Model for the next turn</span>
+      <span class="mode-name">{t('Model for the next turn')}</span>
       <select disabled={!selection.available}>
-        <option>The provider’s default</option>
+        <option>{t('The provider’s default')}</option>
         {#each facts?.offered?.entries ?? [] as e (e.model_id)}
           <option>{e.alias ?? e.model_id}</option>
         {/each}
       </select>
     </label>
     <label>
-      <span class="mode-name">Reasoning effort</span>
+      <span class="mode-name">{t('Reasoning effort')}</span>
       <select disabled>
-        <option>Fixed when the runtime starts</option>
+        <option>{t('Fixed when the runtime starts')}</option>
       </select>
     </label>
     {#if !selection.available}
-      <ul class="m3-reasons" aria-label="Why model selection is off">
-        {#each selection.reasons as r (r)}<li>{reasonText(r)}</li>{/each}
+      <ul class="m3-reasons" aria-label={t('Why model selection is off')}>
+        {#each selection.reasons as r (r)}<li>{t(reasonText(r))}</li>{/each}
       </ul>
     {/if}
     <p class="m3-meta">
-      Claude’s SDK can change the model for a turn, but reads the effort once,
-      when its runtime starts. A request that cannot be honored is refused; it
-      is never replaced by another model.
+      {t(
+        'Claude’s SDK can change the model for a turn, but reads the effort once, when its runtime starts. A request that cannot be honored is refused; it is never replaced by another model.',
+      )}
     </p>
   </div>
 </div>
