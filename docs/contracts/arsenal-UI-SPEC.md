@@ -92,7 +92,7 @@ Arsenal  [ Claude Code | Codex ]                                             [Re
 │ Presets [+ New preset]   Estudio 6   frontend 1   gsap-react 2   [Duplicate][Delete]│
 └───────────────────────────────────────────────────────────────────────────────────┘
  Choose                                                  ┌ How it is put together ──┐
- [Search…]  (Rules)(Skills)(Agents)(All)                 │ Name [Estudio          ] │
+ [Search…]  (All)(Rules)(Skills)(Agents)                 │ Name [Estudio          ] │
  Family: (All)(GSD)(gstack)                              │ ■■■□□ Design          3  │
  ▾ [–] Design and interface                        3/12  │ 6 on · 37 off            │
     [x] frontend-design                                  │ [Save preset] [Discard]  │

@@ -90,24 +90,39 @@
     value: 'all' | 'skill' | 'agent' | 'rule';
     label: string;
   }[] = [
+    { value: 'all', label: msg('All') },
     { value: 'rule', label: msg('Rules') },
     { value: 'skill', label: msg('Skills') },
     { value: 'agent', label: msg('Agents') },
-    { value: 'all', label: msg('All') },
   ];
-  /** What each type is, shown under the type filter. */
-  const KIND_HELP: Record<'all' | 'skill' | 'agent' | 'rule', string> = {
-    all: msg(
-      'Everything installed for this provider, grouped by what it solves.',
-    ),
-    skill: msg(
-      'Skills are instructions the agent loads when a task needs them.',
-    ),
-    agent: msg('Agents are helpers the main agent can hand a task to.'),
-    rule: msg(
-      'Rules are files the agent reads as standing instructions, such as invariantes.md. They are not run.',
-    ),
-  };
+  /** What each type does for the agent, always listed under the type filter. */
+  const KIND_HELP: {
+    value: 'skill' | 'agent' | 'rule';
+    label: string;
+    text: string;
+  }[] = [
+    {
+      value: 'rule',
+      label: msg('Rules'),
+      text: msg(
+        'Always on. Standing instructions the agent reads when the session starts, such as invariantes.md. They set how it works; nothing runs.',
+      ),
+    },
+    {
+      value: 'skill',
+      label: msg('Skills'),
+      text: msg(
+        'On demand. A guide for one kind of task; the agent loads it only when the task calls for it.',
+      ),
+    },
+    {
+      value: 'agent',
+      label: msg('Agents'),
+      text: msg(
+        'Delegated. A helper with its own role; the main agent hands it a subtask and gets the result back.',
+      ),
+    },
+  ];
   const CELLS = Array.from({ length: METER_CELLS }, (_, index) => index);
 
   /** The preset on screen: what it is now, and the saved version it came from (`null` for a new one). */
@@ -420,7 +435,17 @@
           >
         {/each}
       </div>
-      <p class="help">{t(KIND_HELP[kind])}</p>
+      <dl class="kind-help">
+        {#each KIND_HELP as entry (entry.value)}
+          <div
+            class="kind-help-row"
+            data-active={kind === 'all' || kind === entry.value}
+          >
+            <dt>{t(entry.label)}</dt>
+            <dd>{t(entry.text)}</dd>
+          </div>
+        {/each}
+      </dl>
       {#if families.length > 0}
         <div class="chips">
           <span class="chip-label">{t('Family')}</span>
@@ -1130,6 +1155,27 @@
     margin: 0;
     color: var(--muted);
     font-size: var(--text-xs);
+  }
+  .kind-help {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    font-size: var(--text-xs);
+  }
+  .kind-help-row {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 8px;
+    color: var(--muted);
+  }
+  .kind-help-row[data-active='true'] {
+    color: var(--text);
+  }
+  .kind-help dt {
+    font-weight: 600;
+  }
+  .kind-help dd {
+    margin: 0;
   }
   .notice[data-tone='error'] {
     background: var(--error-soft);

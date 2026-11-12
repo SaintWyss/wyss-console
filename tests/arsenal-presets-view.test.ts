@@ -213,23 +213,34 @@ describe('Presets screen', () => {
     expect(withRules.root.textContent).not.toContain('frontend-design');
   });
 
-  it('lists the type filters with Rules first', () => {
+  it('lists the type filters with All first, then Rules, Skills, Agents', () => {
     const { root } = render(stateWith());
     flushSync();
     expect(
       [...root.querySelectorAll('.filters .chips:first-of-type .chip')].map(
         (node) => text(node),
       ),
-    ).toEqual(['Rules', 'Skills', 'Agents', 'All']);
+    ).toEqual(['All', 'Rules', 'Skills', 'Agents']);
   });
 
-  it('explains the selected type under the filters, and what Move to group does', () => {
+  it('explains what each type does, marks the chosen one, and what Move to group does', () => {
     const rule = item('invariantes', { kind: 'rule' });
     const { root } = render(stateWith({ library: [frontend, rule] }));
     flushSync();
-    expect(text(root.querySelector('.filters .help'))).toContain(
-      'Rules are files the agent reads',
-    );
+    const rows = [...root.querySelectorAll('.filters .kind-help-row')];
+    expect(rows.map((row) => text(row.querySelector('dt')))).toEqual([
+      'Rules',
+      'Skills',
+      'Agents',
+    ]);
+    expect(text(rows[0])).toContain('Always on');
+    expect(text(rows[1])).toContain('On demand');
+    expect(text(rows[2])).toContain('hands it a subtask');
+    expect(rows.map((row) => row.getAttribute('data-active'))).toEqual([
+      'true',
+      'false',
+      'false',
+    ]);
     const move = [...root.querySelectorAll('button')].find(
       (node) => text(node) === 'Move to group…',
     )!;

@@ -2275,14 +2275,12 @@ export const ES: Readonly<Record<string, string>> = {
   Family: 'Familia',
   'No capabilities match.': 'Ninguna capacidad coincide.',
   'Move to group…': 'Mover a grupo…',
-  'Everything installed for this provider, grouped by what it solves.':
-    'Todo lo instalado para este proveedor, agrupado por lo que resuelve.',
-  'Skills are instructions the agent loads when a task needs them.':
-    'Las skills son instrucciones que el agente carga cuando una tarea las necesita.',
-  'Agents are helpers the main agent can hand a task to.':
-    'Los agentes son ayudantes a los que el agente principal le delega una tarea.',
-  'Rules are files the agent reads as standing instructions, such as invariantes.md. They are not run.':
-    'Las reglas son archivos que el agente lee como instrucciones permanentes, como invariantes.md. No se ejecutan.',
+  'Always on. Standing instructions the agent reads when the session starts, such as invariantes.md. They set how it works; nothing runs.':
+    'Siempre activas. Instrucciones fijas que el agente lee al arrancar la sesión, como invariantes.md. Marcan cómo trabaja; no ejecutan nada.',
+  'On demand. A guide for one kind of task; the agent loads it only when the task calls for it.':
+    'A pedido. Una guía para un tipo de tarea; el agente la carga solo cuando la tarea la necesita.',
+  'Delegated. A helper with its own role; the main agent hands it a subtask and gets the result back.':
+    'Delegados. Un ayudante con su propio rol; el agente principal le pasa una subtarea y recibe el resultado.',
   'Only changes where it is listed on this screen, not what it does. Saved on this computer.':
     'Solo cambia dónde aparece en esta pantalla, no lo que hace. Se guarda en esta computadora.',
   'Back to automatic group': 'Volver al grupo automático',
