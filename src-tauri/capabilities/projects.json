@@ -8,6 +8,8 @@
     "allow-projects-list",
     "allow-projects-project",
     "allow-projects-workspace",
+    "allow-projects-insight",
+    "allow-projects-readme-save",
     "allow-projects-sessions",
     "allow-projects-choose-folder",
     "allow-projects-forget-picks",

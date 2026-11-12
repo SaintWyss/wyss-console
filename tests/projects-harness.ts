@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { Insight } from '../src/lib/contracts/insight';
 import {
   parseOverview,
   parseProject,
@@ -269,6 +270,12 @@ export function fakeClient(): Fake {
     compactReceipts: vi.fn(async () => 0),
     setEnabled: vi.fn(async () => state.overview),
     openWindow: vi.fn(async () => 'w-12345678'),
+    insight: vi.fn(async (): Promise<Insight> => {
+      throw new Error('insight is not part of this fake');
+    }),
+    saveReadme: vi.fn(async (): Promise<string> => {
+      throw new Error('saveReadme is not part of this fake');
+    }),
   };
   return client;
 }

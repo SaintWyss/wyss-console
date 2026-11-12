@@ -4152,3 +4152,290 @@ li.native-row .native-note {
   background: var(--warn-soft);
   border-bottom: 1px solid var(--warn-line);
 }
+
+/* Project Insight: the details panel, the README preview and the class diagram. */
+.insight-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.insight-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insight-head h3,
+.insight-panel h4 {
+  margin: 0;
+  color: var(--text);
+}
+.insight-panel h4 {
+  margin-top: 8px;
+  font-size: 0.95em;
+}
+.insight-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.insight-tabs [aria-selected='true'],
+.insight-tabs [aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent-line);
+}
+.insight-panel .action {
+  min-height: 34px;
+  padding: 0 12px;
+  font: inherit;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+.insight-panel .action:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.insight-panel .action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.insight-panel .action.primary {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent-line);
+}
+.insight-panel :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.insight-cards {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.insight-cards > div {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+.insight-cards dt {
+  color: var(--faint);
+  font-size: 0.85em;
+}
+.insight-cards dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.insight-list,
+.insight-legend {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.insight-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.insight-table th,
+.insight-table td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.insight-bar {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+.insight-bar > span {
+  display: block;
+  height: 100%;
+}
+.insight-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.insight-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+.insight-pattern {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+}
+.insight-pattern header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insight-pattern p {
+  margin: 6px 0;
+  color: var(--muted);
+}
+.insight-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.insight-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.insight-readme {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.insight-readme-bar,
+.insight-uml-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.insight-readme-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 320px;
+}
+.insight-readme-panes[data-mode='view'],
+.insight-readme-panes[data-mode='edit'] {
+  grid-template-columns: 1fr;
+}
+@container (max-width: 640px) {
+  .insight-readme-panes {
+    grid-template-columns: 1fr;
+  }
+}
+.insight-readme-source {
+  min-height: 320px;
+  padding: 8px;
+  font:
+    13px/1.5 ui-monospace,
+    monospace;
+  color: var(--text);
+  background: var(--surface-control);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+.insight-readme-preview {
+  min-width: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.insight-readme-preview code,
+.insight-readme-source {
+  font-family: ui-monospace, monospace;
+}
+.insight-readme-preview pre {
+  padding: 8px;
+  overflow: auto;
+  background: var(--surface-control);
+  border-radius: var(--radius-sm);
+}
+.insight-readme-preview blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--muted);
+}
+.insight-readme-preview table {
+  border-collapse: collapse;
+}
+.insight-readme-preview th,
+.insight-readme-preview td {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+}
+.insight-readme-preview img {
+  max-width: 100%;
+}
+.md-link-disabled,
+.md-image-note {
+  color: var(--faint);
+}
+.insight-uml {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.insight-uml-bar select,
+.insight-uml-bar input[type='text'] {
+  min-height: 34px;
+  padding: 0 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-control);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.insight-uml-canvas {
+  width: 100%;
+  height: 420px;
+  touch-action: none;
+  cursor: grab;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+}
+.uml-box rect {
+  fill: var(--surface-raised);
+  stroke: var(--line-strong);
+}
+.uml-box text {
+  fill: var(--text);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+.uml-box .uml-muted {
+  fill: var(--muted);
+}
+.uml-box {
+  cursor: pointer;
+}
+.uml-box:focus-visible rect {
+  stroke: var(--focus);
+}
+.uml-picked rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.uml-line {
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+  fill: none;
+}
+.uml-dashed {
+  stroke-dasharray: 5 4;
+}
+.uml-arrow-head {
+  fill: var(--surface-control);
+  stroke: var(--line-strong);
+}

@@ -16,6 +16,7 @@
     managedAvailable,
     busy,
     launched = null,
+    oninsight = null,
   }: {
     workspace: WorkspaceView;
     scratch: boolean;
@@ -25,6 +26,8 @@
     managedAvailable: boolean;
     busy: boolean;
     launched?: string | null;
+    /** Opens the project's details; absent when the workspace belongs to no folder. */
+    oninsight?: (() => void) | null;
   } = $props();
 
   let area = $state<HTMLDivElement>();
@@ -92,6 +95,11 @@
 >
   <div class="projects-toolbar">
     <span class="projects-title">{workspace.label}</span>
+    {#if !scratch && oninsight}
+      <button type="button" class="action" onclick={() => oninsight?.()}
+        >Detalles del proyecto</button
+      >
+    {/if}
     {#if workspace.layout === null}
       <button
         type="button"

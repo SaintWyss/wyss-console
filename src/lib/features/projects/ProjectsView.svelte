@@ -6,6 +6,7 @@
     SessionView,
   } from '../../contracts/projects';
   import type { ProjectsClient } from '../../desktop/projects-client';
+  import InsightPanel from '../insight/InsightPanel.svelte';
   import type { NativeProfileOption } from './LaunchPanel.svelte';
   import MigrationPanel from './MigrationPanel.svelte';
   import ProjectRail from './ProjectRail.svelte';
@@ -48,6 +49,12 @@
   const emptyLeaf = $derived(
     projects.workspace?.leaves.find((l) => !l.session) ?? null,
   );
+  // The project whose details replace the workspace; selecting another project closes them.
+  let insightFor = $state<string | null>(null);
+  $effect(() => {
+    void projects.project;
+    insightFor = null;
+  });
   // Adopting a shell changes which project it belongs to. The window first asks the desktop where
   // the shell really is, shows that, and only then asks: the answer is good for one adoption.
   let adopting = $state<{
@@ -168,10 +175,20 @@
       </p>
     {/if}
     <div class="projects-layout">
-      <ProjectRail {projects} {controller} />
+      <ProjectRail
+        {projects}
+        {controller}
+        oninsight={(id) => (insightFor = id)}
+      />
       <div class="projects-main">
-        <!-- Hidden means unmounted: no pane keeps reading or holding input behind another view. -->
-        {#if projects.workspace && visible}
+        {#if insightFor && visible}
+          <InsightPanel
+            {client}
+            projectId={insightFor}
+            onClose={() => (insightFor = null)}
+          />
+          <!-- Hidden means unmounted: no pane keeps reading or holding input behind another view. -->
+        {:else if projects.workspace && visible}
           <WorkspaceCanvas
             workspace={projects.workspace}
             {scratch}
@@ -181,6 +198,7 @@
             {managedAvailable}
             busy={projects.busy}
             launched={projects.launched}
+            oninsight={current ? () => (insightFor = current.id) : null}
           />
         {/if}
         <section class="projects-sessions" aria-label={t('Sessions')}>

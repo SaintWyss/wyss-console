@@ -308,20 +308,20 @@ export interface Envelope {
 
 type Rec = Record<string, unknown>;
 
-function rec(value: unknown, what: string): Rec {
+export function rec(value: unknown, what: string): Rec {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error(`projects: ${what}`);
   return value as Rec;
 }
-function str(value: unknown, what: string, most = 4096): string {
+export function str(value: unknown, what: string, most = 4096): string {
   if (typeof value !== 'string' || value.length > most)
     throw new Error(`projects: ${what}`);
   return value;
 }
-function strOrNull(value: unknown, what: string): string | null {
+export function strOrNull(value: unknown, what: string): string | null {
   return value === null ? null : str(value, what);
 }
-function bool(value: unknown, what: string): boolean {
+export function bool(value: unknown, what: string): boolean {
   if (typeof value !== 'boolean') throw new Error(`projects: ${what}`);
   return value;
 }
@@ -330,7 +330,7 @@ function counter(value: unknown, what: string): string {
   if (!/^[1-9][0-9]*$/.test(text)) throw new Error(`projects: ${what}`);
   return text;
 }
-function oneOf<T extends string>(
+export function oneOf<T extends string>(
   value: unknown,
   allowed: readonly T[],
   what: string,
@@ -339,7 +339,11 @@ function oneOf<T extends string>(
     throw new Error(`projects: ${what}`);
   return value as T;
 }
-function list<T>(value: unknown, what: string, item: (v: unknown) => T): T[] {
+export function list<T>(
+  value: unknown,
+  what: string,
+  item: (v: unknown) => T,
+): T[] {
   if (!Array.isArray(value) || value.length > 4096)
     throw new Error(`projects: ${what}`);
   return value.map(item);
