@@ -5,6 +5,7 @@
     NEW_DOCUMENT_KINDS,
     type NewDocumentKind,
   } from '../../contracts/configuration';
+  import { t, tPhrase } from '../../i18n/index.svelte';
   import type { ChangesController, ChangesState } from './changes-controller';
   import type {
     ConfigurationController,
@@ -138,22 +139,24 @@
 
 <section
   class="configuration-feature"
-  aria-label="Configuration"
+  aria-label={t('Configuration')}
   hidden={!visible}
   inert={!visible}
 >
   <div class="sessions-toolbar">
     <div class="sessions-heading">
-      <h2>Configuration</h2>
+      <h2>{t('Configuration')}</h2>
       <p class="sessions-count">
         {#if reply}
           {reply.inventory.items.length}
-          {reply.inventory.items.length === 1 ? 'item' : 'items'} from {reply
-            .inventory.sources.length} places
+          {reply.inventory.items.length === 1 ? t('item') : t('items')}
+          {t('from')}
+          {reply.inventory.sources.length}
+          {t('places')}
         {:else if configuration.phase === 'unavailable'}
-          Unavailable
+          {t('Unavailable')}
         {:else}
-          Reading
+          {t('Reading')}
         {/if}
       </p>
     </div>
@@ -161,28 +164,25 @@
       type="button"
       class="action"
       disabled={configuration.phase === 'loading'}
-      onclick={() => controller.refresh()}>Refresh</button
+      onclick={() => controller.refresh()}>{t('Refresh')}</button
     >
   </div>
 
   <p class="configuration-note">
-    This is what Claude Code and Codex are set up with, read from their own
-    files. Nothing changes until you confirm a plan, and Claude Code hooks and
-    skills, Codex skills and MCP servers, and OpenCode MCP servers and plugins
-    can be switched here. You can also write a Claude Code hook or an MCP server
-    for Codex or OpenCode, in a separate window. Secrets in commands,
-    environments and headers are never shown.
+    {t(
+      'This is what Claude Code and Codex are set up with, read from their own files. Nothing changes until you confirm a plan, and Claude Code hooks and skills, Codex skills and MCP servers, and OpenCode MCP servers and plugins can be switched here. You can also write a Claude Code hook or an MCP server for Codex or OpenCode, in a separate window. Secrets in commands, environments and headers are never shown.',
+    )}
   </p>
 
   {#if changes.plan}
     {@const plan = changes.plan}
-    <section class="configuration-plan" aria-label="Change to confirm">
-      <h3>{OPERATION_LABEL[plan.operation]}: {plan.name}</h3>
+    <section class="configuration-plan" aria-label={t('Change to confirm')}>
+      <h3>{t(OPERATION_LABEL[plan.operation])}: {plan.name}</h3>
       <p class="event-meta">
-        {PROVIDER_LABEL[plan.provider]} · {SOURCE_LABEL[plan.source]}
+        {PROVIDER_LABEL[plan.provider]} · {t(SOURCE_LABEL[plan.source])}
       </p>
       {#if plan.diff.length > 0}
-        <ul class="configuration-diff" aria-label="What would change">
+        <ul class="configuration-diff" aria-label={t('What would change')}>
           {#each plan.diff as line, index (index)}
             <li data-kind={line.kind}>
               <span aria-hidden="true"
@@ -199,33 +199,38 @@
       {/if}
       {#if plan.shared_with_declared_writers}
         <p class="event-meta">
-          Another account you named in <span class="mono">trusted-writers</span> can
-          also write this file’s folder. It is accepted because you named it.
+          {t('Another account you named in')}
+          <span class="mono">trusted-writers</span>
+          {t(
+            'can also write this file’s folder. It is accepted because you named it.',
+          )}
         </p>
       {/if}
       {#if plan.holds_hidden_values}
         <p class="configuration-warning">
-          This entry holds values that are not shown here.
+          {t('This entry holds values that are not shown here.')}
         </p>
       {/if}
       {#if plan.storage}
-        <p class="event-meta">{STORAGE_LABEL[plan.storage]}</p>
+        <p class="event-meta">{t(STORAGE_LABEL[plan.storage])}</p>
       {/if}
-      <p class="event-meta">{EFFECT_LABEL[plan.effect]}</p>
+      <p class="event-meta">{t(EFFECT_LABEL[plan.effect])}</p>
       {#if plan.managed_effect}
         <p class="event-meta">
-          Prediction, not a reading: managed Inference {VERDICT_LABEL[
-            plan.managed_effect.before
-          ]} now
+          {t('Prediction, not a reading: managed Inference')}
+          {t(VERDICT_LABEL[plan.managed_effect.before])}
+          {t('now')}
           {#if plan.managed_effect.before === plan.managed_effect.after}
-            and this change does not alter that.
+            {t('and this change does not alter that.')}
           {:else}
-            and would {VERDICT_LABEL[plan.managed_effect.after]} after it.
+            {t('and would')}
+            {t(VERDICT_LABEL[plan.managed_effect.after])}
+            {t('after it.')}
           {/if}
         </p>
       {/if}
       {#if RISK_LABEL[plan.risk]}
-        <p class="configuration-warning">{RISK_LABEL[plan.risk]}</p>
+        <p class="configuration-warning">{t(RISK_LABEL[plan.risk])}</p>
       {/if}
       <div class="configuration-plan-actions">
         <button
@@ -235,23 +240,23 @@
           onclick={() => changesController.apply()}
           >{changes.applying
             ? plan.needs_native_dialog
-              ? 'Waiting for the confirmation window…'
-              : 'Applying…'
+              ? t('Waiting for the confirmation window…')
+              : t('Applying…')
             : plan.needs_native_dialog
-              ? 'Continue to confirm'
-              : 'Apply'}</button
+              ? t('Continue to confirm')
+              : t('Apply')}</button
         >
         <button
           type="button"
           class="action"
           disabled={changes.applying}
-          onclick={() => changesController.cancel()}>Cancel</button
+          onclick={() => changesController.cancel()}>{t('Cancel')}</button
         >
       </div>
     </section>
   {/if}
   {#if changes.planning}
-    <p class="sessions-status" role="status">Preparing the change…</p>
+    <p class="sessions-status" role="status">{t('Preparing the change…')}</p>
   {/if}
   {#if changes.result}
     <p
@@ -260,68 +265,75 @@
         OUTCOME_LABEL[changes.result].tone === 'warn'}
       role="status"
     >
-      {OUTCOME_LABEL[changes.result].text}
+      {t(OUTCOME_LABEL[changes.result].text)}
     </p>
   {/if}
   {#if changes.failure}
     <p class="sessions-status failed" role="alert">
-      {CHANGE_FAILURE_TEXT[changes.failure]}
+      {t(CHANGE_FAILURE_TEXT[changes.failure])}
     </p>
   {/if}
   {#if changes.notice}
-    <p class="sessions-status" role="status">{NOTICE_LABEL[changes.notice]}</p>
+    <p class="sessions-status" role="status">
+      {t(NOTICE_LABEL[changes.notice])}
+    </p>
   {/if}
 
   {#if configuration.stale}
     <p class="sessions-status failed" role="status">
-      This could not be read again just now. What is shown is from the last
-      successful read.
+      {t(
+        'This could not be read again just now. What is shown is from the last successful read.',
+      )}
     </p>
   {/if}
   {#if reply?.inventory.truncated}
     <p class="sessions-status" role="status">
-      There are more items than this app reads at once. Some are not listed.
+      {t(
+        'There are more items than this app reads at once. Some are not listed.',
+      )}
     </p>
   {/if}
 
   {#if configuration.phase === 'loading' || configuration.phase === 'idle'}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Reading configuration…</p>
+      <p class="empty-title">{t('Reading configuration…')}</p>
     </div>
   {:else if configuration.phase === 'unavailable'}
     <div class="sessions-empty" role="alert">
-      <p class="empty-title">There is no configuration to read here</p>
+      <p class="empty-title">{t('There is no configuration to read here')}</p>
       <p>
-        The app could not find where your account keeps its files. Nothing is
-        shown, which does not mean there is nothing configured.
+        {t(
+          'The app could not find where your account keeps its files. Nothing is shown, which does not mean there is nothing configured.',
+        )}
       </p>
     </div>
   {:else if configuration.phase === 'failed'}
     <div class="sessions-empty" role="alert">
-      <p class="empty-title">The configuration could not be read</p>
+      <p class="empty-title">{t('The configuration could not be read')}</p>
       <button type="button" class="action" onclick={() => controller.refresh()}
-        >Try again</button
+        >{t('Try again')}</button
       >
     </div>
   {:else if reply}
-    <div class="events-filters" role="group" aria-label="View">
+    <div class="events-filters" role="group" aria-label={t('View')}>
       <button
         type="button"
         class="action chip"
         aria-pressed={changes.panel === 'items'}
-        onclick={() => changesController.show('items')}>Items</button
+        onclick={() => changesController.show('items')}>{t('Items')}</button
       >
       <button
         type="button"
         class="action chip"
         aria-pressed={changes.panel === 'parked'}
-        onclick={() => changesController.show('parked')}>Turned off</button
+        onclick={() => changesController.show('parked')}
+        >{t('Turned off')}</button
       >
       <button
         type="button"
         class="action chip"
         aria-pressed={changes.panel === 'history'}
-        onclick={() => changesController.show('history')}>History</button
+        onclick={() => changesController.show('history')}>{t('History')}</button
       >
       {#if changes.panel === 'items'}
         <button
@@ -329,21 +341,21 @@
           class="action chip"
           aria-pressed={writing === 'hook'}
           onclick={() => (writing = writing === 'hook' ? null : 'hook')}
-          >Add a hook…</button
+          >{t('Add a hook…')}</button
         >
         <button
           type="button"
           class="action chip"
           aria-pressed={writing === 'mcp'}
           onclick={() => (writing = writing === 'mcp' ? null : 'mcp')}
-          >Add an MCP server…</button
+          >{t('Add an MCP server…')}</button
         >
         <button
           type="button"
           class="action chip"
           aria-pressed={writing === 'document'}
           onclick={() => (writing = writing === 'document' ? null : 'document')}
-          >New instruction file…</button
+          >{t('New instruction file…')}</button
         >
       {/if}
       {#if changes.panel === 'items'}
@@ -352,12 +364,14 @@
           class="action chip"
           disabled={changes.busy || changes.planning || changes.applying}
           title={changes.project === null
-            ? 'Choose the project whose instruction files and skills are listed and may be changed.'
-            : 'Choose another project.'}
+            ? t(
+                'Choose the project whose instruction files and skills are listed and may be changed.',
+              )
+            : t('Choose another project.')}
           onclick={() => changesController.chooseProject(false)}
           >{changes.project === null
-            ? 'Choose project…'
-            : `Project: ${changes.project}`}</button
+            ? t('Choose project…')
+            : t('Project: {project}', { project: changes.project })}</button
         >
         {#if changes.project !== null}
           <button
@@ -365,7 +379,7 @@
             class="action chip"
             disabled={changes.busy || changes.planning || changes.applying}
             onclick={() => changesController.chooseProject(true)}
-            >No project</button
+            >{t('No project')}</button
           >
         {/if}
       {/if}
@@ -376,7 +390,7 @@
           disabled={changes.planning || changes.applying}
           onclick={() =>
             changesController.draft(allHooks.operation, 'claude_user_settings')}
-          >{allHooks.label}</button
+          >{t(allHooks.label)}</button
         >
       {/if}
     </div>
@@ -384,10 +398,10 @@
       <form
         class="configuration-plan"
         aria-label={writing === 'hook'
-          ? 'Add a hook'
+          ? t('Add a hook')
           : writing === 'document'
-            ? 'New instruction file'
-            : 'Add an MCP server'}
+            ? t('New instruction file')
+            : t('Add an MCP server')}
         onsubmit={(event) => {
           event.preventDefault();
           if (writing === 'document')
@@ -417,11 +431,12 @@
       >
         {#if writing === 'hook'}
           <p class="event-meta">
-            Choose when it runs. The command is typed next, in a separate
-            window.
+            {t(
+              'Choose when it runs. The command is typed next, in a separate window.',
+            )}
           </p>
           <label
-            >Event
+            >{t('Event')}
             <select bind:value={hookEvent}>
               {#each HOOK_EVENTS as name (name)}<option value={name}
                   >{name}</option
@@ -429,7 +444,7 @@
             </select>
           </label>
           <label
-            >Matcher (optional)
+            >{t('Matcher (optional)')}
             <input
               type="text"
               bind:value={hookMatcher}
@@ -439,51 +454,58 @@
           </label>
           <label class="configuration-check"
             ><input type="checkbox" bind:checked={writeFromTemplate} />
-            Start from a sealed template (asks for the file and its passphrase; what
-            it holds is shown for review before anything is planned)
+            {t(
+              'Start from a sealed template (asks for the file and its passphrase; what it holds is shown for review before anything is planned)',
+            )}
           </label>
         {:else if writing === 'document'}
           <p class="event-meta">
-            Creates a file that does not exist yet. The name (where one is
-            needed) and the text are typed next, in a separate window; nothing
-            is written until you review the plan and confirm it separately. Undo
-            removes it again.
+            {t(
+              'Creates a file that does not exist yet. The name (where one is needed) and the text are typed next, in a separate window; nothing is written until you review the plan and confirm it separately. Undo removes it again.',
+            )}
           </p>
           {#if changes.project !== null}
             <label
-              >Where
+              >{t('Where')}
               <select bind:value={documentScope}>
-                <option value="account">Your account</option>
-                <option value="project">Project “{changes.project}”</option>
+                <option value="account">{t('Your account')}</option>
+                <option value="project"
+                  >{t('Project “{project}”', {
+                    project: changes.project,
+                  })}</option
+                >
               </select>
             </label>
           {/if}
           <label
-            >What to create
+            >{t('What to create')}
             <select bind:value={documentKind}>
               {#each documentKinds as kind (kind)}<option value={kind}
-                  >{NEW_DOCUMENT_LABEL[kind]}</option
+                  >{t(NEW_DOCUMENT_LABEL[kind])}</option
                 >{/each}
             </select>
           </label>
           <label class="configuration-check"
             ><input type="checkbox" bind:checked={documentFromTemplate} />
-            Start from a sealed template (asks for the file and its passphrase)
+            {t(
+              'Start from a sealed template (asks for the file and its passphrase)',
+            )}
           </label>
         {:else}
           <p class="event-meta">
-            Name the server and say what it is. What it starts or connects to is
-            typed next, in a separate window.
+            {t(
+              'Name the server and say what it is. What it starts or connects to is typed next, in a separate window.',
+            )}
           </p>
           <label
-            >Agent
+            >{t('Agent')}
             <select bind:value={mcpAgent}>
               <option value="opencode">OpenCode</option>
               <option value="codex">Codex</option>
             </select>
           </label>
           <label
-            >Name
+            >{t('Name')}
             <input
               type="text"
               bind:value={mcpName}
@@ -492,16 +514,17 @@
             />
           </label>
           <label
-            >Kind
+            >{t('Kind')}
             <select bind:value={mcpKind}>
-              <option value="local">Starts a program</option>
-              <option value="remote">Connects to an address</option>
+              <option value="local">{t('Starts a program')}</option>
+              <option value="remote">{t('Connects to an address')}</option>
             </select>
           </label>
           <label class="configuration-check"
             ><input type="checkbox" bind:checked={writeFromTemplate} />
-            Start from a sealed template (asks for the file and its passphrase; what
-            it holds is shown for review before anything is planned)
+            {t(
+              'Start from a sealed template (asks for the file and its passphrase; what it holds is shown for review before anything is planned)',
+            )}
           </label>
         {/if}
         <div class="configuration-plan-actions">
@@ -509,10 +532,10 @@
             type="submit"
             class="action primary"
             disabled={busy || (writing === 'mcp' && !mcpNameOk(mcpName))}
-            >Continue…</button
+            >{t('Continue…')}</button
           >
           <button type="button" class="action" onclick={() => (writing = null)}
-            >Cancel</button
+            >{t('Cancel')}</button
           >
         </div>
       </form>
@@ -521,26 +544,28 @@
       <div class="configuration-main">
         {#if changes.history === null}
           <div class="sessions-empty" role="status" aria-busy="true">
-            <p class="empty-title">Reading the history…</p>
+            <p class="empty-title">{t('Reading the history…')}</p>
           </div>
         {:else if changes.history.changes.length === 0}
           <div class="sessions-empty">
-            <p class="empty-title">No changes yet</p>
-            <p>Changes you make here are listed, without their content.</p>
+            <p class="empty-title">{t('No changes yet')}</p>
+            <p>
+              {t('Changes you make here are listed, without their content.')}
+            </p>
           </div>
         {:else}
-          <ul class="events-list" aria-label="Changes">
+          <ul class="events-list" aria-label={t('Changes')}>
             {#each changes.history.changes as change (change.id)}
               <li class="configuration-history-row">
                 <span class="event-title"
-                  >{OPERATION_LABEL[change.operation]}</span
+                  >{t(OPERATION_LABEL[change.operation])}</span
                 >
                 <span class="event-meta">
-                  {PROVIDER_LABEL[change.provider]} · {SOURCE_LABEL[
-                    change.source
-                  ]} · {day(change.at)}
+                  {PROVIDER_LABEL[change.provider]} · {t(
+                    SOURCE_LABEL[change.source],
+                  )} · {day(change.at)}
                   {#if change.undoes}
-                    · an undo
+                    {t('· an undo')}
                   {/if}
                 </span>
                 <span
@@ -551,8 +576,8 @@
                 >
                   <span class="dot" aria-hidden="true"></span>
                   {change.outcome
-                    ? OUTCOME_LABEL[change.outcome].text
-                    : 'Not finished'}
+                    ? t(OUTCOME_LABEL[change.outcome].text)
+                    : t('Not finished')}
                 </span>
                 {#if (change.outcome === 'applied' || change.outcome === 'recovered_applied') && !change.undoes}
                   <button
@@ -560,7 +585,7 @@
                     class="action chip"
                     disabled={changes.planning || changes.applying}
                     onclick={() => changesController.undo(change.id)}
-                    >Undo</button
+                    >{t('Undo')}</button
                   >
                 {/if}
               </li>
@@ -571,7 +596,7 @@
               type="button"
               class="action"
               onclick={() => changesController.loadHistory(true)}
-              >Older changes</button
+              >{t('Older changes')}</button
             >
           {/if}
         {/if}
@@ -584,36 +609,38 @@
             class="action"
             disabled={changes.busy}
             onclick={() => changesController.importRecord()}
-            >Import a kept hook…</button
+            >{t('Import a kept hook…')}</button
           >
         </div>
         {#if changes.records === null}
           <div class="sessions-empty" role="status" aria-busy="true">
-            <p class="empty-title">Reading…</p>
+            <p class="empty-title">{t('Reading…')}</p>
           </div>
         {:else if parked.length === 0}
           <div class="sessions-empty">
-            <p class="empty-title">Nothing is turned off</p>
+            <p class="empty-title">{t('Nothing is turned off')}</p>
             <p>
-              A hook you turn off is removed from its file and kept here, so it
-              can be put back exactly.
+              {t(
+                'A hook you turn off is removed from its file and kept here, so it can be put back exactly.',
+              )}
             </p>
           </div>
         {:else}
-          <ul class="events-list" aria-label="Turned-off hooks">
+          <ul class="events-list" aria-label={t('Turned-off hooks')}>
             {#each parked as record (record.id)}
               <li class="configuration-history-row">
                 <span class="event-title">{record.label}</span>
                 <span class="event-meta">
-                  Kept {day(record.created)} ·
+                  {t('Kept')}
+                  {day(record.created)} ·
                   {record.protection === 'sealed'
-                    ? 'encrypted'
-                    : 'not encrypted (no secret in it)'}
+                    ? t('encrypted')
+                    : t('not encrypted (no secret in it)')}
                   {#if record.secret_bearing}
-                    · holds hidden values
+                    {t('· holds hidden values')}
                   {/if}
                   {#if record.past_retention}
-                    · kept past the usual time; it stays until you decide
+                    {t('· kept past the usual time; it stays until you decide')}
                   {/if}
                 </span>
                 <span class="configuration-record-actions">
@@ -625,21 +652,21 @@
                       changes.busy}
                     onclick={() =>
                       changesController.draft('restore_hook', record.id)}
-                    >Put back</button
+                    >{t('Put back')}</button
                   >
                   <button
                     type="button"
                     class="action chip"
                     disabled={changes.busy}
                     onclick={() => changesController.exportRecord(record.id)}
-                    >Export…</button
+                    >{t('Export…')}</button
                   >
                   <button
                     type="button"
                     class="action chip"
                     disabled={changes.busy}
                     onclick={() => changesController.deleteRecord(record.id)}
-                    >Forget</button
+                    >{t('Forget')}</button
                   >
                 </span>
               </li>
@@ -648,12 +675,17 @@
         {/if}
       </div>
     {:else}
-      <div class="events-filters" role="group" aria-label="Filter by agent">
+      <div
+        class="events-filters"
+        role="group"
+        aria-label={t('Filter by agent')}
+      >
         <button
           type="button"
           class="action chip"
           aria-pressed={configuration.provider === 'all'}
-          onclick={() => controller.setProvider('all')}>All agents</button
+          onclick={() => controller.setProvider('all')}
+          >{t('All agents')}</button
         >
         {#each PROVIDERS as provider (provider)}
           <button
@@ -665,13 +697,13 @@
           >
         {/each}
       </div>
-      <div class="events-filters" role="group" aria-label="Filter by kind">
+      <div class="events-filters" role="group" aria-label={t('Filter by kind')}>
         <button
           type="button"
           class="action chip"
           aria-pressed={configuration.kind === 'all'}
           onclick={() => controller.setKind('all')}
-          >Everything {counts.all}</button
+          >{t('Everything')} {counts.all}</button
         >
         {#each ITEM_KINDS as kind (kind)}
           <button
@@ -679,13 +711,13 @@
             class="action chip"
             aria-pressed={configuration.kind === kind}
             onclick={() => controller.setKind(kind)}
-            >{KIND_LABEL[kind]} {counts[kind]}</button
+            >{t(KIND_LABEL[kind])} {counts[kind]}</button
           >
         {/each}
       </div>
 
       <label class="configuration-search"
-        >Search by name
+        >{t('Search by name')}
         <input
           type="search"
           bind:value={query}
@@ -697,32 +729,33 @@
       </label>
       <div class="configuration-main" bind:this={main}>
         {#if selected}
-          <aside class="configuration-detail" aria-label="Details">
+          <aside class="configuration-detail" aria-label={t('Details')}>
             <h3>{selected.name}</h3>
             <dl>
-              <dt>Agent</dt>
+              <dt>{t('Agent')}</dt>
               <dd>{PROVIDER_LABEL[selected.provider]}</dd>
-              <dt>Kind</dt>
-              <dd>{kindName(selected.kind)}</dd>
-              <dt>Found in</dt>
-              <dd>{SOURCE_LABEL[selected.source]}</dd>
-              <dt>In the file</dt>
-              <dd>{PERSISTED_LABEL[selected.persisted].label}</dd>
-              <dt>In use</dt>
-              <dd>{EFFECTIVE_LABEL[selected.effective]}</dd>
-              <dt>Changing it</dt>
+              <dt>{t('Kind')}</dt>
+              <dd>{t(kindName(selected.kind))}</dd>
+              <dt>{t('Found in')}</dt>
+              <dd>{t(SOURCE_LABEL[selected.source])}</dd>
+              <dt>{t('In the file')}</dt>
+              <dd>{t(PERSISTED_LABEL[selected.persisted].label)}</dd>
+              <dt>{t('In use')}</dt>
+              <dd>{t(EFFECTIVE_LABEL[selected.effective])}</dd>
+              <dt>{t('Changing it')}</dt>
               <dd>
                 {#if selectedChange}
-                  You can do it here, with a plan you confirm.
+                  {t('You can do it here, with a plan you confirm.')}
                 {:else if selectedAuthoring}
-                  You can change it here: you review the text in a separate
-                  window, then confirm a plan.
+                  {t(
+                    'You can change it here: you review the text in a separate window, then confirm a plan.',
+                  )}
                 {:else}
-                  {NOT_WRITABLE_LABEL[selected.not_writable]}
+                  {t(NOT_WRITABLE_LABEL[selected.not_writable])}
                 {/if}
               </dd>
               {#if selected.hash}
-                <dt>Fingerprint</dt>
+                <dt>{t('Fingerprint')}</dt>
                 <dd class="mono">{selected.hash.slice(0, 12)}</dd>
               {/if}
             </dl>
@@ -736,7 +769,7 @@
                     changesController.draft(
                       selectedChange.operation,
                       selected.id,
-                    )}>{selectedChange.label}…</button
+                    )}>{t(selectedChange.label)}…</button
                 >
               </div>
             {/if}
@@ -757,7 +790,7 @@
                           )
                         : changesController.author((c) =>
                             c.editMcp(selected.id),
-                          )}>Change it…</button
+                          )}>{t('Change it…')}</button
                 >
                 {#if selectedAuthoring.edit === 'hook' || selectedAuthoring.edit === 'mcp'}
                   <button
@@ -766,7 +799,7 @@
                     disabled={busy || changes.busy}
                     onclick={() =>
                       changesController.exportTemplate(selected.id)}
-                    >Export template…</button
+                    >{t('Export template…')}</button
                   >
                 {/if}
                 {#if selectedAuthoring.edit === 'document'}
@@ -776,7 +809,7 @@
                     disabled={busy || changes.busy}
                     onclick={() =>
                       changesController.exportDocument(selected.id)}
-                    >Export template…</button
+                    >{t('Export template…')}</button
                   >
                   <button
                     type="button"
@@ -785,7 +818,7 @@
                     onclick={() =>
                       changesController.author((c) =>
                         c.importDocument(selected.id),
-                      )}>Apply template…</button
+                      )}>{t('Apply template…')}</button
                   >
                 {/if}
                 {#if selectedAuthoring.remove}
@@ -797,21 +830,23 @@
                       changesController.draft(
                         selectedAuthoring.remove ?? 'park_mcp',
                         selected.id,
-                      )}>Delete…</button
+                      )}>{t('Delete…')}</button
                   >
                 {/if}
               </div>
             {/if}
             {#if lines.length > 0}
-              <h4>Settings</h4>
+              <h4>{t('Settings')}</h4>
               <ul class="configuration-lines">
                 {#each lines as line (line.name)}
                   <li>
                     <span class="mono"
-                      >{line.name === '' ? 'value' : line.name}</span
+                      >{line.name === '' ? t('value') : line.name}</span
                     >
                     <span class="configuration-value" class:hidden={line.hidden}
-                      >{line.value}</span
+                      >{typeof line.value === 'string'
+                        ? line.value
+                        : tPhrase(line.value)}</span
                     >
                   </li>
                 {/each}
@@ -821,18 +856,19 @@
         {/if}
         {#if items.length === 0}
           <div class="sessions-empty">
-            <p class="empty-title">Nothing to show</p>
+            <p class="empty-title">{t('Nothing to show')}</p>
             <p>
               {#if reply.inventory.items.length === 0}
-                No hooks, skills, servers, rules or model settings were found in
-                the places that were read.
+                {t(
+                  'No hooks, skills, servers, rules or model settings were found in the places that were read.',
+                )}
               {:else}
-                Nothing matches this filter.
+                {t('Nothing matches this filter.')}
               {/if}
             </p>
           </div>
         {:else}
-          <ul class="events-list" aria-label="Configuration items">
+          <ul class="events-list" aria-label={t('Configuration items')}>
             {#each items as item (item.id)}
               <li>
                 <button
@@ -850,12 +886,12 @@
                     data-tone={PERSISTED_LABEL[item.persisted].tone}
                   >
                     <span class="dot" aria-hidden="true"></span>
-                    {PERSISTED_LABEL[item.persisted].label}
+                    {t(PERSISTED_LABEL[item.persisted].label)}
                   </span>
                   <span class="event-meta">
-                    {kindName(item.kind)} · {SCOPE_LABEL[item.scope]}
+                    {t(kindName(item.kind))} · {t(SCOPE_LABEL[item.scope])}
                     {#if mayHoldSecret(item.detail)}
-                      · values hidden
+                      {t('· values hidden')}
                     {/if}
                   </span>
                 </button>
@@ -866,9 +902,9 @@
 
         <details class="configuration-sources">
           <summary>
-            Where this was read from
+            {t('Where this was read from')}
             {#if problems > 0}
-              · {problems} {problems === 1 ? 'problem' : 'problems'}
+              · {problems} {problems === 1 ? t('problem') : t('problems')}
             {/if}
           </summary>
           <ul>
@@ -876,12 +912,16 @@
               <li>
                 <span class="pill compact" data-tone={outcomeTone(source)}>
                   <span class="dot" aria-hidden="true"></span>
-                  {SOURCE_LABEL[source.key]}
+                  {t(SOURCE_LABEL[source.key])}
                 </span>
                 <span class="event-meta">
-                  {PROVIDER_LABEL[source.provider]} · {outcomeText(source)}
+                  {PROVIDER_LABEL[source.provider]} · {tPhrase(
+                    outcomeText(source),
+                  )}
                   {#if source.outcome === 'read' && source.trust.trust === 'read_only'}
-                    Its folder is shared with a group, so it is only read.
+                    {t(
+                      'Its folder is shared with a group, so it is only read.',
+                    )}
                   {/if}
                 </span>
               </li>

@@ -14,9 +14,15 @@ import {
   matchingName,
   visibleItems,
 } from '../src/lib/features/configuration/present';
+import type { Phrase } from '../src/lib/i18n/msg';
+import { tPhrase } from '../src/lib/i18n/index.svelte';
 import fixture from './fixtures/configuration-inventory-v1.json';
 
 const reply = () => structuredClone(fixture) as Record<string, any>;
+
+/** A line's value as the window draws it: a sentence it wrote is translated, data is kept as it came. */
+const shown = (value: string | Phrase) =>
+  typeof value === 'string' ? value : tPhrase(value);
 
 describe('the inventory contract', () => {
   it('accepts exactly what the desktop sends', () => {
@@ -79,9 +85,9 @@ describe('the inventory contract', () => {
     const parsed = parseInventoryReply(fixture).inventory;
     const read = parsed.sources.find((s) => s.outcome === 'read')!;
     expect(
-      outcomeText({ ...read, conflict_copy: true } as typeof read),
+      tPhrase(outcomeText({ ...read, conflict_copy: true } as typeof read)),
     ).toContain('A conflict copy of this file sits beside it');
-    expect(outcomeText(read)).not.toContain('conflict copy');
+    expect(tPhrase(outcomeText(read))).not.toContain('conflict copy');
     const damaged = reply();
     delete damaged.inventory.sources.find((s: any) => s.outcome === 'read')
       .conflict_copy;
@@ -148,7 +154,7 @@ describe('presentation', () => {
     const server = parsed.items.find((i) => i.kind === 'mcp_server')!;
     const lines = detailLines(server.detail);
     const key = lines.find((l) => l.name === 'env.CONTEXT7_API_KEY')!;
-    expect(key).toEqual({
+    expect({ ...key, value: shown(key.value) }).toEqual({
       name: 'env.CONTEXT7_API_KEY',
       value: 'hidden (environment value)',
       hidden: true,
@@ -181,7 +187,7 @@ describe('presentation', () => {
           ['b', { kind: 'map', value: [['c', { kind: 'number', value: 2 }]] }],
           ['empty', { kind: 'list', value: [] }],
         ],
-      }).map((l) => [l.name, l.value]),
+      }).map((l) => [l.name, shown(l.value)]),
     ).toEqual([
       ['a[0]', 'true'],
       ['a[1]', 'empty'],
@@ -228,17 +234,19 @@ describe('presentation', () => {
 
   it('says what became of every source without a path or an operating-system text', () => {
     for (const source of parsed.sources) {
-      const said = outcomeText(source);
+      const said = tPhrase(outcomeText(source));
       expect(said.length).toBeGreaterThan(3);
       expect(said).not.toMatch(/\/|errno|permission denied|No such file/i);
     }
     expect(
-      outcomeText(parsed.sources.find((s) => s.outcome === 'failed')!),
+      tPhrase(outcomeText(parsed.sources.find((s) => s.outcome === 'failed')!)),
     ).toContain('line 1, column 3');
     expect(
-      failureText({ failure: 'untrusted_path', reason: 'outside_roots' }),
+      tPhrase(
+        failureText({ failure: 'untrusted_path', reason: 'outside_roots' }),
+      ),
     ).toContain('outside');
-    expect(failureText({ failure: 'credential_file' })).toContain(
+    expect(tPhrase(failureText({ failure: 'credential_file' }))).toContain(
       'never opened',
     );
   });

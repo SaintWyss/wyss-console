@@ -142,7 +142,7 @@
               t('not shown here')}</span
           >
           <span class="event-meta">
-            {row.source} · {row.scope}. {t(
+            {t(row.source)} · {t(row.scope)}. {t(
               'As the file says; it applies to new sessions, and what a running session does with a change is not known.',
             )}
           </span>

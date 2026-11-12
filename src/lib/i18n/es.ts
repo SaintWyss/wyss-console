@@ -911,4 +911,351 @@ export const ES: Readonly<Record<string, string>> = {
     'No hay mediciones de CPU, RAM, batería, reposo, latencia ni roaming para ninguno de los dos candidatos. OD01 sigue siendo una decisión del dueño. OD02 mantiene bloqueada la entrada con cuenta completa en un host bloqueado.',
   'Disconnected · no action is queued or sent.':
     'Desconectado · no se encola ni se envía ninguna acción.',
+  // Configuration: the items view, its changes and history, and the sentences of its presenter
+  item: 'elemento',
+  items: 'elementos',
+  from: 'de',
+  places: 'lugares',
+  Reading: 'Leyendo',
+  'This is what Claude Code and Codex are set up with, read from their own files. Nothing changes until you confirm a plan, and Claude Code hooks and skills, Codex skills and MCP servers, and OpenCode MCP servers and plugins can be switched here. You can also write a Claude Code hook or an MCP server for Codex or OpenCode, in a separate window. Secrets in commands, environments and headers are never shown.':
+    'Esto es lo que tienen configurado Claude Code y Codex, leído de sus propios archivos. No cambia nada hasta que confirmes un plan, y los hooks y skills de Claude Code, las skills y los servidores MCP de Codex, y los servidores MCP y plugins de OpenCode se pueden activar o desactivar desde acá. También podés escribir un hook de Claude Code o un servidor MCP para Codex u OpenCode, en una ventana aparte. Los secretos de comandos, entornos y encabezados nunca se muestran.',
+  'Change to confirm': 'Cambio para confirmar',
+  'What would change': 'Qué cambiaría',
+  'Another account you named in': 'Otra cuenta que nombraste en',
+  'can also write this file’s folder. It is accepted because you named it.':
+    'también puede escribir la carpeta de este archivo. Se acepta porque la nombraste.',
+  'This entry holds values that are not shown here.':
+    'Esta entrada tiene valores que no se muestran acá.',
+  'Prediction, not a reading: managed Inference':
+    'Predicción, no una lectura: Inference administrado',
+  now: 'ahora',
+  'and this change does not alter that.': 'y este cambio no lo altera.',
+  'and would': 'y',
+  'after it.': 'después de este cambio.',
+  'Waiting for the confirmation window…':
+    'Esperando la ventana de confirmación…',
+  'Applying…': 'Aplicando…',
+  'Continue to confirm': 'Seguir para confirmar',
+  Apply: 'Aplicar',
+  'Preparing the change…': 'Preparando el cambio…',
+  'This could not be read again just now. What is shown is from the last successful read.':
+    'No se pudo volver a leer ahora mismo. Lo que se muestra es de la última lectura exitosa.',
+  'There are more items than this app reads at once. Some are not listed.':
+    'Hay más elementos de los que esta app lee de una vez. Algunos no aparecen.',
+  'Reading configuration…': 'Leyendo configuración…',
+  'There is no configuration to read here':
+    'Acá no hay configuración para leer',
+  'The app could not find where your account keeps its files. Nothing is shown, which does not mean there is nothing configured.':
+    'La app no encontró dónde guarda tu cuenta sus archivos. No se muestra nada, lo que no quiere decir que no haya nada configurado.',
+  'The configuration could not be read': 'No se pudo leer la configuración',
+  View: 'Vista',
+  Items: 'Elementos',
+  'Turned off': 'Desactivados',
+  History: 'Historial',
+  'Add a hook…': 'Agregar un hook…',
+  'Add an MCP server…': 'Agregar un servidor MCP…',
+  'New instruction file…': 'Nuevo archivo de instrucciones…',
+  'Choose the project whose instruction files and skills are listed and may be changed.':
+    'Elegí el proyecto cuyos archivos de instrucciones y skills se listan y se pueden cambiar.',
+  'Choose another project.': 'Elegí otro proyecto.',
+  'Choose project…': 'Elegir proyecto…',
+  'Project: {project}': 'Proyecto: {project}',
+  'No project': 'Sin proyecto',
+  'Add a hook': 'Agregar un hook',
+  'New instruction file': 'Nuevo archivo de instrucciones',
+  'Add an MCP server': 'Agregar un servidor MCP',
+  'Choose when it runs. The command is typed next, in a separate window.':
+    'Elegí cuándo corre. El comando se escribe después, en una ventana aparte.',
+  Event: 'Evento',
+  'Matcher (optional)': 'Coincidencia (opcional)',
+  'Start from a sealed template (asks for the file and its passphrase; what it holds is shown for review before anything is planned)':
+    'Empezar desde una plantilla sellada (pide el archivo y su frase de paso; lo que tiene se muestra para revisar antes de planear algo)',
+  'Creates a file that does not exist yet. The name (where one is needed) and the text are typed next, in a separate window; nothing is written until you review the plan and confirm it separately. Undo removes it again.':
+    'Crea un archivo que todavía no existe. El nombre (cuando hace falta) y el texto se escriben después, en una ventana aparte; no se escribe nada hasta que revises el plan y lo confirmes por separado. Deshacer lo borra de nuevo.',
+  Where: 'Dónde',
+  'Project “{project}”': 'Proyecto “{project}”',
+  'What to create': 'Qué crear',
+  'Start from a sealed template (asks for the file and its passphrase)':
+    'Empezar desde una plantilla sellada (pide el archivo y su frase de paso)',
+  'Name the server and say what it is. What it starts or connects to is typed next, in a separate window.':
+    'Poné nombre al servidor y decí qué es. Lo que arranca o a lo que se conecta se escribe después, en una ventana aparte.',
+  Kind: 'Tipo',
+  'Starts a program': 'Arranca un programa',
+  'Connects to an address': 'Se conecta a una dirección',
+  'Continue…': 'Continuar…',
+  'Reading the history…': 'Leyendo el historial…',
+  'No changes yet': 'Todavía no hay cambios',
+  'Changes you make here are listed, without their content.':
+    'Los cambios que hagas acá se listan, sin su contenido.',
+  Changes: 'Cambios',
+  '· an undo': '· un deshacer',
+  'Not finished': 'No terminado',
+  Undo: 'Deshacer',
+  'Older changes': 'Cambios anteriores',
+  'Import a kept hook…': 'Importar un hook guardado…',
+  'Nothing is turned off': 'No hay nada desactivado',
+  'A hook you turn off is removed from its file and kept here, so it can be put back exactly.':
+    'Un hook que desactivás se quita de su archivo y queda guardado acá, así se puede restaurar tal cual.',
+  'Turned-off hooks': 'Hooks desactivados',
+  Kept: 'Guardado el',
+  encrypted: 'cifrado',
+  'not encrypted (no secret in it)': 'sin cifrar (no tiene secretos)',
+  '· holds hidden values': '· tiene valores ocultos',
+  '· kept past the usual time; it stays until you decide':
+    '· guardado más tiempo del habitual; queda hasta que decidas',
+  'Put back': 'Restaurar',
+  'Export…': 'Exportar…',
+  Forget: 'Olvidar',
+  'Filter by agent': 'Filtrar por agente',
+  'All agents': 'Todos los agentes',
+  'Filter by kind': 'Filtrar por tipo',
+  Everything: 'Todo',
+  'Search by name': 'Buscar por nombre',
+  'Found in': 'Encontrado en',
+  'In the file': 'En el archivo',
+  'In use': 'En uso',
+  'Changing it': 'Cambiarlo',
+  'You can do it here, with a plan you confirm.':
+    'Podés hacerlo acá, con un plan que confirmás.',
+  'You can change it here: you review the text in a separate window, then confirm a plan.':
+    'Podés cambiarlo acá: revisás el texto en una ventana aparte y después confirmás un plan.',
+  Fingerprint: 'Huella',
+  'Change it…': 'Cambiar…',
+  'Export template…': 'Exportar plantilla…',
+  'Apply template…': 'Aplicar plantilla…',
+  value: 'valor',
+  'Nothing to show': 'Nada para mostrar',
+  'No hooks, skills, servers, rules or model settings were found in the places that were read.':
+    'No se encontraron hooks, skills, servidores, reglas ni ajustes de modelo en los lugares que se leyeron.',
+  'Nothing matches this filter.': 'Nada coincide con este filtro.',
+  'Configuration items': 'Elementos de configuración',
+  '· values hidden': '· valores ocultos',
+  'Where this was read from': 'De dónde se leyó',
+  problem: 'problema',
+  problems: 'problemas',
+  'Its folder is shared with a group, so it is only read.':
+    'Su carpeta es compartida con un grupo, así que solo se lee.',
+  Hooks: 'Hooks',
+  Skills: 'Skills',
+  'MCP servers': 'Servidores MCP',
+  'Rule files': 'Archivos de reglas',
+  Plugins: 'Plugins',
+  Hook: 'Hook',
+  Skill: 'Skill',
+  'MCP server': 'Servidor MCP',
+  'Rule file': 'Archivo de reglas',
+  'Model setting': 'Ajuste de modelo',
+  Plugin: 'Plugin',
+  'On in the file': 'Activado en el archivo',
+  'Off in the file': 'Desactivado en el archivo',
+  'Not in the file': 'No está en el archivo',
+  Parked: 'Apartado',
+  'Could not be read': 'No se pudo leer',
+  'Confirmed active': 'Activo confirmado',
+  'Confirmed inactive': 'Inactivo confirmado',
+  'As the provider documents it': 'Según documenta el proveedor',
+  'Cannot be confirmed without running the provider':
+    'No se puede confirmar sin ejecutar el proveedor',
+  'Your account': 'Tu cuenta',
+  'Managed settings': 'Ajustes administrados',
+  'User settings': 'Ajustes del usuario',
+  'Account file (MCP servers only)':
+    'Archivo de la cuenta (solo servidores MCP)',
+  'User skills folder': 'Carpeta de skills del usuario',
+  'User rules': 'Reglas del usuario',
+  'Project settings': 'Ajustes del proyecto',
+  'Project local settings': 'Ajustes locales del proyecto',
+  'Project MCP file': 'Archivo MCP del proyecto',
+  'Project skills folder': 'Carpeta de skills del proyecto',
+  'Project rules': 'Reglas del proyecto',
+  'Administrator requirements': 'Requisitos del administrador',
+  'Managed configuration': 'Configuración administrada',
+  'User configuration': 'Configuración del usuario',
+  'User hooks file': 'Archivo de hooks del usuario',
+  'User instructions': 'Instrucciones del usuario',
+  'User skills folder (~/.agents/skills)':
+    'Carpeta de skills del usuario (~/.agents/skills)',
+  'Project configuration': 'Configuración del proyecto',
+  'Project instructions': 'Instrucciones del proyecto',
+  'Set by the system; this app never changes it':
+    'Lo define el sistema; esta app nunca lo cambia',
+  'Owned by the provider; changed only through its own command':
+    'Es del proveedor; solo se cambia con su propio comando',
+  'Produced by another tool': 'Lo genera otra herramienta',
+  'Its folder can be written by a group: read, never changed':
+    'Su carpeta la puede escribir un grupo: solo se lee, nunca se cambia',
+  'Read-only for now: changing it is not available yet':
+    'Solo lectura por ahora: cambiarlo todavía no está disponible',
+  'environment value': 'valor de entorno',
+  header: 'encabezado',
+  'address credentials': 'credenciales de la dirección',
+  'secret field': 'campo secreto',
+  token: 'token',
+  'It is not there.': 'No está.',
+  'It could not be read.': 'No se pudo leer.',
+  'It kept changing while it was being read. It will be read again.':
+    'Cambió mientras se leía. Se va a leer de nuevo.',
+  'It holds credentials, so it is never opened.':
+    'Tiene credenciales, así que nunca se abre.',
+  'Where it leads is outside the places this app may read.':
+    'A donde apunta está fuera de los lugares que esta app puede leer.',
+  'Its place is not safe to read from: someone else owns or can change it.':
+    'Su lugar no es seguro para leer: otro lo tiene o lo puede cambiar.',
+  'It is behind too many links.': 'Está detrás de demasiados enlaces.',
+  'It is not a regular file.': 'No es un archivo regular.',
+  'It is larger than the bounds this app reads.':
+    'Es más grande de lo que esta app lee.',
+  'It is not valid: reading stopped at line {line}, column {column}.':
+    'No es válido: la lectura se detuvo en la línea {line}, columna {column}.',
+  'Read. A conflict copy of this file sits beside it, so it cannot be changed from here until that copy is dealt with.':
+    'Leído. Hay una copia en conflicto de este archivo al lado, así que no se puede cambiar desde acá hasta resolver esa copia.',
+  'Read. {entries}': 'Leído. {entries}',
+  '{count} entry was not recognised and left untouched.':
+    '{count} entrada no se reconoció y quedó sin tocar.',
+  '{count} entries were not recognised and left untouched.':
+    '{count} entradas no se reconocieron y quedaron sin tocar.',
+  'Read.': 'Leído.',
+  'Not present.': 'No está presente.',
+  'Not read: Codex loads a project’s own configuration only for a project you trust.':
+    'No se leyó: Codex carga la configuración propia de un proyecto solo para un proyecto de confianza.',
+  empty: 'vacío',
+  none: 'ninguno',
+  'hidden ({kind})': 'oculto ({kind})',
+  'Change this instruction file': 'Cambiar este archivo de instrucciones',
+  'Create this instruction file': 'Crear este archivo de instrucciones',
+  'Delete this instruction file (kept encrypted, so it can be put back)':
+    'Borrar este archivo de instrucciones (queda guardado cifrado, para poder restaurarlo)',
+  'Turn off this hook': 'Desactivar este hook',
+  'Put this hook back': 'Volver a poner este hook',
+  'Turn off every hook': 'Desactivar todos los hooks',
+  'Allow hooks again': 'Volver a permitir los hooks',
+  'Turn off this skill': 'Desactivar esta skill',
+  'Turn on this skill': 'Activar esta skill',
+  'Turn off this Codex skill': 'Desactivar esta skill de Codex',
+  'Turn on this Codex skill': 'Activar esta skill de Codex',
+  'Turn off this Codex MCP server': 'Desactivar este servidor MCP de Codex',
+  'Turn on this Codex MCP server': 'Activar este servidor MCP de Codex',
+  'Turn off this OpenCode MCP server':
+    'Desactivar este servidor MCP de OpenCode',
+  'Turn on this OpenCode MCP server': 'Activar este servidor MCP de OpenCode',
+  'Turn off this OpenCode plugin': 'Desactivar este plugin de OpenCode',
+  'Add this hook': 'Agregar este hook',
+  'Change this hook’s command': 'Cambiar el comando de este hook',
+  'Add this OpenCode MCP server': 'Agregar este servidor MCP de OpenCode',
+  'Change this OpenCode MCP server': 'Cambiar este servidor MCP de OpenCode',
+  'Delete this OpenCode MCP server (kept, so it can be put back)':
+    'Borrar este servidor MCP de OpenCode (queda guardado, para poder restaurarlo)',
+  'Take back what you wrote': 'Quitar lo que escribiste',
+  'Add this Codex MCP server': 'Agregar este servidor MCP de Codex',
+  'Change this Codex MCP server': 'Cambiar este servidor MCP de Codex',
+  'Delete this Codex MCP server (kept, so it can be put back)':
+    'Borrar este servidor MCP de Codex (queda guardado, para poder restaurarlo)',
+  'This can switch off something that stops an action. You will be asked to confirm in a separate window.':
+    'Esto puede desactivar algo que frena una acción. Te van a pedir confirmar en una ventana aparte.',
+  'This writes, or puts back, something that runs programs. You will be asked to confirm in a separate window.':
+    'Esto escribe, o vuelve a poner, algo que ejecuta programas. Te van a pedir confirmar en una ventana aparte.',
+  'Written and read back. Reload and use by a running provider are not observed.':
+    'Escrito y releído. No se observa la recarga ni el uso por un proveedor en ejecución.',
+  'A new Claude Code session follows the file (checked). A session that is already running is documented to pick it up; that has not been checked.':
+    'Una sesión nueva de Claude Code sigue el archivo (verificado). Una sesión que ya está corriendo, según la documentación, lo toma; eso no se verificó.',
+  'A new Codex process shows the server as the file says (checked). A Codex session that is already running is not known to follow it.':
+    'Un proceso nuevo de Codex muestra el servidor como dice el archivo (verificado). No se sabe si una sesión de Codex que ya está corriendo lo sigue.',
+  'A new OpenCode process reads the file. That a running OpenCode follows it has not been checked.':
+    'Un proceso nuevo de OpenCode lee el archivo. No se verificó que un OpenCode en ejecución lo siga.',
+  'A new Codex process lists the skill as the file says (checked, through its own skills/list). A Codex session that is already running is not known to follow it.':
+    'Un proceso nuevo de Codex lista la skill como dice el archivo (verificado, con su propio skills/list). No se sabe si una sesión de Codex que ya está corriendo la sigue.',
+  'A new Claude Code session refuses to run a skill that is switched off (checked). Skills that come from a plugin are not affected. What a running session does is not known.':
+    'Una sesión nueva de Claude Code no ejecuta una skill desactivada (verificado). Las skills que vienen de un plugin no se afectan. No se sabe qué hace una sesión que ya está corriendo.',
+  'What this keeps is stored on this computer, encrypted, with a key held by your system’s credential store. If that store is reset or its key is lost, it cannot be put back from here.':
+    'Lo que se guarda queda en esta computadora, cifrado, con una clave que tiene el almacén de credenciales del sistema. Si ese almacén se resetea o se pierde su clave, desde acá no se puede restaurar.',
+  'What this keeps is stored on this computer as a private file that is not encrypted: it holds no secret, and no credential store could be reached.':
+    'Lo que se guarda queda en esta computadora como archivo privado sin cifrar: no tiene ningún secreto, y no se pudo acceder a ningún almacén de credenciales.',
+  'Done. The file was changed and read back.':
+    'Listo. El archivo se cambió y se volvió a leer.',
+  'Cancelled in the confirmation window. Nothing was changed.':
+    'Cancelado en la ventana de confirmación. No se cambió nada.',
+  'The file changed after this was planned, so nothing was written. Plan it again.':
+    'El archivo cambió después de planear esto, así que no se escribió nada. Volvé a planearlo.',
+  'The entry is no longer there.': 'La entrada ya no está.',
+  'The entry is not the one that was planned. Nothing was written.':
+    'La entrada no es la que se planeó. No se escribió nada.',
+  'A conflict copy of this file exists beside it. Resolve that first; nothing was written.':
+    'Hay una copia en conflicto de este archivo al lado. Resolvela primero; no se escribió nada.',
+  'The plan was too old and was dropped. Plan it again.':
+    'El plan era muy viejo y se descartó. Volvé a planearlo.',
+  'Your system’s credential store is not available, so an entry that may hold a secret is not kept. Nothing was written.':
+    'El almacén de credenciales del sistema no está disponible, así que no se guarda una entrada que puede tener un secreto. No se escribió nada.',
+  'The kept entry cannot be read. Nothing was written.':
+    'La entrada guardada no se puede leer. No se escribió nada.',
+  'The file could not be written. It is as it was.':
+    'No se pudo escribir el archivo. Quedó como estaba.',
+  'The file was written, but what it holds is not what was planned. Check it.':
+    'El archivo se escribió, pero lo que tiene no es lo que se planeó. Revisalo.',
+  'The history could not be written, so nothing was changed.':
+    'No se pudo escribir el historial, así que no se cambió nada.',
+  'Interrupted, then found complete at start.':
+    'Interrumpido; al arrancar se encontró completo.',
+  'Interrupted before it changed the file.':
+    'Interrumpido antes de cambiar el archivo.',
+  'Interrupted while Claude Code was writing the same file. Its newer version was put back and nothing of ours was kept.':
+    'Interrumpido mientras Claude Code escribía el mismo archivo. Se restauró su versión más nueva y no se guardó nada nuestro.',
+  'Interrupted, and the file holds neither version. Check it.':
+    'Interrumpido, y el archivo no tiene ninguna de las dos versiones. Revisalo.',
+  'Changing the configuration is not available here.':
+    'Cambiar la configuración no está disponible acá.',
+  'That request is not one the app accepts.':
+    'Esa solicitud no es una que la app acepte.',
+  'Something went wrong. Nothing was changed.':
+    'Algo salió mal. No se cambió nada.',
+  'That cannot be changed from here.': 'Eso no se puede cambiar desde acá.',
+  'Its file is not one this app may write: it is shared, owned by someone else, or provider-owned.':
+    'Su archivo no es uno que esta app pueda escribir: es compartido, de otra persona o del proveedor.',
+  'Its file is not there.': 'Su archivo no está.',
+  'Its file could not be read.': 'No se pudo leer su archivo.',
+  'Its file is not valid JSON, so it is left alone.':
+    'Su archivo no es JSON válido, así que no se toca.',
+  'The entry is not the one that was planned, or has a value this app does not know how to change.':
+    'La entrada no es la que se planeó, o tiene un valor que esta app no sabe cambiar.',
+  'It already is that way.': 'Ya está así.',
+  'Something already has that name. It was not touched, and nothing was written.':
+    'Ya existe algo con ese nombre. No se tocó nada y no se escribió nada.',
+  'A different entry is where this one would go. Nothing was written.':
+    'Hay otra entrada donde iría esta. No se escribió nada.',
+  'Your system’s credential store is not available, and this entry may hold a secret, so it is not turned off individually. You can turn off every hook, or edit the file yourself.':
+    'El almacén de credenciales del sistema no está disponible, y esta entrada puede tener un secreto, así que no se desactiva por separado. Podés desactivar todos los hooks o editar el archivo vos mismo.',
+  'The kept entry is damaged and was not used.':
+    'La entrada guardada está dañada y no se usó.',
+  'The key that protected this entry is gone, so it cannot be put back from here.':
+    'Se perdió la clave que protegía esta entrada, así que desde acá no se puede restaurar.',
+  'That plan is gone. Plan it again.':
+    'Ese plan ya no está. Volvé a planearlo.',
+  'That cannot be undone from here.': 'Eso no se puede deshacer desde acá.',
+  'That file is not a kept entry, or the passphrase is wrong.':
+    'Ese archivo no es una entrada guardada, o la frase de paso es incorrecta.',
+  'A passphrase is needed.': 'Hace falta una frase de paso.',
+  'That is not something that can be written: an event this app does not know, an empty or multi-line command, an unusable name or address.':
+    'Eso no se puede escribir: un evento que esta app no conoce, un comando vacío o de varias líneas, o un nombre o una dirección que no sirven.',
+  'Cancelled. Nothing was changed.': 'Cancelado. No se cambió nada.',
+  'That folder cannot be the project: it must be your own, inside your home, with no link on the way and nobody else able to write it or the folders above it.':
+    'Esa carpeta no puede ser el proyecto: tiene que ser tuya, dentro de tu carpeta personal, sin enlaces en el camino y sin que otro pueda escribirla ni las carpetas de arriba.',
+  'can start': 'puede arrancar',
+  'cannot start: a hook is enabled in Codex’s files':
+    'no puede arrancar: hay un hook activado en los archivos de Codex',
+  'cannot start: an MCP server’s name or count cannot be proved':
+    'no puede arrancar: no se puede comprobar el nombre ni la cantidad de un servidor MCP',
+  'Exported. Keep the file and the passphrase safe.':
+    'Exportado. Guardá el archivo y la frase de paso en un lugar seguro.',
+  'Imported. It is listed under Turned off.':
+    'Importado. Figura en Desactivados.',
+  'The plan was dropped because it was too old.':
+    'Se descartó el plan porque era muy viejo.',
+  'Turn off': 'Desactivar',
+  'Turn on': 'Activar',
+  'Claude Code skill': 'Skill de Claude Code',
+  'Claude Code rule (rules/…)': 'Regla de Claude Code (rules/…)',
+  'Claude Code CLAUDE.md': 'CLAUDE.md de Claude Code',
+  'Codex skill (~/.agents/skills)': 'Skill de Codex (~/.agents/skills)',
+  'Codex AGENTS.md': 'AGENTS.md de Codex',
+  'Codex AGENTS.override.md': 'AGENTS.override.md de Codex',
+  'OpenCode AGENTS.md': 'AGENTS.md de OpenCode',
 };

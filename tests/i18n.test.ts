@@ -10,6 +10,7 @@ import {
   t,
   tJoin,
   tPhrase,
+  type Phrase,
 } from '../src/lib/i18n/index.svelte';
 import { activityLabel } from '../src/lib/features/agent/present';
 import {
@@ -20,6 +21,11 @@ import {
   runtimeLine,
 } from '../src/lib/features/sessions/present';
 import { catalogueFailure, entryRow } from '../src/lib/features/models/present';
+import {
+  detailLines,
+  failureText,
+  outcomeText,
+} from '../src/lib/features/configuration/present';
 import { parseModelCatalogue } from '../src/lib/contracts/models';
 import catalogues from './fixtures/model-catalogue-v1.json';
 
@@ -149,6 +155,36 @@ it('draws the remote view sections and its first sentence in Spanish', () => {
   expect(t('Connect to a host')).toBe('Conectar con un equipo');
   setLanguage('en');
   expect(t('Hosts')).toBe('Hosts');
+});
+
+it('draws the configuration sentences in Spanish, with their nested places', () => {
+  const read = (unrecognised: number) =>
+    ({
+      outcome: 'read',
+      unrecognised,
+      conflict_copy: false,
+    }) as unknown as Parameters<typeof outcomeText>[0];
+  const [hidden] = detailLines({ kind: 'hidden', value: 'environment_value' });
+  setLanguage('es');
+  expect(tPhrase(outcomeText(read(1)))).toBe(
+    'Leído. 1 entrada no se reconoció y quedó sin tocar.',
+  );
+  expect(tPhrase(outcomeText(read(2)))).toBe(
+    'Leído. 2 entradas no se reconocieron y quedaron sin tocar.',
+  );
+  expect(
+    tPhrase(failureText({ failure: 'malformed', line: 1, column: 3 })),
+  ).toBe('No es válido: la lectura se detuvo en la línea 1, columna 3.');
+  expect(hidden && tPhrase(hidden.value as Phrase)).toBe(
+    'oculto (valor de entorno)',
+  );
+  setLanguage('en');
+  expect(tPhrase(outcomeText(read(2)))).toBe(
+    'Read. 2 entries were not recognised and left untouched.',
+  );
+  expect(hidden && tPhrase(hidden.value as Phrase)).toBe(
+    'hidden (environment value)',
+  );
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {
