@@ -228,6 +228,13 @@ const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[
         source: "docs/research/arsenal-am1a/ARSENAL-Q319-QUALIFICATION-2026-11-07.md (harness-v2, the same 9 pre-registered cases)",
         limitation: "plugin and built-in skills are not switched off; provider use of each skill is not observed",
     },
+    ArsenalEvidence {
+        qualified_version: "2.1.323 (Claude Code)",
+        checked_on: "2026-11-12",
+        operation: "--settings overlay holding only skillOverrides=off for installed user and project skills",
+        source: "docs/research/arsenal-am1a/ARSENAL-Q323-QUALIFICATION-2026-11-12.md (harness-v2, the same 9 pre-registered cases)",
+        limitation: "plugin and built-in skills are not switched off; provider use of each skill is not observed",
+    },
 ];
 
 /// Codex builds whose per-session skill switch passed a focused qualification: the session runs with
@@ -294,6 +301,15 @@ mod tests {
         assert!(permits_arsenal_exclusion(
             AgentId::ClaudeCode,
             Some("2.1.314 (Claude Code)")
+        ));
+        assert!(permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.323 (Claude Code)")
+        ));
+        // 2.1.321 and 2.1.322 were installed in between and never qualified.
+        assert!(!permits_arsenal_exclusion(
+            AgentId::ClaudeCode,
+            Some("2.1.322 (Claude Code)")
         ));
         // Profile syntax no longer depends on the build; Arsenal exclusion still does (above).
         assert!(permits_profile_overrides(
