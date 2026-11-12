@@ -7,7 +7,7 @@ export type ArsenalProvider = (typeof PROVIDERS)[number];
 export type ImportOutcome = 'created' | 'new_revision' | 'unchanged';
 /** What a discovered capability is. Only the first three can be copied into the library. */
 export type CandidateKind =
-  'skill' | 'agent' | 'rule' | 'hook' | 'mcp_server' | 'plugin';
+  'skill' | 'agent' | 'rule' | 'hook' | 'mcp_server' | 'plugin' | 'command';
 export type CandidateStatus =
   'not_imported' | 'imported' | 'source_changed' | 'read_only';
 export type CandidateScope = 'user' | 'project';
@@ -383,6 +383,7 @@ const CANDIDATE_KINDS = [
   'hook',
   'mcp_server',
   'plugin',
+  'command',
 ] as const;
 const CANDIDATE_STATUSES = [
   'not_imported',

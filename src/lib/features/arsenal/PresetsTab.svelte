@@ -28,6 +28,8 @@
     planKey,
     summaryOf,
     totalsOf,
+    viewOnlyEntries,
+    type ChooserKind,
     type Draft,
     type GroupRow,
   } from './presets';
@@ -116,6 +118,7 @@
     hook: msg('Hook'),
     mcp_server: msg('MCP server'),
     plugin: msg('Plugin'),
+    command: msg('Command'),
   };
   const COMPATIBILITY_LABEL: Record<Compatibility, string> = {
     supported: msg('Supported'),
@@ -132,18 +135,19 @@
     methodology_conflict: msg('Two methodologies'),
     scope_shadow: msg('Installed in account and project'),
   };
-  const KIND_FILTERS: {
-    value: 'all' | 'skill' | 'agent' | 'rule';
-    label: string;
-  }[] = [
+  const KIND_FILTERS: { value: ChooserKind; label: string }[] = [
     { value: 'all', label: msg('All') },
     { value: 'rule', label: msg('Rules') },
     { value: 'skill', label: msg('Skills') },
     { value: 'agent', label: msg('Agents') },
+    { value: 'hook', label: msg('Hooks') },
+    { value: 'mcp_server', label: msg('MCP') },
+    { value: 'plugin', label: msg('Plugins') },
+    { value: 'command', label: msg('Commands') },
   ];
   /** Hover text for each type filter: what that type is, in plain words. */
-  const KIND_TITLE: Record<'all' | 'skill' | 'agent' | 'rule', string> = {
-    all: msg('Shows everything at once: rules, skills and agents.'),
+  const KIND_TITLE: Record<ChooserKind, string> = {
+    all: msg('Shows everything at once, of every type.'),
     rule: msg(
       'A rule is a file of permanent instructions, such as invariantes.md. The agent reads it when every session starts and follows it the whole time. It does not run anything.',
     ),
@@ -153,6 +157,18 @@
     agent: msg(
       'An agent is a helper with a job of its own, such as reviewing code. The main agent hands it part of the work; it does it on its own and returns the result.',
     ),
+    hook: msg(
+      'A hook is a script that runs by itself at a moment of the session, such as before a command or when it starts. It can stop a command or add context, without being asked.',
+    ),
+    mcp_server: msg(
+      'An MCP server connects the agent to an outside tool, such as Notion, a browser or library docs, and gives it new actions to use.',
+    ),
+    plugin: msg(
+      'A plugin is a package that brings several pieces together (skills, agents, hooks, MCP servers) and is switched on or off as a whole.',
+    ),
+    command: msg(
+      'A command is a /name you type to run a saved prompt. Here only your own command files are listed; most /commands are skills.',
+    ),
   };
   const CELLS = Array.from({ length: METER_CELLS }, (_, index) => index);
 
@@ -161,7 +177,7 @@
   let saved = $state<Draft | null>(null);
   let query = $state('');
   /** The type the owner picked; `null` until they pick one. */
-  let kindChoice = $state<'all' | 'skill' | 'agent' | 'rule' | null>(null);
+  let kindChoice = $state<ChooserKind | null>(null);
   let family = $state<Family | 'all'>('all');
   let opened = $state<Group[]>([]);
   let menuFor = $state<string | null>(null);
@@ -192,6 +208,9 @@
         shown: row.items.filter((item) => matching.has(item.id)),
       }))
       .filter((row) => row.shown.length > 0),
+  );
+  const viewOnly = $derived(
+    viewOnlyEntries(arsenal.discover ?? null, provider, kind, query),
   );
   const filtering = $derived(
     query.trim() !== '' || kind !== 'all' || family !== 'all',
@@ -488,8 +507,12 @@
       {/if}
     </div>
 
-    {#if rows.length === 0}
-      <p class="muted">{t('No capabilities match.')}</p>
+    {#if rows.length === 0 && viewOnly.length === 0}
+      <p class="muted">
+        {kind === 'command' && query.trim() === ''
+          ? t('No custom commands. Your /commands are skills here.')
+          : t('No capabilities match.')}
+      </p>
     {:else}
       {#each rows as row (row.group)}
         <div class="group">
@@ -622,6 +645,36 @@
           {/if}
         </div>
       {/each}
+      {#if viewOnly.length > 0}
+        <div class="view-only">
+          <h4>{t('Shown, not selectable yet')}</h4>
+          <p class="help">
+            {t(
+              'Hooks, MCP servers, plugins and commands will be chosen per preset in a later step. GSD Core agents go on and off with Keep GSD Core.',
+            )}
+          </p>
+          <ul class="view-only-rows">
+            {#each viewOnly as entry (entry.key)}
+              <li class="view-only-row">
+                <span class="capability-name">{entry.name}</span>
+                <span class="tag"
+                  >{t(KIND_LABEL[entry.kind] ?? entry.kind)}</span
+                >
+                {#if entry.partOf}
+                  <span class="tag"
+                    >{t('Part of {name}', { name: entry.partOf })}</span
+                  >
+                {/if}
+                {#if entry.description}
+                  <span class="capability-summary" title={entry.description}
+                    >{entry.description}</span
+                  >
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
     {/if}
   </section>
 
@@ -1177,6 +1230,38 @@
     margin: 0;
     color: var(--muted);
     font-size: var(--text-xs);
+  }
+  .view-only {
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+    display: grid;
+    gap: 6px;
+  }
+  .view-only h4 {
+    margin: 0;
+  }
+  .view-only-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+  }
+  .view-only-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    min-height: 32px;
+    padding: 4px 12px;
+    color: var(--muted);
+  }
+  .view-only-row .capability-name {
+    color: var(--text);
+  }
+  .view-only-row .capability-summary {
+    flex: 1 1 240px;
+    min-width: 0;
   }
   .notice[data-tone='error'] {
     background: var(--error-soft);

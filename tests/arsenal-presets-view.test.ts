@@ -213,20 +213,31 @@ describe('Presets screen', () => {
     expect(withRules.root.textContent).not.toContain('frontend-design');
   });
 
-  it('lists the type filters with All first, then Rules, Skills, Agents', () => {
+  it('lists the eight type filters in the contract order', () => {
     const { root } = render(stateWith());
     flushSync();
     expect(
       [...root.querySelectorAll('.filters .chips:first-of-type .chip')].map(
         (node) => text(node),
       ),
-    ).toEqual(['All', 'Rules', 'Skills', 'Agents']);
+    ).toEqual([
+      'All',
+      'Rules',
+      'Skills',
+      'Agents',
+      'Hooks',
+      'MCP',
+      'Plugins',
+      'Commands',
+    ]);
     const chips = [
       ...root.querySelectorAll('.filters .chips:first-of-type .chip'),
     ];
-    expect(chips[0].getAttribute('title')).toContain(
-      'rules, skills and agents',
-    );
+    expect(chips[0].getAttribute('title')).toContain('of every type');
+    expect(chips[4].getAttribute('title')).toContain('A hook is a script');
+    expect(chips[5].getAttribute('title')).toContain('An MCP server');
+    expect(chips[6].getAttribute('title')).toContain('A plugin is a package');
+    expect(chips[7].getAttribute('title')).toContain('A command is a /name');
     expect(chips[1].getAttribute('title')).toContain('A rule is a file');
     expect(chips[2].getAttribute('title')).toContain('A skill is a how-to');
     expect(chips[3].getAttribute('title')).toContain('An agent is a helper');
@@ -461,5 +472,89 @@ describe('Presets screen', () => {
     expect(text(list)).not.toContain('No presets for Claude Code yet.');
     button('Try again').click();
     expect(controller.loadSelections).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists hooks, MCP servers, plugins and GSD agents to see, without a checkbox', () => {
+    const base = {
+      tree_hash: '',
+      status: 'read_only' as const,
+      importable: false,
+      compatibility: 'unsupported' as const,
+      capability: null,
+      duplicates: [],
+      name_collisions: [],
+      provider: 'claude_code' as const,
+      source: 'claude_settings',
+      scope: 'user' as const,
+      description: '',
+      origin: '',
+      executes_code: false,
+      blocked: 'read_only_kind',
+      managed_by: null,
+      file_count: 0,
+      excluded_count: 0,
+      review_count: 0,
+    };
+    const discover = {
+      project: null,
+      sources: [],
+      truncated: false,
+      candidates: [
+        {
+          ...base,
+          id: 'h1',
+          kind: 'hook' as const,
+          name: 'PreToolUse r3-gate',
+        },
+        { ...base, id: 'm1', kind: 'mcp_server' as const, name: 'context7' },
+      ],
+      composites: [
+        {
+          key: 'gsd_core@1.15.0',
+          kind: 'gsd_core' as const,
+          provider: 'claude_code' as const,
+          name: 'GSD Core',
+          version: '1.15.0',
+          description: 'Spec-driven workflow',
+          artifacts: 0,
+          members: 2,
+          origin: '~/.local/share/wyss/gsd-core/1.15.0',
+          enabled: null,
+          methodology: true,
+          skills: [],
+          agents: ['gsd-planner'],
+          commands: 0,
+          hooks: false,
+          mcp: false,
+          categories: [],
+          limitations: [],
+        },
+      ],
+    };
+    const { root } = render(stateWith({ discover }));
+    flushSync();
+    const chip = (label: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>('.filters .chip')].find(
+        (node) => text(node) === label,
+      )!;
+    chip('Agents').click();
+    flushSync();
+    const agents = text(root.querySelector('.view-only'));
+    expect(agents).toContain('gsd-planner');
+    expect(agents).toContain('Part of GSD Core');
+    expect(root.querySelector('.view-only input')).toBeNull();
+    chip('Hooks').click();
+    flushSync();
+    expect(text(root.querySelector('.view-only'))).toContain('r3-gate');
+    expect(text(root.querySelector('.view-only'))).not.toContain('context7');
+    chip('MCP').click();
+    flushSync();
+    expect(text(root.querySelector('.view-only'))).toContain('context7');
+    chip('Plugins').click();
+    flushSync();
+    expect(text(root.querySelector('.view-only'))).toContain('GSD Core');
+    chip('Commands').click();
+    flushSync();
+    expect(text(root)).toContain('No custom commands');
   });
 });

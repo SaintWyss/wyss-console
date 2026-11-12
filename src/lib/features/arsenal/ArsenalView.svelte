@@ -70,6 +70,7 @@
     hook: msg('Hook'),
     mcp_server: msg('MCP server'),
     plugin: msg('Plugin'),
+    command: msg('Command'),
   };
   const SCOPE_LABEL: Record<CandidateScope, string> = {
     user: msg('Account'),

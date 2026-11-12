@@ -1,6 +1,7 @@
 import type {
   ArsenalProvider,
   Composite,
+  DiscoverReply,
   Item,
   LibraryItem,
   Preview,
@@ -127,6 +128,85 @@ export function keptComposites(
     (composite) =>
       composite.kind === 'gsd_core' &&
       (composite.provider === provider || composite.provider === 'shared'),
+  );
+}
+
+/** The types the chooser offers, in the order the contract shows them. */
+export type ChooserKind =
+  | 'all'
+  | 'rule'
+  | 'skill'
+  | 'agent'
+  | 'hook'
+  | 'mcp_server'
+  | 'plugin'
+  | 'command';
+
+/** Something the chooser shows but a preset cannot hold yet: hooks, MCP servers, plugins, commands. */
+export interface ViewOnlyEntry {
+  key: string;
+  kind: 'agent' | 'hook' | 'mcp_server' | 'plugin' | 'command';
+  name: string;
+  description: string;
+  /** Where it comes from, when it belongs to a package (GSD Core). */
+  partOf: string | null;
+}
+
+/**
+ * The provider's entries the chooser lists without a checkbox. Claude Code's GSD agents are links
+ * into GSD Core, so they are listed from that package, marked as part of it; Codex's are ordinary
+ * files already in the library.
+ */
+export function viewOnlyEntries(
+  discover: DiscoverReply | null,
+  provider: ArsenalProvider,
+  kind: ChooserKind,
+  query: string,
+): ViewOnlyEntry[] {
+  if (discover === null) return [];
+  const entries: ViewOnlyEntry[] = [];
+  for (const candidate of discover.candidates) {
+    if (candidate.provider !== provider) continue;
+    if (
+      candidate.kind === 'hook' ||
+      candidate.kind === 'mcp_server' ||
+      candidate.kind === 'command'
+    )
+      entries.push({
+        key: candidate.id,
+        kind: candidate.kind,
+        name: candidate.name,
+        description: candidate.description,
+        partOf: null,
+      });
+  }
+  for (const composite of discover.composites) {
+    const mine =
+      composite.provider === provider || composite.provider === 'shared';
+    if (!mine) continue;
+    entries.push({
+      key: composite.key,
+      kind: 'plugin',
+      name: composite.name,
+      description: composite.description,
+      partOf: null,
+    });
+    if (composite.kind === 'gsd_core' && provider === 'claude_code')
+      for (const agent of composite.agents)
+        entries.push({
+          key: `${composite.key}/agent/${agent}`,
+          kind: 'agent',
+          name: agent,
+          description: '',
+          partOf: 'GSD Core',
+        });
+  }
+  const needle = query.trim().toLowerCase();
+  return entries.filter(
+    (entry) =>
+      (kind === 'all' || entry.kind === kind) &&
+      (needle === '' ||
+        `${entry.name} ${entry.description}`.toLowerCase().includes(needle)),
   );
 }
 

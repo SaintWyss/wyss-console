@@ -539,8 +539,26 @@ fn folders(env: &Environment) -> Vec<Folder> {
             "codex",
             "codex_user_rules",
             "user",
-            codex,
+            codex.clone(),
             Shape::Named("AGENTS.md"),
+        ),
+        // Custom slash commands: one Markdown file each. Listed so the owner sees them; choosing
+        // them per preset comes with hooks and MCP servers.
+        folder(
+            "command",
+            "claude_code",
+            "claude_user_commands",
+            "user",
+            claude.join("commands"),
+            Shape::Files("md"),
+        ),
+        folder(
+            "command",
+            "codex",
+            "codex_user_prompts",
+            "user",
+            codex.join("prompts"),
+            Shape::Files("md"),
         ),
     ];
     if let Some(project) = &env.project {
@@ -2097,6 +2115,14 @@ mod tests {
         fs::create_dir_all(home.join(".codex")).unwrap();
         fs::write(home.join(".codex/AGENTS.md"), "Be brief.").unwrap();
         fs::write(home.join(".codex/config.toml"), "model = \"x\"").unwrap();
+        fs::create_dir_all(home.join(".claude/commands")).unwrap();
+        fs::write(
+            home.join(".claude/commands/deploy.md"),
+            "---\ndescription: Deploys the app\n---\nSteps",
+        )
+        .unwrap();
+        fs::create_dir_all(home.join(".codex/prompts")).unwrap();
+        fs::write(home.join(".codex/prompts/standup.md"), "# Daily standup\n").unwrap();
         let project = home.join("work/app");
         fs::create_dir_all(project.join(".claude/agents")).unwrap();
         fs::write(
@@ -2116,6 +2142,20 @@ mod tests {
         assert_eq!(reviewer.blocked, None);
         assert_eq!(find(&scan, "rule", "style").source, "claude_user_rules");
         assert_eq!(find(&scan, "rule", "AGENTS").source, "codex_user_rules");
+        let deploy = find(&scan, "command", "deploy");
+        assert_eq!(
+            (
+                deploy.provider,
+                deploy.source.as_str(),
+                deploy.description.as_str()
+            ),
+            ("claude_code", "claude_user_commands", "Deploys the app")
+        );
+        let standup = find(&scan, "command", "standup");
+        assert_eq!(
+            (standup.provider, standup.description.as_str()),
+            ("codex", "Daily standup")
+        );
         let local = find(&scan, "agent", "local");
         assert_eq!(
             (local.scope, local.source.as_str()),

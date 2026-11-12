@@ -2275,8 +2275,24 @@ export const ES: Readonly<Record<string, string>> = {
   Family: 'Familia',
   'No capabilities match.': 'Ninguna capacidad coincide.',
   'Move to group…': 'Mover a grupo…',
-  'Shows everything at once: rules, skills and agents.':
-    'Muestra todo junto: reglas, skills y agentes.',
+  'Shows everything at once, of every type.':
+    'Muestra todo junto, de todos los tipos.',
+  'A hook is a script that runs by itself at a moment of the session, such as before a command or when it starts. It can stop a command or add context, without being asked.':
+    'Un hook es un script que corre solo en un momento de la sesión, como antes de un comando o al arrancar. Puede frenar un comando o sumar contexto sin que se lo pidas.',
+  'An MCP server connects the agent to an outside tool, such as Notion, a browser or library docs, and gives it new actions to use.':
+    'Un servidor MCP conecta al agente con una herramienta de afuera, como Notion, un navegador o la documentación de una librería, y le da acciones nuevas para usar.',
+  'A plugin is a package that brings several pieces together (skills, agents, hooks, MCP servers) and is switched on or off as a whole.':
+    'Un plugin es un paquete que trae varias piezas juntas (skills, agentes, hooks, servidores MCP) y se prende o apaga entero.',
+  'A command is a /name you type to run a saved prompt. Here only your own command files are listed; most /commands are skills.':
+    'Un comando es un /nombre que escribís para correr un prompt guardado. Acá se listan solo tus archivos de comandos; la mayoría de los /comandos son skills.',
+  MCP: 'MCP',
+  Commands: 'Comandos',
+  'Part of {name}': 'Parte de {name}',
+  'No custom commands. Your /commands are skills here.':
+    'No tenés comandos propios. Acá tus /comandos son skills.',
+  'Shown, not selectable yet': 'Para ver, todavía no se eligen',
+  'Hooks, MCP servers, plugins and commands will be chosen per preset in a later step. GSD Core agents go on and off with Keep GSD Core.':
+    'Hooks, servidores MCP, plugins y comandos se van a elegir por preset en un paso siguiente. Los agentes de GSD Core se prenden y apagan con Mantener GSD Core.',
   'A rule is a file of permanent instructions, such as invariantes.md. The agent reads it when every session starts and follows it the whole time. It does not run anything.':
     'Una regla es un archivo de instrucciones permanentes, como invariantes.md. El agente lo lee al arrancar cada sesión y lo cumple todo el tiempo. No ejecuta nada.',
   'A skill is a how-to manual for one kind of task, such as designing a screen or finding a bug. The agent opens it only when the task you give it needs it.':
