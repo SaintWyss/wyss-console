@@ -6,15 +6,13 @@
     CandidateScope,
     CandidateStatus,
     Compatibility,
-    Composite,
     CompositeKind,
     Dependency,
-    Item,
-    Preset,
-    Selection,
     Summary,
   } from '../../contracts/arsenal';
+  import { PROVIDERS } from '../../contracts/arsenal';
   import { blockedText } from './messages';
+  import PresetsTab from './PresetsTab.svelte';
   import SyncLine from './SyncLine.svelte';
   import {
     candidateMark,
@@ -44,17 +42,19 @@
   } = $props();
 
   const TABS: { id: ArsenalTab; label: string }[] = [
+    { id: 'presets', label: 'Presets' },
     { id: 'library', label: 'Library' },
     { id: 'discover', label: 'Discover' },
     { id: 'composites', label: 'Composites' },
-    { id: 'presets', label: 'Presets' },
-    { id: 'selections', label: 'Selections' },
     { id: 'terminals', label: 'Terminals' },
   ];
+  const PROVIDER_OPTIONS = PROVIDERS;
   const PROVIDER_LABEL: Record<ArsenalProvider, string> = {
     claude_code: 'Claude Code',
     codex: 'Codex',
   };
+  /** The provider every tab works on. Chosen above the tabs; the presets draft is kept per provider. */
+  let provider = $state<ArsenalProvider>('claude_code');
   const KIND_LABEL: Record<CandidateKind, string> = {
     skill: 'Skill',
     agent: 'Agent',
@@ -136,13 +136,6 @@
     absent: 'not present',
     unreadable: 'could not be read',
   };
-  const CONFLICT_LABEL: Record<string, string> = {
-    name_collision: 'Same name',
-    duplicate_content: 'Same content',
-    instruction_overlap: 'Two rules for one provider',
-    methodology_conflict: 'Two methodologies',
-    scope_shadow: 'Installed in account and project',
-  };
 
   // Library filters
   let libraryQuery = $state('');
@@ -155,24 +148,6 @@
   let discoverKind = $state<KindFilter>('all');
   let discoverScope = $state<ScopeFilter>('all');
   let discoverStatus = $state<CandidateStatus | 'all'>('all');
-  // Drafts
-  let presetDraft = $state({
-    id: null as string | null,
-    name: '',
-    description: '',
-    items: [] as Item[],
-  });
-  let presetError = $state<string | null>(null);
-  let selectionDraft = $state({
-    id: null as string | null,
-    name: '',
-    provider: 'claude_code' as ArsenalProvider,
-    items: [] as Item[],
-    composites: [] as string[],
-  });
-  let selectionError = $state<string | null>(null);
-  let confirmDelete = $state<string | null>(null);
-
   const visibleLibrary = $derived(
     filterLibrary(arsenal.library, {
       query: libraryQuery,
@@ -217,183 +192,19 @@
         ?.name ?? id
     );
   }
-  function inItems(items: Item[], id: string): boolean {
-    return items.some((item) => item.capability === id);
-  }
-  function toggle(items: Item[], id: string): Item[] {
-    return inItems(items, id)
-      ? items.filter((item) => item.capability !== id)
-      : [...items, { capability: id, revision: null }];
-  }
   /** Pins an item to a revision, or lets it follow the current one. */
-  function pin(items: Item[], id: string, value: string): Item[] {
-    return items.map((item) =>
-      item.capability === id
-        ? { ...item, revision: value === 'current' ? null : Number(value) }
-        : item,
-    );
-  }
-  function revisionsOf(id: string): number[] {
-    const count =
-      arsenal.library.find((item) => item.id === id)?.revisions ?? 0;
-    return Array.from({ length: count }, (_, index) => count - index);
-  }
-  function compositeFor(provider: ArsenalProvider): Composite[] {
-    return (arsenal.discover?.composites ?? []).filter(
-      (composite) =>
-        composite.kind === 'gsd_core' &&
-        (composite.provider === provider || composite.provider === 'shared'),
-    );
-  }
-  function toggleComposite(key: string) {
-    selectionDraft.composites = selectionDraft.composites.includes(key)
-      ? selectionDraft.composites.filter((entry) => entry !== key)
-      : [...selectionDraft.composites, key];
-  }
-  function applyPreset(id: string) {
-    const preset = arsenal.presets.find((entry) => entry.id === id);
-    if (!preset) return;
-    const known = new Set(selectionDraft.items.map((item) => item.capability));
-    selectionDraft.items = [
-      ...selectionDraft.items,
-      ...preset.items
-        .filter((item) => !known.has(item.capability))
-        .map((item) => ({ ...item })),
-    ];
-  }
-  function copySelection(selection: Selection) {
-    selectionDraft = {
-      id: null,
-      name: `Copy of ${selection.name}`,
-      provider: selection.provider,
-      items: selection.items.map((item) => ({ ...item })),
-      composites: [...selection.composites],
-    };
-    selectionError = null;
-  }
-  function when(seconds: number): string {
-    return new Date(seconds * 1000).toLocaleString(undefined, {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    });
-  }
-  function nameOf(id: string): string {
-    return (
-      arsenal.library.find((item) => item.id === id)?.name ??
-      'Missing capability'
-    );
-  }
   function kindOf(item: Summary): string {
     return KIND_LABEL[item.kind as CandidateKind] ?? item.kind;
-  }
-  function newPreset() {
-    presetDraft = { id: null, name: '', description: '', items: [] };
-    presetError = null;
-  }
-  function editPreset(preset: Preset) {
-    presetDraft = {
-      id: preset.id,
-      name: preset.name,
-      description: preset.description,
-      items: preset.items.map((item) => ({ ...item })),
-    };
-    presetError = null;
-  }
-  function copyPreset(preset: Preset) {
-    presetDraft = {
-      id: null,
-      name: `Copy of ${preset.name}`,
-      description: preset.description,
-      items: preset.items.map((item) => ({ ...item })),
-    };
-    presetError = null;
-  }
-  async function savePreset() {
-    if (presetDraft.name.trim() === '') {
-      presetError = 'Name the preset before saving.';
-      return;
-    }
-    presetError = null;
-    const saved = await controller.savePreset({
-      id: presetDraft.id,
-      name: presetDraft.name,
-      description: presetDraft.description,
-      items: presetDraft.items,
-    });
-    if (saved) newPreset();
   }
   /**
    * Starts a preset or a selection with one capability, named after it, in its own tab. A draft
    * already in the editor is never discarded: the capability is added to it instead.
    */
-  function presetFrom(summary: Summary) {
-    const item = { capability: summary.id, revision: null };
-    const blank =
-      presetDraft.id === null &&
-      presetDraft.name.trim() === '' &&
-      presetDraft.items.length === 0;
-    if (blank) {
-      presetDraft = {
-        id: null,
-        name: summary.name,
-        description: '',
-        items: [item],
-      };
-    } else if (!inItems(presetDraft.items, summary.id)) {
-      presetDraft.items = [...presetDraft.items, item];
-    }
-    presetError = null;
-    controller.setTab('presets');
-  }
-  function selectionFrom(summary: Summary) {
-    const item = { capability: summary.id, revision: null };
-    const blank =
-      selectionDraft.id === null &&
-      selectionDraft.name.trim() === '' &&
-      selectionDraft.items.length === 0 &&
-      selectionDraft.composites.length === 0;
-    selectionError = null;
-    if (blank) {
-      selectionDraft = {
-        id: null,
-        name: summary.name,
-        provider: summary.provider,
-        items: [item],
-        composites: [],
-      };
-    } else if (selectionDraft.provider !== summary.provider) {
-      selectionError = `The selection being edited is for ${PROVIDER_LABEL[selectionDraft.provider]}. Save or clear it before starting one for ${PROVIDER_LABEL[summary.provider]}.`;
-    } else if (!inItems(selectionDraft.items, summary.id)) {
-      selectionDraft.items = [...selectionDraft.items, item];
-    }
-    controller.setTab('selections');
-  }
-  function editSelection(selection: Selection) {
-    selectionDraft = {
-      id: selection.id,
-      name: selection.name,
-      provider: selection.provider,
-      items: selection.items.map((item) => ({ ...item })),
-      composites: [...selection.composites],
-    };
-    selectionError = null;
-  }
-  async function saveSelection() {
-    if (selectionDraft.name.trim() === '') {
-      selectionError = 'Name the selection before saving.';
-      return;
-    }
-    selectionError = null;
-    const saved = await controller.saveSelection({ ...selectionDraft });
-    if (saved) {
-      selectionDraft = {
-        id: null,
-        name: '',
-        provider: selectionDraft.provider,
-        items: [],
-        composites: [],
-      };
-    }
+  function when(seconds: number): string {
+    return new Date(seconds * 1000).toLocaleString(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
   }
   function revisionOf(detail: { summary: Summary }): string {
     return `${detail.summary.revision} of ${detail.summary.revisions}`;
@@ -450,6 +261,18 @@
     <SyncLine sync={arsenal.sync} onsyncnow={() => controller.syncNow()} />
   {/if}
 
+  <div class="arsenal-provider" role="radiogroup" aria-label="Provider">
+    {#each PROVIDER_OPTIONS as option (option)}
+      <button
+        class="action arsenal-provider-option"
+        type="button"
+        role="radio"
+        aria-checked={provider === option}
+        tabindex={provider === option ? 0 : -1}
+        onclick={() => (provider = option)}>{PROVIDER_LABEL[option]}</button
+      >
+    {/each}
+  </div>
   <div class="arsenal-tabs" role="tablist" aria-label="Arsenal sections">
     {#each TABS as tab, index (tab.id)}
       <button
@@ -617,20 +440,7 @@
                 applied.
               </dd>
             </dl>
-            <div class="arsenal-actions">
-              <button
-                class="action"
-                type="button"
-                onclick={() => presetFrom(opened.summary)}
-                >Start a preset with this</button
-              >
-              <button
-                class="action"
-                type="button"
-                onclick={() => selectionFrom(opened.summary)}
-                >Start a selection with this</button
-              >
-            </div>
+            <h4>Dependencies</h4>
             <h4>Dependencies</h4>
             {#if opened.dependencies.length === 0}
               <p class="arsenal-muted">
@@ -1176,437 +986,7 @@
         aria-labelledby="arsenal-tab-presets"
         class="arsenal-panel"
       >
-        <div class="arsenal-split">
-          <div>
-            <button class="action" type="button" onclick={newPreset}
-              >New preset</button
-            >
-            {#if arsenal.presets.length === 0}
-              <p class="arsenal-empty">
-                No presets yet. Create one from a capability.
-              </p>
-            {/if}
-            <ul class="arsenal-list" aria-label="Presets">
-              {#each arsenal.presets as preset (preset.id)}
-                <li class="arsenal-row-item">
-                  <button
-                    class="arsenal-row"
-                    type="button"
-                    aria-pressed={presetDraft.id === preset.id}
-                    onclick={() => editPreset(preset)}
-                  >
-                    <span class="arsenal-row-name">{preset.name}</span>
-                    <span class="arsenal-badges"
-                      ><span class="pill"
-                        >{preset.items.length} capabilities</span
-                      ></span
-                    >
-                  </button>
-                  <button
-                    class="action"
-                    type="button"
-                    onclick={() => copyPreset(preset)}
-                    >Duplicate {preset.name}</button
-                  >
-                  {#if confirmDelete === preset.id}
-                    <button
-                      class="action"
-                      type="button"
-                      onclick={() => {
-                        confirmDelete = null;
-                        controller.deletePreset(preset.id);
-                      }}>Confirm delete {preset.name}</button
-                    >
-                  {:else}
-                    <button
-                      class="action"
-                      type="button"
-                      onclick={() => (confirmDelete = preset.id)}
-                      >Delete {preset.name}</button
-                    >
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          </div>
-
-          <form
-            class="arsenal-editor"
-            aria-label="Preset editor"
-            onsubmit={(event) => {
-              event.preventDefault();
-              void savePreset();
-            }}
-          >
-            <h3>{presetDraft.id ? 'Edit preset' : 'New preset'}</h3>
-            <label
-              >Name <input
-                type="text"
-                maxlength="80"
-                bind:value={presetDraft.name}
-                aria-invalid={presetError !== null}
-                aria-describedby={presetError ? 'preset-error' : undefined}
-              /></label
-            >
-            <label
-              >Description <textarea
-                rows="2"
-                maxlength="500"
-                bind:value={presetDraft.description}></textarea></label
-            >
-            <fieldset>
-              <legend>Capabilities</legend>
-              {#if arsenal.library.length === 0}
-                <p class="arsenal-muted">
-                  Import a capability first; presets are built from the library.
-                </p>
-              {/if}
-              {#each arsenal.library as item (item.id)}
-                <label class="arsenal-check">
-                  <input
-                    type="checkbox"
-                    checked={inItems(presetDraft.items, item.id)}
-                    onchange={() =>
-                      (presetDraft.items = toggle(presetDraft.items, item.id))}
-                  />
-                  {item.name}
-                  <span class="arsenal-muted"
-                    >{kindOf(item)} · {PROVIDER_LABEL[item.provider]} · revision {item.revision}
-                    · {COMPATIBILITY_LABEL[libraryCompatibility(item)]}</span
-                  >
-                </label>
-              {/each}
-            </fieldset>
-            {#if presetDraft.items.length > 0}
-              <ul class="arsenal-files" aria-label="Inspect preset">
-                {#each presetDraft.items as item (item.capability)}
-                  <li>
-                    <span>{nameOf(item.capability)}</span>
-                    <label class="arsenal-pin"
-                      >Revision
-                      <select
-                        value={item.revision === null
-                          ? 'current'
-                          : String(item.revision)}
-                        onchange={(event) =>
-                          (presetDraft.items = pin(
-                            presetDraft.items,
-                            item.capability,
-                            event.currentTarget.value,
-                          ))}
-                      >
-                        <option value="current">Follow current</option>
-                        {#each revisionsOf(item.capability) as number (number)}
-                          <option value={String(number)}>Pin {number}</option>
-                        {/each}
-                      </select>
-                    </label>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            {#if presetError}<p
-                id="preset-error"
-                role="alert"
-                class="arsenal-warn"
-              >
-                {presetError}
-              </p>{/if}
-            <button class="action" type="submit" disabled={busy}
-              >{arsenal.busy === 'save' ? 'Saving…' : 'Save preset'}</button
-            >
-          </form>
-        </div>
-      </div>
-    {/if}
-
-    {#if arsenal.tab === 'selections'}
-      <div
-        id="arsenal-panel-selections"
-        role="tabpanel"
-        aria-labelledby="arsenal-tab-selections"
-        class="arsenal-panel"
-      >
-        <div class="arsenal-split">
-          <div>
-            <button
-              class="action"
-              type="button"
-              onclick={() => {
-                selectionDraft = {
-                  id: null,
-                  name: '',
-                  provider: 'claude_code',
-                  items: [],
-                  composites: [],
-                };
-                controller.clearNotice();
-              }}>New selection</button
-            >
-            {#if arsenal.selections.length === 0}
-              <p class="arsenal-empty">
-                No selections yet. A selection is a saved list for one provider.
-              </p>
-            {/if}
-            <ul class="arsenal-list" aria-label="Selections">
-              {#each arsenal.selections as selection (selection.id)}
-                <li class="arsenal-row-item">
-                  <button
-                    class="arsenal-row"
-                    type="button"
-                    onclick={() => editSelection(selection)}
-                  >
-                    <span class="arsenal-row-name">{selection.name}</span>
-                    <span class="arsenal-badges"
-                      ><span class="pill"
-                        >{PROVIDER_LABEL[selection.provider]}</span
-                      ><span class="pill"
-                        >{selection.items.length} capabilities</span
-                      ></span
-                    >
-                  </button>
-                  <button
-                    class="action"
-                    type="button"
-                    onclick={() => controller.loadPreview(selection.id)}
-                    >Preview {selection.name}</button
-                  >
-                  <button
-                    class="action"
-                    type="button"
-                    onclick={() => copySelection(selection)}
-                    >Duplicate {selection.name}</button
-                  >
-                  {#if confirmDelete === selection.id}
-                    <button
-                      class="action"
-                      type="button"
-                      onclick={() => {
-                        confirmDelete = null;
-                        controller.deleteSelection(selection.id);
-                      }}>Confirm delete {selection.name}</button
-                    >
-                  {:else}
-                    <button
-                      class="action"
-                      type="button"
-                      onclick={() => (confirmDelete = selection.id)}
-                      >Delete {selection.name}</button
-                    >
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          </div>
-
-          <form
-            class="arsenal-editor"
-            aria-label="Selection editor"
-            onsubmit={(event) => {
-              event.preventDefault();
-              void saveSelection();
-            }}
-          >
-            <h3>{selectionDraft.id ? 'Edit selection' : 'New selection'}</h3>
-            <label
-              >Name <input
-                type="text"
-                maxlength="80"
-                bind:value={selectionDraft.name}
-                aria-invalid={selectionError !== null}
-                aria-describedby={selectionError
-                  ? 'selection-error'
-                  : undefined}
-              /></label
-            >
-            <label
-              >Provider
-              <select bind:value={selectionDraft.provider}>
-                <option value="claude_code">Claude Code</option>
-                <option value="codex">Codex</option>
-              </select>
-            </label>
-            <fieldset>
-              <legend>Capabilities</legend>
-              {#each arsenal.library as item (item.id)}
-                <label class="arsenal-check">
-                  <input
-                    type="checkbox"
-                    checked={inItems(selectionDraft.items, item.id)}
-                    onchange={() =>
-                      (selectionDraft.items = toggle(
-                        selectionDraft.items,
-                        item.id,
-                      ))}
-                  />
-                  {item.name}
-                  <span class="arsenal-muted"
-                    >{kindOf(item)} · {PROVIDER_LABEL[
-                      item.provider
-                    ]}{item.provider !== selectionDraft.provider
-                      ? ' · different provider'
-                      : ''}</span
-                  >
-                </label>
-              {/each}
-            </fieldset>
-            {#if arsenal.presets.length > 0}
-              <div
-                class="arsenal-actions"
-                role="group"
-                aria-label="Add a preset's capabilities"
-              >
-                <span class="arsenal-muted">Add a preset's capabilities</span>
-                {#each arsenal.presets as preset (preset.id)}
-                  <button
-                    class="action"
-                    type="button"
-                    onclick={() => applyPreset(preset.id)}
-                    >Add {preset.name}</button
-                  >
-                {/each}
-              </div>
-            {/if}
-            {#if selectionDraft.items.length > 0}
-              <ul
-                class="arsenal-files"
-                aria-label="Revisions in this selection"
-              >
-                {#each selectionDraft.items as item (item.capability)}
-                  <li>
-                    <span>{nameOf(item.capability)}</span>
-                    <label class="arsenal-pin"
-                      >Revision
-                      <select
-                        value={item.revision === null
-                          ? 'current'
-                          : String(item.revision)}
-                        onchange={(event) =>
-                          (selectionDraft.items = pin(
-                            selectionDraft.items,
-                            item.capability,
-                            event.currentTarget.value,
-                          ))}
-                      >
-                        <option value="current">Follow current</option>
-                        {#each revisionsOf(item.capability) as number (number)}
-                          <option value={String(number)}>Pin {number}</option>
-                        {/each}
-                      </select>
-                    </label>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            <fieldset>
-              <legend>Keep installed composites</legend>
-              {#if arsenal.discover === null}
-                <p class="arsenal-muted">
-                  {arsenal.discovering
-                    ? 'Reading installed composites…'
-                    : 'Installed composites are read from Discover.'}
-                </p>
-              {:else if compositeFor(selectionDraft.provider).length === 0}
-                <p class="arsenal-muted">
-                  No composite installed for this provider. Plugins are not
-                  listed here: their skills are switched as a whole, outside
-                  Arsenal.
-                </p>
-              {/if}
-              {#each compositeFor(selectionDraft.provider) as composite (composite.key)}
-                <label class="arsenal-check">
-                  <input
-                    type="checkbox"
-                    checked={selectionDraft.composites.includes(composite.key)}
-                    onchange={() => toggleComposite(composite.key)}
-                  />
-                  {composite.name}
-                  <span class="arsenal-muted"
-                    >{composite.skills.length} skills stay exposed{composite.methodology
-                      ? ' · methodology'
-                      : ''}</span
-                  >
-                </label>
-              {/each}
-            </fieldset>
-            {#if selectionError}<p
-                id="selection-error"
-                role="alert"
-                class="arsenal-warn"
-              >
-                {selectionError}
-              </p>{/if}
-            <button class="action" type="submit" disabled={busy}
-              >{arsenal.busy === 'save' ? 'Saving…' : 'Save selection'}</button
-            >
-          </form>
-        </div>
-
-        {#if arsenal.preview}
-          {@const preview = arsenal.preview}
-          <section class="arsenal-detail" aria-label="Configuration preview">
-            <h3>Configuration preview: {preview.selection.name}</h3>
-            <p class="arsenal-status">
-              <span class="badge" data-tone="warn"
-                ><span aria-hidden="true">!</span> NOT APPLIED</span
-              > Saved for later. No provider session uses it.
-            </p>
-            <ul class="arsenal-files">
-              {#each preview.items as item (item.capability)}
-                <li>
-                  <span>{item.name || 'Missing capability'}</span>
-                  {#if item.state === 'resolved'}
-                    <span class="arsenal-muted"
-                      >{KIND_LABEL[item.kind as CandidateKind] ?? item.kind} · revision
-                      {item.revision}{item.pinned
-                        ? ' (pinned)'
-                        : ' (current)'}</span
-                    >
-                    {@const itemMark = compatibilityMark(item.compatibility)}
-                    <span class="badge" data-tone={itemMark.tone}
-                      ><span aria-hidden="true">{itemMark.symbol}</span>
-                      {COMPATIBILITY_LABEL[item.compatibility]}</span
-                    >
-                    <span class="arsenal-muted">{item.reason}</span>
-                    {#each item.dependencies.filter((dep) => dep.state === 'missing') as dep (dep.kind + dep.name)}
-                      <span class="arsenal-warn"
-                        >Missing {DEPENDENCY_KIND[dep.kind].toLowerCase()}
-                        {dep.name}</span
-                      >
-                    {/each}
-                  {:else if item.state === 'revision_missing'}
-                    <span class="arsenal-warn">Pinned revision is gone.</span>
-                  {:else}
-                    <span class="arsenal-warn"
-                      >Not in the library any more.</span
-                    >
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-            {#if preview.conflicts.length > 0}
-              <h4>Conflicts</h4>
-              <ul class="arsenal-files">
-                {#each preview.conflicts as conflict, index (index)}
-                  <li>
-                    {CONFLICT_LABEL[conflict.code] ?? conflict.code}: {conflict.capabilities
-                      .map(nameOf)
-                      .join(', ')}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            <p class="arsenal-muted">
-              {preview.dependencies === 'analysed'
-                ? 'Dependencies were read from every file. Tools are declared, not checked; MCP servers are checked per terminal.'
-                : 'Some items were too large to read here; their dependencies are not listed.'}
-            </p>
-            <p class="arsenal-muted">
-              To see what a terminal would actually start with, choose this
-              selection in Workspace when starting Claude Code or Codex.
-            </p>
-          </section>
-        {/if}
+        <PresetsTab {provider} {arsenal} {controller} />
       </div>
     {/if}
   </div>
@@ -1681,8 +1061,7 @@
     grid-template-columns: 1fr;
     margin-block: 4px;
   }
-  .arsenal-filters label,
-  .arsenal-editor label {
+  .arsenal-filters label {
     display: grid;
     gap: 4px;
     font-size: var(--text-sm);
@@ -1691,10 +1070,7 @@
   }
   /* Fields fill their column; a checkbox or radio keeps its own size. */
   .arsenal-filters input:not([type='checkbox'], [type='radio']),
-  .arsenal-filters select,
-  .arsenal-editor input:not([type='checkbox'], [type='radio']),
-  .arsenal-editor select,
-  .arsenal-editor textarea {
+  .arsenal-filters select {
     width: 100%;
     min-width: 0;
     color: var(--text);
@@ -1804,8 +1180,7 @@
     gap: 10px;
     align-content: start;
   }
-  .arsenal-detail h3,
-  .arsenal-editor h3 {
+  .arsenal-detail h3 {
     margin: 0;
     font-size: var(--text-lg);
     font-weight: 600;
@@ -1879,9 +1254,6 @@
     color: var(--text) !important;
     font-weight: 500 !important;
     text-align: left;
-  }
-  .arsenal-check input {
-    flex: 0 0 auto;
   }
   .arsenal-status {
     font-size: var(--text-md);

@@ -25,12 +25,7 @@ import { planKey } from './presets';
 const GROUP_NOT_SAVED = msg('Could not be saved. Nothing changed.');
 
 export type ArsenalTab =
-  | 'library'
-  | 'discover'
-  | 'composites'
-  | 'presets'
-  | 'selections'
-  | 'terminals';
+  'library' | 'discover' | 'composites' | 'presets' | 'terminals';
 
 export interface Notice {
   tone: 'ok' | 'error';
@@ -205,12 +200,6 @@ export class ArsenalController {
   setTab(tab: ArsenalTab) {
     this.set({ tab, notice: null });
     if (tab === 'presets') void this.loadPresets();
-    if (tab === 'selections') {
-      void this.loadSelections();
-      void this.loadPresets();
-      // The composites a selection may keep come from the scan.
-      if (this.state.discover === null) void this.discover();
-    }
     if (tab === 'terminals') void this.loadBindings();
     if (
       (tab === 'discover' || tab === 'composites') &&

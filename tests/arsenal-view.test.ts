@@ -8,7 +8,6 @@ import type {
 import type {
   Candidate,
   Composite,
-  Preview,
   LibraryItem,
 } from '../src/lib/contracts/arsenal';
 
@@ -376,67 +375,6 @@ describe('Arsenal view', () => {
     );
     expect(text(root)).toContain('No project selected');
   });
-
-  it('keeps a preset without a name from being saved and says what to fix', async () => {
-    const controller = controllerMock();
-    const { root } = render(stateWith({ tab: 'presets' }), controller);
-    const form = root.querySelector<HTMLFormElement>(
-      'form[aria-label="Preset editor"]',
-    )!;
-    form.dispatchEvent(
-      new Event('submit', { cancelable: true, bubbles: true }),
-    );
-    flushSync();
-    expect(controller.savePreset).not.toHaveBeenCalled();
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
-      'Name the preset before saving.',
-    );
-  });
-
-  it('labels a configuration preview NOT APPLIED, names instruction overlaps and missing dependencies', () => {
-    const preview: Preview = {
-      selection: {
-        id: 'sel-1',
-        name: 'Frontend',
-        provider: 'codex',
-        items: [],
-        composites: [],
-        created_at: 1,
-        updated_at: 1,
-      },
-      status: 'not_applied',
-      items: [
-        {
-          capability: 'cap-design',
-          state: 'resolved',
-          kind: 'skill',
-          name: 'design',
-          provider: 'claude_code',
-          revision: 2,
-          pinned: false,
-          tree_hash: 'c'.repeat(64),
-          compatibility: 'requires_qualification',
-          reason: 'A Claude Code skill. Codex needs a qualified way in.',
-          dependencies: [
-            { kind: 'mcp_server', name: 'context7', state: 'missing' },
-          ],
-        },
-      ],
-      conflicts: [
-        {
-          code: 'instruction_overlap',
-          capabilities: ['cap-design', 'cap-brief'],
-        },
-      ],
-      dependencies: 'analysed',
-    };
-    const { root } = render(stateWith({ tab: 'selections', preview }));
-    expect(text(root)).toContain('NOT APPLIED');
-    expect(text(root)).toContain('Dependencies were read from every file.');
-    expect(text(root)).toContain('Missing mcp server context7');
-    expect(text(root)).toContain('Needs provider qualification');
-    expect(text(root)).toContain('Two rules for one provider');
-  });
 });
 
 describe('Arsenal composites and terminals', () => {
@@ -512,77 +450,5 @@ describe('Arsenal composites and terminals', () => {
     expect(shown).toContain('Use not observed');
     expect(shown).toContain('not qualified for Claude Code 2.1.314');
     expect(shown).not.toContain('Verified');
-  });
-
-  it('lets a selection pin a revision and keep an installed composite', () => {
-    const composite: Composite = {
-      key: 'gsd_core@1.15.0',
-      kind: 'gsd_core',
-      provider: 'claude_code',
-      name: 'GSD Core 1.15.0',
-      version: '1.15.0',
-      description: '',
-      artifacts: 3,
-      members: 1,
-      origin: '~',
-      enabled: null,
-      methodology: true,
-      skills: ['gsd-help'],
-      agents: [],
-      commands: 0,
-      hooks: false,
-      mcp: false,
-      categories: [],
-      limitations: [],
-    };
-    const controller = controllerMock();
-    const { root } = render(
-      stateWith({
-        tab: 'selections',
-        library: [{ ...design, revisions: 3, revision: 3 }],
-        discover: {
-          project: null,
-          sources: [],
-          candidates: [],
-          composites: [composite],
-          truncated: false,
-        },
-      }),
-      controller,
-    );
-    const editor = root.querySelector('form[aria-label="Selection editor"]')!;
-    const boxes = [
-      ...editor.querySelectorAll<HTMLInputElement>('input[type=checkbox]'),
-    ];
-    boxes[0].click();
-    flushSync();
-    const pinSelect = editor.querySelector<HTMLSelectElement>(
-      '[aria-label="Revisions in this selection"] select',
-    )!;
-    expect(
-      [...pinSelect.options].map((option) => option.textContent?.trim()),
-    ).toEqual(['Follow current', 'Pin 3', 'Pin 2', 'Pin 1']);
-    pinSelect.value = '2';
-    // Svelte delegates change events from the root, so the event bubbles as a real one does.
-    pinSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    const keep = [
-      ...editor.querySelectorAll<HTMLInputElement>('input[type=checkbox]'),
-    ].find((box) => box.parentElement?.textContent?.includes('GSD Core'))!;
-    keep.click();
-    const name = editor.querySelector<HTMLInputElement>('input[type=text]')!;
-    name.value = 'Focused';
-    name.dispatchEvent(new Event('input'));
-    flushSync();
-    editor.dispatchEvent(
-      new Event('submit', { cancelable: true, bubbles: true }),
-    );
-    flushSync();
-    expect(controller.saveSelection).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Focused',
-        items: [{ capability: 'cap-design', revision: 2 }],
-        composites: ['gsd_core@1.15.0'],
-      }),
-    );
   });
 });

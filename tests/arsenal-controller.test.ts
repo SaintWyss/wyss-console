@@ -463,7 +463,7 @@ describe('Arsenal controller', () => {
   it('saves presets and selections and reloads them; a selection is never reported as applied', async () => {
     const client = fakeClient();
     const { controller, last } = controllerWith(client);
-    controller.setTab('selections');
+    await controller.loadSelections();
     await settle();
     expect(last().selections).toEqual([selection]);
     const saved = await controller.saveSelection({
