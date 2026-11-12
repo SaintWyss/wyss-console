@@ -544,4 +544,203 @@ export const ES: Readonly<Record<string, string>> = {
     'La autoridad informa que ahora no se puede iniciar un turno.',
   'The input is longer than one turn can carry.':
     'La entrada es más larga de lo que puede tener un turno.',
+
+  // Sessions: the managed session view and the presenter that words it
+  'Managed sessions': 'Sesiones Managed',
+  'Connecting to the authority': 'Conectando con la autoridad',
+  'Authority unavailable': 'Autoridad no disponible',
+  'New session': 'Nueva sesión',
+  'Activate {name}': 'Activar {name}',
+  'Activate session': 'Activar sesión',
+  'New managed session': 'Nueva sesión Managed',
+  Project: 'Proyecto',
+  'No folder selected': 'Ninguna carpeta elegida',
+  Mode: 'Modo',
+  'The authority decides whether the folder can be a workspace, starts Codex if it is not running, and binds the session to it. A session keeps the mode it is created in.':
+    'La autoridad decide si la carpeta puede ser un workspace, arranca Codex si no está corriendo y asocia la sesión a él. Una sesión conserva el modo con el que se creó.',
+  'Local Tools gives Codex more to work with, not more authority: every command and file change waits for your approval. The authority runs one Codex runtime, in one mode and for one folder at a time.':
+    'Local Tools le da a Codex más con qué trabajar, no más autoridad: cada comando y cambio de archivo espera tu aprobación. La autoridad corre un solo runtime de Codex, en un modo y para una carpeta a la vez.',
+  'Change folder': 'Cambiar carpeta',
+  'Choose folder': 'Elegir carpeta',
+  'Restart Codex & activate': 'Reiniciar Codex y activar',
+  Activate: 'Activar',
+  'Create & activate': 'Crear y activar',
+  'The authority is unavailable': 'La autoridad no está disponible',
+  'Sessions are read from the authority and cannot be created, activated, resumed or closed until it is connected. The Console keeps working.':
+    'Las sesiones se leen de la autoridad y no se pueden crear, activar, reanudar ni cerrar hasta que esté conectada. La consola sigue funcionando.',
+  'Reading sessions…': 'Leyendo sesiones…',
+  'No managed sessions yet.': 'Todavía no hay sesiones Managed.',
+  'Create a session to let Wyss supervise Codex in one of your projects.':
+    'Creá una sesión para que Wyss supervise Codex en uno de tus proyectos.',
+  Updated: 'Actualizada',
+  'Only the first 2,000 sessions can be listed.':
+    'Solo se pueden listar las primeras 2.000 sesiones.',
+  'Newest sessions': 'Sesiones más nuevas',
+  'Older sessions · page {page}': 'Sesiones más viejas · página {page}',
+  Newer: 'Más nuevas',
+  Older: 'Más viejas',
+  'Session details': 'Detalles de la sesión',
+  'Hide details': 'Ocultar detalles',
+  'Confirm close': 'Confirmar cierre',
+  'Close this session? It cannot be reopened, and its execution lease is revoked.':
+    '¿Cerrar esta sesión? No se puede reabrir, y su concesión de ejecución queda revocada.',
+  'Close session': 'Cerrar sesión',
+  'Keep open': 'Mantenerla abierta',
+  'Confirm discard': 'Confirmar descarte',
+  'Discard the uncertain attempt? The authority records that it was abandoned and stops holding the session for it. If Codex did create a thread for that attempt, the empty thread is left behind. The session can then be activated again.':
+    '¿Descartar el intento incierto? La autoridad registra que se abandonó y deja de retener la sesión por él. Si Codex sí creó un hilo para ese intento, el hilo vacío queda. Después la sesión se puede volver a activar.',
+  'Discard attempt': 'Descartar intento',
+  'Keep it': 'Conservarlo',
+  'Confirm mode': 'Confirmar modo',
+  'Enable Local Tools for {name}?': '¿Habilitar Local Tools para {name}?',
+  'Use Inference for {name}?': '¿Usar Inference para {name}?',
+  'Enable Local Tools': 'Habilitar Local Tools',
+  'Use Inference': 'Usar Inference',
+  'Activation outcome uncertain': 'Resultado de la activación incierto',
+  'The authority asked Codex to bind a workspace and could not confirm what Codex did. Nothing asks again by itself: a second request could create a second thread.':
+    'La autoridad le pidió a Codex asociar un workspace y no pudo confirmar qué hizo. Nada vuelve a pedirlo por sí solo: una segunda solicitud podría crear un segundo hilo.',
+  'Open agent': 'Abrir agente',
+  Resume: 'Reanudar',
+  Close: 'Cerrar',
+  'This session runs in Inference: Codex is offered no tool. Local Tools needs a session of its own, because a conversation stays in the mode it was created in.':
+    'Esta sesión corre en Inference: a Codex no se le ofrece ninguna herramienta. Local Tools necesita una sesión propia, porque una conversación se queda en el modo en que se creó.',
+  'New Local Tools session': 'Nueva sesión de Local Tools',
+  'This session runs in Local Tools. Every command and file change Codex proposes waits for your approval.':
+    'Esta sesión corre en Local Tools. Cada comando y cambio de archivo que propone Codex espera tu aprobación.',
+  'Activate binds a project folder and attaches the session to Codex.':
+    'Activar asocia una carpeta de proyecto y conecta la sesión a Codex.',
+  Session: 'Sesión',
+  Revision: 'Revisión',
+  Created: 'Creada',
+  None: 'Ninguna',
+  "The authority reports a session's mode while it is attached.":
+    'La autoridad informa el modo de la sesión mientras está conectada.',
+  '{prepared} prepared · {closed} closed':
+    '{prepared} preparadas · {closed} cerradas',
+  Prepared: 'Preparada',
+  'No workspace': 'Sin workspace',
+  'No workspace is bound to this session.':
+    'Esta sesión no tiene un workspace asociado.',
+  Binding: 'Asociando',
+  'The authority is binding a workspace to this session.':
+    'La autoridad está asociando un workspace a esta sesión.',
+  Uncertain: 'Incierto',
+  'The authority could not confirm whether the workspace binding was created.':
+    'La autoridad no pudo confirmar si se creó la asociación de workspace.',
+  Detached: 'Desconectada',
+  'Bound to a workspace and not attached to the running agent.':
+    'Asociada a un workspace y no conectada al agente en ejecución.',
+  'Bound to a workspace and attached to the running agent.':
+    'Asociada a un workspace y conectada al agente en ejecución.',
+  'Text only. Codex is offered no tool.':
+    'Solo texto. No se le ofrece ninguna herramienta a Codex.',
+  'Codex may propose commands and file changes in this folder. Each one waits for your approval.':
+    'Codex puede proponer comandos y cambios de archivos en esta carpeta. Cada uno espera tu aprobación.',
+  'Model in use: not reported by the runtime':
+    'Modelo en uso: el runtime no lo informó',
+  'Model in use: not known while detached':
+    'Modelo en uso: no se conoce mientras está desconectada',
+  ', effort {level}': ', esfuerzo {level}',
+  'Model in use: {model}{effort} (the runtime said it rerouted a turn from {from}, {reason}; whether later turns stay on it is not documented)':
+    'Modelo en uso: {model}{effort} (el runtime dijo que redirigió un turno desde {from}, {reason}; no está documentado si los turnos siguientes siguen en él)',
+  'for a safety reason it named': 'por un motivo de seguridad que nombró',
+  'for a reason this app does not know': 'por un motivo que esta app no conoce',
+  'Model in use: {model}{effort} (reported by the runtime when the session was resumed)':
+    'Modelo en uso: {model}{effort} (informado por el runtime cuando la sesión se reanudó)',
+  'Model in use: {model}{effort} (reported by the runtime when the session was started)':
+    'Modelo en uso: {model}{effort} (informado por el runtime cuando la sesión se inició)',
+  'Not attached': 'Sin conectar',
+  'Codex runs in Local Tools for {folder}':
+    'Codex corre en Local Tools para {folder}',
+  'a workspace': 'un workspace',
+  'Codex runs in Inference': 'Codex corre en Inference',
+  'This restarts the managed Codex runtime in Local Tools for this workspace. Sessions attached now are detached. A session created in Inference cannot be resumed in Local Tools. Every command and file change still waits for your approval.':
+    'Esto reinicia el runtime de Codex administrado en Local Tools para este workspace. Las sesiones conectadas ahora quedan desconectadas. Una sesión creada en Inference no se puede reanudar en Local Tools. Cada comando y cambio de archivo sigue esperando tu aprobación.',
+  'This restarts the managed Codex runtime in Inference. Sessions attached now are detached. A session created in Local Tools cannot be resumed in Inference.':
+    'Esto reinicia el runtime de Codex administrado en Inference. Las sesiones conectadas ahora quedan desconectadas. Una sesión creada en Local Tools no se puede reanudar en Inference.',
+  '{current} now, and the authority runs one Codex runtime. Activating this session restarts it in {to}, and the sessions attached to it are detached.':
+    '{current} ahora, y la autoridad corre un solo runtime de Codex. Activar esta sesión lo reinicia en {to}, y las sesiones conectadas a él quedan desconectadas.',
+  'Local Tools for this folder': 'Local Tools para esta carpeta',
+  '{restart} {kept}': '{restart} {kept}',
+  'A session created in {from} cannot be resumed in {to}.':
+    'Una sesión creada en {from} no se puede reanudar en {to}.',
+  'Resuming session…': 'Reanudando la sesión…',
+  'Closing session…': 'Cerrando la sesión…',
+  'Discarding the uncertain attempt…': 'Descartando el intento incierto…',
+  'Preparing session…': 'Preparando la sesión…',
+  'Stopping the managed runtime…': 'Deteniendo el runtime administrado…',
+  'Starting Codex…': 'Iniciando Codex…',
+  'Creating workspace binding…': 'Creando la asociación de workspace…',
+  'Attaching…': 'Conectando…',
+  'Starting Codex in {mode}…': 'Iniciando Codex en {mode}…',
+  'The session is not ready': 'La sesión no está lista',
+  'The session is not ready in that mode':
+    'La sesión no está lista en ese modo',
+  'The session was not resumed': 'La sesión no se reanudó',
+  'The session was not closed': 'La sesión no se cerró',
+  'The attempt was not discarded': 'El intento no se descartó',
+  'The authority did not answer, so the result is unknown. Retrying repeats the same request safely.':
+    'La autoridad no respondió, así que el resultado es desconocido. Reintentar repite la misma solicitud sin riesgo.',
+  'This session has no workspace binding to resume.':
+    'Esta sesión no tiene una asociación de workspace para reanudar.',
+  'The authority denied it because the agent runtime is not ready.':
+    'La autoridad lo denegó porque el runtime del agente no está listo.',
+  'A turn is running, and the runtime it runs on is not restarted under it. Wait for it or cancel it.':
+    'Hay un turno en curso y el runtime en el que corre no se reinicia por debajo. Esperá a que termine o cancelalo.',
+  'This session is attached in the other mode: its conversation exists only there.':
+    'Esta sesión está conectada en el otro modo: su conversación existe solo ahí.',
+  'The authority did not accept that folder as a workspace. Nothing was bound.':
+    'La autoridad no aceptó esa carpeta como workspace. No se asoció nada.',
+  'The session already has a workspace binding. It has been read again.':
+    'La sesión ya tiene una asociación de workspace. Se volvió a leer.',
+  'The authority denied it: no execution lease allows this for the session.':
+    'La autoridad lo denegó: ninguna concesión de ejecución permite esto para la sesión.',
+  'The agent refused to resume this session.':
+    'El agente rechazó reanudar esta sesión.',
+  'The authority could not confirm what the agent did. Check the session before trying again.':
+    'La autoridad no pudo confirmar qué hizo el agente. Revisá la sesión antes de volver a intentarlo.',
+  'That request was already used for something else. Try again.':
+    'Esa solicitud ya se usó para otra cosa. Probá de nuevo.',
+  'The authority refused: the session no longer allows it.':
+    'La autoridad rechazó: la sesión ya no lo permite.',
+  'Codex is not ready, so the session could not be bound or attached.':
+    'Codex no está listo, así que la sesión no se pudo asociar ni conectar.',
+  'Codex refused the request.': 'Codex rechazó la solicitud.',
+  'Codex did not come up in that mode. The runtime is as the authority reports it.':
+    'Codex no arrancó en ese modo. El runtime queda como lo informa la autoridad.',
+  'Codex refused to resume this session in that mode. A session resumes only in the mode it was created in. The runtime now runs in the mode that was asked for.':
+    'Codex rechazó reanudar esta sesión en ese modo. Una sesión solo se reanuda en el modo en que se creó. El runtime ahora corre en el modo que se pidió.',
+  'This session has no workspace to run a mode for.':
+    'Esta sesión no tiene un workspace en el que correr un modo.',
+  'Codex refused to resume this session. A session resumes only in the mode it was created in: if Codex runs in the other one now, change the mode for this session instead.':
+    'Codex rechazó reanudar esta sesión. Una sesión solo se reanuda en el modo en que se creó: si Codex corre ahora en el otro, cambiá el modo de esta sesión.',
+  'The authority holds no uncertain attempt for this session any more.':
+    'La autoridad ya no tiene ningún intento incierto para esta sesión.',
+  '{action}. The authority refused to start Codex in Local Tools: it could not set up or prove the isolation that mode requires. Nothing runs without it.':
+    '{action}. La autoridad rechazó iniciar Codex en Local Tools: no pudo preparar ni comprobar el aislamiento que ese modo exige. Nada corre sin él.',
+  'Activation outcome uncertain: the authority could not confirm whether Codex created the workspace binding. Nothing is sent again by itself.':
+    'Resultado de la activación incierto: la autoridad no pudo confirmar si Codex creó la asociación de workspace. Nada se vuelve a enviar por sí solo.',
+  '{action}. {reason}': '{action}. {reason}',
+  'Sessions could not be read: the authority did not answer.':
+    'No se pudieron leer las sesiones: la autoridad no respondió.',
+  'Sessions could not be read. {reason}':
+    'No se pudieron leer las sesiones. {reason}',
+  'Sessions could not be read. Nothing is shown rather than something unverified.':
+    'No se pudieron leer las sesiones. No se muestra nada en lugar de algo no verificado.',
+  'That folder cannot be used: its path is too long or cannot be written as text.':
+    'Esa carpeta no se puede usar: su ruta es demasiado larga o no se puede escribir como texto.',
+  'The folder dialog is already open.':
+    'El diálogo de carpetas ya está abierto.',
+  'The folder dialog could not be opened.':
+    'No se pudo abrir el diálogo de carpetas.',
+  'A closed session cannot be resumed.':
+    'Una sesión cerrada no se puede reanudar.',
+  'Ready: attached to the running agent.':
+    'Lista: conectada al agente en ejecución.',
+  'Resume needs a workspace bound to the session.':
+    'Reanudar necesita un workspace asociado a la sesión.',
+  'Resume has to wait until the workspace binding is settled.':
+    'Reanudar tiene que esperar a que la asociación de workspace esté definida.',
+  'The agent runtime is not ready, so there is nothing to attach to.':
+    'El runtime del agente no está listo, así que no hay a qué conectarse.',
 };

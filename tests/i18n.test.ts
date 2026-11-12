@@ -12,6 +12,13 @@ import {
   tPhrase,
 } from '../src/lib/i18n/index.svelte';
 import { activityLabel } from '../src/lib/features/agent/present';
+import {
+  composeImpact,
+  failureMessage,
+  observedModelLine,
+  pendingMessage,
+  runtimeLine,
+} from '../src/lib/features/sessions/present';
 
 afterEach(() => setLanguage('en'));
 
@@ -77,6 +84,34 @@ it('draws a phrase whose place takes another phrase, and joins phrases', () => {
   );
   expect(tJoin(activityLabel('command_completed', 2))).toBe(
     'Command finished · 2',
+  );
+});
+
+it('draws the sessions sentences in Spanish, with their nested places', () => {
+  const runtime = { mode: 'local_tools' as const, workspace: '/a/rag-corp' };
+  setLanguage('es');
+  const line = runtimeLine(runtime);
+  expect(line && tPhrase(line)).toBe(
+    'Codex corre en Local Tools para rag-corp',
+  );
+  expect(
+    tPhrase(
+      observedModelLine({ binding: 'bound_attached', observed_model: null }),
+    ),
+  ).toBe('Modelo en uso: el runtime no lo informó');
+  expect(tPhrase(pendingMessage('activate', 'starting', 'local_tools'))).toBe(
+    'Iniciando Codex en Local Tools…',
+  );
+  expect(tPhrase(failureMessage('resume', 'rejected'))).toBe(
+    'La sesión no se reanudó. Codex rechazó reanudar esta sesión. Una sesión solo se reanuda en el modo en que se creó: si Codex corre ahora en el otro, cambiá el modo de esta sesión.',
+  );
+  const impact = composeImpact('inference', null, runtime);
+  expect(impact && tPhrase(impact)).toBe(
+    'Codex corre en Local Tools para rag-corp ahora, y la autoridad corre un solo runtime de Codex. Activar esta sesión lo reinicia en Inference, y las sesiones conectadas a él quedan desconectadas. Una sesión creada en Local Tools no se puede reanudar en Inference.',
+  );
+  setLanguage('en');
+  expect(impact && tPhrase(impact)).toBe(
+    'Codex runs in Local Tools for rag-corp now, and the authority runs one Codex runtime. Activating this session restarts it in Inference, and the sessions attached to it are detached. A session created in Local Tools cannot be resumed in Inference.',
   );
 });
 

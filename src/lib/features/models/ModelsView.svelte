@@ -2,6 +2,7 @@
   import type { ConfigItem } from '../../contracts/configuration';
   import type { Profile } from '../../contracts/native';
   import type { SessionSummary } from '../../contracts/sessions';
+  import { tPhrase } from '../../i18n/index.svelte';
   import type { ModelsController, ModelsState } from './controller';
   import {
     ENTITLEMENT_NOTE,
@@ -174,7 +175,7 @@
       {#each observed as row (row.id)}
         <li class="models-row">
           <span class="event-title">{row.label}</span>
-          <span class="event-meta">{row.line}</span>
+          <span class="event-meta">{tPhrase(row.line)}</span>
         </li>
       {/each}
     </ul>

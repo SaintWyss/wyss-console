@@ -23,6 +23,7 @@ import {
 import ModelsHarness from './ModelsHarness.svelte';
 import catalogues from './fixtures/model-catalogue-v1.json';
 import pages from './fixtures/session-page-v4.json';
+import { tPhrase } from '../src/lib/i18n/index.svelte';
 import { profiles } from './native-harness';
 
 let component: ReturnType<typeof mount> | undefined;
@@ -250,7 +251,9 @@ describe('configured, selected and observed are three lists', () => {
     const rows = observedRows(parseSessionPage(page).sessions);
     const rerouted = rows.filter((r) => r.rerouted);
     expect(rerouted).toHaveLength(1);
-    expect(rerouted[0]?.line).toContain('rerouted a turn from model-a');
+    expect(rerouted[0] && tPhrase(rerouted[0].line)).toContain(
+      'rerouted a turn from model-a',
+    );
     // A detached session with no report is not listed at all: nothing is invented for it.
     expect(
       observedRows(parseSessionPage(damaged(pages.loaded)).sessions),

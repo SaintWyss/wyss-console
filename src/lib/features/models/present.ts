@@ -10,6 +10,7 @@ import {
   SCOPE_LABEL,
   SOURCE_LABEL,
 } from '../configuration/present';
+import type { Phrase } from '../../i18n/msg';
 import { AGENT_LABEL } from '../native/present';
 import { observedModelLine, sessionLabel } from '../sessions/present';
 
@@ -220,7 +221,7 @@ export const SELECTED_NOTE =
 export interface ObservedRow {
   id: string;
   label: string;
-  line: string;
+  line: Phrase;
   rerouted: boolean;
 }
 

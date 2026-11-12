@@ -35,8 +35,13 @@ import {
   observedModelLine,
 } from '../src/lib/features/sessions/present';
 import type { AuthorityObservation } from '../src/lib/shell/authority';
+import { tPhrase, type Phrase } from '../src/lib/i18n/index.svelte';
 import views from './fixtures/authority-view-v1.json';
 import pages from './fixtures/session-page-v4.json';
+
+/** The sentence a presenter hands over, drawn in the language in force. */
+const said = (phrase: Phrase | null) =>
+  phrase === null ? null : tPhrase(phrase);
 import {
   at,
   bound,
@@ -714,30 +719,35 @@ it('words sessions, hints and failures without protocol text', () => {
   expect(sessionLabel(bound)).toBe('rag-corp');
   expect(sessionLabel(fresh)).toBe('Session 33333333');
   expect(sessionLabel({ ...bound, workspace: '/' })).toBe('Session 22222222');
-  expect(resumeHint(bound, true)).toBeNull();
-  expect(resumeHint(bound, false)).toContain('not ready');
-  expect(resumeHint(fresh, true)).toContain('needs a workspace bound');
-  expect(resumeHint({ ...fresh, binding: 'indeterminate' }, true)).toContain(
-    'until the workspace binding is settled',
-  );
-  expect(resumeHint(closed, true)).toContain('closed');
+  expect(said(resumeHint(bound, true))).toBeNull();
+  expect(said(resumeHint(bound, false))).toContain('not ready');
+  expect(said(resumeHint(fresh, true))).toContain('needs a workspace bound');
   expect(
-    resumeHint({ ...bound, binding: 'bound_attached', resumable: false }, true),
+    said(resumeHint({ ...fresh, binding: 'indeterminate' }, true)),
+  ).toContain('until the workspace binding is settled');
+  expect(said(resumeHint(closed, true))).toContain('closed');
+  expect(
+    said(
+      resumeHint(
+        { ...bound, binding: 'bound_attached', resumable: false },
+        true,
+      ),
+    ),
   ).toContain('Ready');
   for (const code of SESSION_FAILURES) {
     for (const kind of ['activate', 'resume', 'close', 'abandon'] as const) {
-      const message = failureMessage(kind, code);
+      const message = tPhrase(failureMessage(kind, code));
       expect(message.length).toBeGreaterThan(20);
       // Product wording: no error code, method or field name of the control protocol.
       expect(message).not.toMatch(/_|managedSession|executionLease|\{|\}/);
     }
-    expect(readFailureMessage(code)).not.toMatch(/_|\{|\}/);
-    expect(chooseFailureMessage(code)).not.toMatch(/_|\{|\}/);
+    expect(tPhrase(readFailureMessage(code))).not.toMatch(/_|\{|\}/);
+    expect(tPhrase(chooseFailureMessage(code))).not.toMatch(/_|\{|\}/);
   }
   // Every step of an activation says what is being done, in the product's words.
   expect(
     (['preparing', 'starting', 'binding', 'attaching'] as const).map((step) =>
-      pendingMessage('activate', step),
+      tPhrase(pendingMessage('activate', step)),
     ),
   ).toEqual([
     'Preparing session…',
@@ -745,26 +755,30 @@ it('words sessions, hints and failures without protocol text', () => {
     'Creating workspace binding…',
     'Attaching…',
   ]);
-  expect(pendingMessage('resume', undefined)).toBe('Resuming session…');
+  expect(tPhrase(pendingMessage('resume', undefined))).toBe(
+    'Resuming session…',
+  );
   // Neither is an activation the authority could not confirm, nor one it could not answer.
   for (const code of ['uncertain', 'unavailable'] as const) {
-    const message = failureMessage('activate', code);
+    const message = tPhrase(failureMessage('activate', code));
     expect(message).not.toMatch(/not ready|refused|failed/i);
   }
-  expect(failureMessage('activate', 'uncertain')).toContain(
+  expect(tPhrase(failureMessage('activate', 'uncertain'))).toContain(
     'Activation outcome uncertain',
   );
-  expect(failureMessage('activate', 'workspace_invalid')).toContain(
+  expect(tPhrase(failureMessage('activate', 'workspace_invalid'))).toContain(
     'did not accept that folder',
   );
   // An unknown outcome is never worded as a refusal.
-  expect(failureMessage('close', 'unavailable')).not.toContain(
+  expect(tPhrase(failureMessage('close', 'unavailable'))).not.toContain(
     'was not closed',
   );
-  expect(failureMessage('close', 'changed')).toContain('was not closed');
+  expect(tPhrase(failureMessage('close', 'changed'))).toContain(
+    'was not closed',
+  );
   // A detached session has no mode to show: a resume the provider refused says where
   // to look, and what to do about it.
-  expect(failureMessage('resume', 'rejected')).toBe(
+  expect(tPhrase(failureMessage('resume', 'rejected'))).toBe(
     'The session was not resumed. Codex refused to resume this session. A session resumes only in the mode it was created in: if Codex runs in the other one now, change the mode for this session instead.',
   );
 });
@@ -787,18 +801,18 @@ describe('the model of a managed session', () => {
     };
     const parsed = parseSessionPage(page);
     expect(parsed.sessions[1].observed_model?.model_id).toBe('gpt-x');
-    expect(observedModelLine(parsed.sessions[1])).toContain('gpt-x');
-    expect(observedModelLine(parsed.sessions[1])).toContain(
+    expect(tPhrase(observedModelLine(parsed.sessions[1]))).toContain('gpt-x');
+    expect(tPhrase(observedModelLine(parsed.sessions[1]))).toContain(
       'reported by the runtime',
     );
     // Attached with no report: "not reported", never a default.
     s.observed_model = null;
-    expect(observedModelLine(parseSessionPage(page).sessions[1])).toBe(
+    expect(tPhrase(observedModelLine(parseSessionPage(page).sessions[1]))).toBe(
       'Model in use: not reported by the runtime',
     );
     // Detached: not known.
     const detached = parseSessionPage(structuredClone(pages.loaded));
-    expect(observedModelLine(detached.sessions[1])).toContain(
+    expect(tPhrase(observedModelLine(detached.sessions[1]))).toContain(
       'not known while detached',
     );
   });
@@ -816,15 +830,15 @@ describe('the model of a managed session', () => {
     };
     const model = parseSessionPage(page).sessions[1];
     expect(model.observed_model?.rerouted_from).toBe('model-a');
-    const line = observedModelLine(model);
+    const line = tPhrase(observedModelLine(model));
     expect(line).toContain('model-b');
     expect(line).toContain('rerouted a turn from model-a');
     expect(line).toContain('whether later turns stay on it is not documented');
     // An unrecognised reason is said as unknown, not as the provider's text.
     s.observed_model.reroute_reason = 'unrecognised';
-    expect(observedModelLine(parseSessionPage(page).sessions[1])).toContain(
-      'a reason this app does not know',
-    );
+    expect(
+      tPhrase(observedModelLine(parseSessionPage(page).sessions[1])),
+    ).toContain('a reason this app does not know');
     // A reroute has all three extra fields or none; nobody else carries any.
     for (const mutate of [
       (m: any) => delete m.rerouted_from,

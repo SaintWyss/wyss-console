@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SessionDetail } from '../../contracts/f8';
+  import { tPhrase } from '../../i18n/index.svelte';
   import { observedModelLine } from '../sessions/present';
   import type { F8Controller, F8ViewState } from './controller';
   import { failureText } from './present';
@@ -43,10 +44,12 @@
     </div>
   {:else if models.info}
     <p class="rt-next" data-testid="observed-model">
-      {observedModelLine({
-        observed_model: models.info.observed,
-        binding: detail.binding.state,
-      })}
+      {tPhrase(
+        observedModelLine({
+          observed_model: models.info.observed,
+          binding: detail.binding.state,
+        }),
+      )}
     </p>
     <p class="composer-note">
       Runtime {models.info.version} · generation {models.info.fence.generation}.

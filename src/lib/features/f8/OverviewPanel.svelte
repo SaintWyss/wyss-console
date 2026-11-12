@@ -8,6 +8,7 @@
   } from '../../contracts/f8';
   import { AGENT_MODES } from '../../contracts/sessions';
   import { localClock } from '../agent/present';
+  import { tPhrase } from '../../i18n/index.svelte';
   import {
     AGENT_MODE,
     folderName,
@@ -389,10 +390,12 @@
       <dd>{binding.mode ? ATTACHMENT_LABEL[binding.mode] : '—'}</dd>
       <dt>Model in use</dt>
       <dd data-testid="observed-model">
-        {observedModelLine({
-          observed_model: binding.observed_model,
-          binding: binding.state,
-        })}
+        {tPhrase(
+          observedModelLine({
+            observed_model: binding.observed_model,
+            binding: binding.state,
+          }),
+        )}
       </dd>
     </dl>
     {#if binding.state === 'indeterminate'}
