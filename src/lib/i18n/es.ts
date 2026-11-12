@@ -1842,4 +1842,12 @@ export const ES: Readonly<Record<string, string>> = {
     'No se pudo observar el receptor desde F8; no se asume que esté preparado.',
   'Prepare a new Managed receiver for this handoff first.':
     'Prepara primero un receptor Managed nuevo para este handoff.',
+
+  // Pipelines view: the handoff review and the clipboard
+  'Complete source, target, session, objective and review both workspace revisions.':
+    'Completa origen, destino, sesión, objetivo y revisa ambas revisiones de workspace.',
+  'BLOCKED: the Native target requires an accepted trust boundary. The text can be copied for the existing manual flow.':
+    'BLOCKED: el destino Native requiere una frontera de confianza aceptada. El texto se puede copiar para el flujo manual existente.',
+  'The clipboard is not available; select and copy the reviewed text.':
+    'El portapapeles no está disponible; selecciona y copia el texto revisado.',
 };

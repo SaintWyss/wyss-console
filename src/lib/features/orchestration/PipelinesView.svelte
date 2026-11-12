@@ -791,8 +791,9 @@
     } catch (error) {
       if (error instanceof OrchestrationCallError) showError(error);
       else
-        lastError =
-          'Completa origen, destino, sesión, objetivo y revisa ambas revisiones de workspace.';
+        lastError = msg(
+          'Complete source, target, session, objective and review both workspace revisions.',
+        );
     } finally {
       busy = false;
     }
@@ -804,8 +805,9 @@
       handoffPreview.envelope.target.provider === 'native_codex' ||
       handoffPreview.envelope.target.provider === 'native_claude'
     ) {
-      lastError =
-        'BLOCKED: el destino Native requiere una frontera de confianza aceptada. El texto se puede copiar para el flujo manual existente.';
+      lastError = msg(
+        'BLOCKED: the Native target requires an accepted trust boundary. The text can be copied for the existing manual flow.',
+      );
       return;
     }
     busy = true;
@@ -849,8 +851,9 @@
       copied = true;
       window.setTimeout(() => (copied = false), 1800);
     } catch {
-      lastError =
-        'El portapapeles no está disponible; selecciona y copia el texto revisado.';
+      lastError = msg(
+        'The clipboard is not available; select and copy the reviewed text.',
+      );
     }
   }
 
