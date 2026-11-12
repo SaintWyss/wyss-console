@@ -29,6 +29,14 @@ import {
 } from '../src/lib/features/sessions/present';
 import { catalogueFailure, entryRow } from '../src/lib/features/models/present';
 import {
+  BYPASS_WARNING,
+  FAILURE_TEXT,
+  PERMISSION_LABEL,
+  START_UNRECORDED,
+  switchHint,
+} from '../src/lib/features/native/present';
+import { delegationTally } from '../src/lib/features/native/delegations';
+import {
   detailLines,
   failureText,
   outcomeText,
@@ -349,6 +357,43 @@ it('draws the m3 labels, reasons and refusals in Spanish, and keeps the English'
   expect(t(reasonText('sdk_not_configured'))).toBe(
     'No Claude Agent SDK installation was named for this Console.',
   );
+});
+
+it('draws the native profile and session sentences in Spanish', () => {
+  setLanguage('es');
+  expect(t(FAILURE_TEXT.profile_unknown)).toBe('Ese perfil ya no existe.');
+  expect(t(FAILURE_TEXT.internal)).toBe('Algo salió mal en el escritorio.');
+  expect(t(PERMISSION_LABEL.bypass)).toBe(
+    'Acceso total: sin preguntas, sin sandbox (bypass)',
+  );
+  expect(t(BYPASS_WARNING)).toBe(
+    'Acceso total: el agente no pregunta nada y ejecuta cada comando y cada edición sin sandbox, con los permisos de tu cuenta.',
+  );
+  expect(t(switchHint('claude_code'))).toBe(
+    'Para cambiar el modelo en esta sesión, escribí /model en ella. Claude Code también guarda tu elección como predeterminada.',
+  );
+  expect(t(START_UNRECORDED)).toMatch(
+    /^La consola no pudo registrar este inicio/,
+  );
+  setLanguage('en');
+  expect(t(FAILURE_TEXT.profile_unknown)).toBe(
+    'That profile no longer exists.',
+  );
+  expect(t(switchHint('claude_code'))).toBe(
+    'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.',
+  );
+});
+
+it('draws the delegation tally words in Spanish, counted in English too', () => {
+  const tally = delegationTally([
+    { status: 'running' },
+    { status: 'succeeded' },
+  ] as unknown as Parameters<typeof delegationTally>[0]);
+  const words = () => tally.map((entry) => `${entry.count} ${t(entry.label)}`);
+  setLanguage('es');
+  expect(words()).toEqual(['1 en curso', '1 terminado(s)']);
+  setLanguage('en');
+  expect(words()).toEqual(['1 running', '1 done']);
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {

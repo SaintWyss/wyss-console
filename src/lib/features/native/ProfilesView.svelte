@@ -10,6 +10,7 @@
     type ProfileBody,
   } from '../../contracts/native';
   import type { NativeController, NativeState } from './controller';
+  import { t } from '../../i18n/index.svelte';
   import {
     AGENT_LABEL,
     HOOKS_LABEL,
@@ -115,24 +116,22 @@
 
 <section
   class="native-feature"
-  aria-label="Session profiles"
+  aria-label={t('Session profiles')}
   hidden={!visible}
   inert={!visible}
 >
   <p class="native-note">
-    A profile says what one session should start with. It is applied when the
-    session starts and changes no global file: your Claude Code and Codex
-    settings stay as they are. OpenCode and Hermes Native retain their own
-    controls; unsupported profile fields are refused. A profile holds names and
-    choices, never a secret.
+    {t(
+      'A profile says what one session should start with. It is applied when the session starts and changes no global file: your Claude Code and Codex settings stay as they are. OpenCode and Hermes Native retain their own controls; unsupported profile fields are refused. A profile holds names and choices, never a secret.',
+    )}
   </p>
   {#if native.failure}
     <p class="sessions-status failed" role="alert">
-      {failureText(native.failure.code)}
+      {t(failureText(native.failure.code))}
     </p>
   {/if}
   {#if native.notice}
-    <p class="sessions-status" role="status">{native.notice}</p>
+    <p class="sessions-status" role="status">{t(native.notice)}</p>
   {/if}
 
   <div class="native-profiles">
@@ -141,15 +140,15 @@
         <button
           type="button"
           class="action primary"
-          onclick={() => controller.edit('new')}>New profile</button
+          onclick={() => controller.edit('new')}>{t('New profile')}</button
         >
         <button
           type="button"
           class="action"
-          onclick={() => controller.importOne()}>Import…</button
+          onclick={() => controller.importOne()}>{t('Import…')}</button
         >
       </div>
-      <ul class="events-list" aria-label="Profiles">
+      <ul class="events-list" aria-label={t('Profiles')}>
         {#each native.profiles as profile (profile.id)}
           <li>
             <button
@@ -160,11 +159,13 @@
             >
               <span class="event-title">{profile.body.name}</span>
               <span class="event-meta">
-                {profile.template ? 'Template' : `Version ${profile.current}`} · {summary(
+                {profile.template
+                  ? t('Template')
+                  : t('Version {n}', { n: profile.current })} · {summary(
                   profile,
                 )}
                 {#if profile.refers_to_missing}
-                  · refers to something not present{/if}
+                  {t('· refers to something not present')}{/if}
               </span>
             </button>
           </li>
@@ -175,8 +176,8 @@
     <div class="native-profile-editor">
       {#if native.editing === null}
         <div class="sessions-empty">
-          <p class="empty-title">Choose a profile or make a new one</p>
-          <p>Templates are read only. Make a copy to change one.</p>
+          <p class="empty-title">{t('Choose a profile or make a new one')}</p>
+          <p>{t('Templates are read only. Make a copy to change one.')}</p>
         </div>
       {:else}
         <form
@@ -187,10 +188,14 @@
           }}
         >
           <h3>
-            {creating ? 'New profile' : readOnly ? 'Template' : 'Profile'}
+            {creating
+              ? t('New profile')
+              : readOnly
+                ? t('Template')
+                : t('Profile')}
           </h3>
           <div class="native-field">
-            <label for="p-name">Name</label>
+            <label for="p-name">{t('Name')}</label>
             <input
               id="p-name"
               type="text"
@@ -201,7 +206,7 @@
             />
           </div>
           <fieldset class="native-field" disabled={readOnly}>
-            <legend>Written for</legend>
+            <legend>{t('Written for')}</legend>
             {#each AGENT_IDS as agent (agent)}
               <label class="native-check">
                 <input
@@ -214,25 +219,25 @@
             {/each}
           </fieldset>
           <div class="native-field">
-            <label for="p-extends">Extends</label>
+            <label for="p-extends">{t('Extends')}</label>
             <select
               id="p-extends"
               bind:value={form.extends}
               disabled={readOnly}
             >
-              <option value={null}>Nothing</option>
+              <option value={null}>{t('Nothing')}</option>
               {#each parents as parent (parent.id)}
                 <option value={parent.id}>{parent.body.name}</option>
               {/each}
             </select>
           </div>
           <div class="native-field">
-            <label for="p-model">Model</label>
+            <label for="p-model">{t('Model')}</label>
             <input
               id="p-model"
               type="text"
               maxlength="64"
-              placeholder="the agent’s own default"
+              placeholder={t('the agent’s own default')}
               list="p-model-choices"
               bind:value={form.model}
               disabled={readOnly}
@@ -244,12 +249,12 @@
             </datalist>
           </div>
           <div class="native-field">
-            <label for="p-effort">Reasoning effort</label>
+            <label for="p-effort">{t('Reasoning effort')}</label>
             <input
               id="p-effort"
               type="text"
               maxlength="32"
-              placeholder="the agent’s own default"
+              placeholder={t('the agent’s own default')}
               list="p-effort-choices"
               bind:value={form.effort}
               disabled={readOnly}
@@ -260,47 +265,50 @@
               {/each}
             </datalist>
             <p class="native-note">
-              Names are suggestions: Claude Code’s documented levels, its model
-              aliases (<em>it</em> decides what they mean), and what the managed
-              Codex runtime lists
+              {t(
+                'Names are suggestions: Claude Code’s documented levels, its model aliases (',
+              )}<em>{t('it')}</em>
+              {t(
+                'decides what they mean), and what the managed Codex runtime lists',
+              )}
               {catalogue?.state === 'listed'
-                ? 'right now'
-                : '(not running, so none are offered)'}. Wyss Console cannot
-              check a name: the agent says so in its session if it does not know
-              it. Claude Code takes only its documented levels; Codex takes the
-              word as a configuration override for that session only.
+                ? t('right now')
+                : t('(not running, so none are offered)')}{t(
+                '. Wyss Console cannot check a name: the agent says so in its session if it does not know it. Claude Code takes only its documented levels; Codex takes the word as a configuration override for that session only.',
+              )}
             </p>
           </div>
           <div class="native-field">
-            <label for="p-permission">Permissions</label>
+            <label for="p-permission">{t('Permissions')}</label>
             <select
               id="p-permission"
               bind:value={form.permission}
               disabled={readOnly}
             >
-              <option value={null}>As configured</option>
+              <option value={null}>{t('As configured')}</option>
               {#each PERMISSIONS as word (word)}
                 <option value={word as Permission}
-                  >{PERMISSION_LABEL[word]}</option
+                  >{t(PERMISSION_LABEL[word])}</option
                 >
               {/each}
             </select>
             {#if form.permission === 'bypass'}
-              <p class="native-warning" role="note">{BYPASS_WARNING}</p>
+              <p class="native-warning" role="note">{t(BYPASS_WARNING)}</p>
             {/if}
           </div>
           <div class="native-field">
-            <label for="p-hooks">Hooks</label>
+            <label for="p-hooks">{t('Hooks')}</label>
             <select id="p-hooks" bind:value={form.hooks} disabled={readOnly}>
-              <option value={null}>As configured</option>
+              <option value={null}>{t('As configured')}</option>
               {#each HOOKS_MODES as word (word)}
-                <option value={word as HooksMode}>{HOOKS_LABEL[word]}</option>
+                <option value={word as HooksMode}>{t(HOOKS_LABEL[word])}</option
+                >
               {/each}
             </select>
           </div>
           <div class="native-field">
             <label for="p-skills"
-              >Skills switched off (Claude Code), one per line</label
+              >{t('Skills switched off (Claude Code), one per line')}</label
             >
             <textarea
               id="p-skills"
@@ -309,7 +317,7 @@
               disabled={readOnly}></textarea>
           </div>
           <div class="native-field">
-            <label for="p-notes">Notes</label>
+            <label for="p-notes">{t('Notes')}</label>
             <textarea
               id="p-notes"
               rows="2"
@@ -320,9 +328,9 @@
 
           {#if selected && Object.keys(selected.from).length > 0}
             <p class="event-meta">
-              Inherited values:
+              {t('Inherited values:')}
               {#each Object.entries(selected.from) as [field, from] (field)}
-                {field} from “{from}”;
+                {t('{field} from “{from}”;', { field, from })}
               {/each}
             </p>
           {/if}
@@ -334,7 +342,7 @@
                 class="action primary"
                 disabled={!dirty || form.name.trim() === ''}
               >
-                {creating ? 'Create' : 'Save as a new version'}
+                {creating ? t('Create') : t('Save as a new version')}
               </button>
             {/if}
             {#if selected}
@@ -342,13 +350,13 @@
                 type="button"
                 class="action"
                 onclick={() => selected && controller.duplicate(selected.id)}
-                >Make a copy</button
+                >{t('Make a copy')}</button
               >
               <button
                 type="button"
                 class="action"
                 onclick={() => selected && controller.exportOne(selected.id)}
-                >Export…</button
+                >{t('Export…')}</button
               >
               {#if !readOnly}
                 <button
@@ -356,26 +364,27 @@
                   class="action"
                   onclick={() =>
                     selected && controller.removeProfile(selected.id)}
-                  >Delete</button
+                  >{t('Delete')}</button
                 >
               {/if}
             {/if}
             <button
               type="button"
               class="action"
-              onclick={() => controller.edit(null)}>Close</button
+              onclick={() => controller.edit(null)}>{t('Close')}</button
             >
           </div>
 
           {#if selected && !readOnly && selected.versions.length > 1}
-            <h4>Versions</h4>
+            <h4>{t('Versions')}</h4>
             <ul class="native-versions">
               {#each [...selected.versions].reverse() as version (version.n)}
                 <li>
                   <span
-                    >Version {version.n} · {day(version.saved_at)}{version.n ===
-                    selected.current
-                      ? ' · current'
+                    >{t('Version {n}', { n: version.n })} · {day(
+                      version.saved_at,
+                    )}{version.n === selected.current
+                      ? ` · ${t('current')}`
                       : ''}</span
                   >
                   {#if version.n !== selected.current}
@@ -384,7 +393,7 @@
                       class="action"
                       onclick={() =>
                         selected && controller.restore(selected.id, version.n)}
-                      >Bring back</button
+                      >{t('Bring back')}</button
                     >
                   {/if}
                 </li>

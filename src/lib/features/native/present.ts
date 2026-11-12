@@ -8,6 +8,7 @@ import type {
   SessionState,
 } from '../../contracts/native';
 import type { ConfigItem } from '../../contracts/configuration';
+import { msg } from '../../i18n/msg';
 
 export type Tone = 'ok' | 'pending' | 'warn' | 'error' | 'idle';
 
@@ -24,133 +25,167 @@ export const isM9Agent = (agent: AgentId): boolean =>
 
 /** Shown when the process ended and only its record failed: the stop happened, the write did not. */
 /** Shown when a start or restart failed while its record was written: a process may exist. */
-export const START_UNRECORDED =
-  'The Console could not record this start, so a process may exist. Check the sessions below. Nothing is started again automatically, and OpenCode and Hermes wait until the store is confirmed.';
+export const START_UNRECORDED = msg(
+  'The Console could not record this start, so a process may exist. Check the sessions below. Nothing is started again automatically, and OpenCode and Hermes wait until the store is confirmed.',
+);
 
 /** Shown when a stop ended the process and only its record failed. */
-export const STOP_UNRECORDED =
-  'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.';
+export const STOP_UNRECORDED = msg(
+  'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.',
+);
 
 /** A restart's new session is "restarting" until its process runs. */
 export function stateLabel(s: NativeSession): { text: string; tone: Tone } {
   switch (s.state) {
     case 'requested':
       return s.restart_of
-        ? { text: 'Restarting', tone: 'pending' }
-        : { text: 'Starting', tone: 'pending' };
+        ? { text: msg('Restarting'), tone: 'pending' }
+        : { text: msg('Starting'), tone: 'pending' };
     case 'running':
-      return { text: 'Active', tone: 'ok' };
+      return { text: msg('Active'), tone: 'ok' };
     case 'exited':
-      if (s.exit_signal) return { text: 'Ended by a signal', tone: 'error' };
+      if (s.exit_signal)
+        return { text: msg('Ended by a signal'), tone: 'error' };
       return s.exit_code === 0
-        ? { text: 'Exited (0)', tone: 'idle' }
+        ? { text: msg('Exited (0)'), tone: 'idle' }
         : { text: `Failed (${s.exit_code ?? '?'})`, tone: 'error' };
     case 'stopped':
-      return { text: 'Stopped', tone: 'warn' };
+      return { text: msg('Stopped'), tone: 'warn' };
     case 'failed_start':
-      return { text: 'Did not start', tone: 'error' };
+      return { text: msg('Did not start'), tone: 'error' };
     case 'lost':
-      return { text: 'Lost', tone: 'warn' };
+      return { text: msg('Lost'), tone: 'warn' };
   }
 }
 
 export const STATE_NOTE: Record<SessionState, string> = {
-  requested: 'The start was accepted and is being prepared.',
-  running: 'The agent’s process is alive in its terminal.',
-  exited: 'The process ended by itself.',
-  stopped: 'You stopped it.',
-  failed_start: 'The process never ran.',
-  lost: 'The Console was restarted and did not see how it ended. Its terminal went with the window, so it is not running.',
+  requested: msg('The start was accepted and is being prepared.'),
+  running: msg('The agent’s process is alive in its terminal.'),
+  exited: msg('The process ended by itself.'),
+  stopped: msg('You stopped it.'),
+  failed_start: msg('The process never ran.'),
+  lost: msg(
+    'The Console was restarted and did not see how it ended. Its terminal went with the window, so it is not running.',
+  ),
 };
 
 export const FAILURE_TEXT: Record<string, string> = {
-  agent_not_installed: 'That agent is not installed on this computer.',
-  project_invalid:
+  agent_not_installed: msg('That agent is not installed on this computer.'),
+  project_invalid: msg(
     'That folder cannot be used. Choose a folder with the folder button.',
-  profile_not_applicable: 'This profile cannot be applied to that agent.',
-  profile_unknown: 'That profile no longer exists.',
-  profile_preview_required:
+  ),
+  profile_not_applicable: msg('This profile cannot be applied to that agent.'),
+  profile_unknown: msg('That profile no longer exists.'),
+  profile_preview_required: msg(
     'Review the current profile preview before starting with it.',
-  profile_preview_stale:
+  ),
+  profile_preview_stale: msg(
     'The profile changed after its preview. Review the new preview and start again.',
-  provider_version_unverified:
+  ),
+  provider_version_unverified: msg(
     'This exact provider build is not verified for profile overrides, so the override was not launched. Choose “No profile — as configured” or use a qualified build.',
-  arsenal_unqualified:
+  ),
+  arsenal_unqualified: msg(
     'Skill exclusion is not qualified for this exact provider build, so nothing was started with it. Start without applying the selection, or use a qualified build.',
-  arsenal_plan_stale:
+  ),
+  arsenal_plan_stale: msg(
     'The Arsenal plan changed since it was shown: the library, the installed skills or the provider build moved. Review the new plan and start again.',
-  arsenal_blocked:
+  ),
+  arsenal_blocked: msg(
     'The Arsenal plan has items that cannot be carried or names a skill that is not installed, so nothing was started with it.',
-  arsenal_unavailable:
+  ),
+  arsenal_unavailable: msg(
     'The Arsenal library or the installed skills could not be read, so nothing was started with the selection.',
-  arsenal_selection_unknown: 'That Arsenal selection no longer exists.',
-  arsenal_project_refused:
+  ),
+  arsenal_selection_unknown: msg('That Arsenal selection no longer exists.'),
+  arsenal_project_refused: msg(
     'Arsenal does not read this project folder, so its selection cannot be applied here.',
-  handoff_target_unverified:
+  ),
+  handoff_target_unverified: msg(
     'Hermes Native does not have a verified interactive handoff argument. It was not started with this brief.',
-  brief_invalid:
+  ),
+  brief_invalid: msg(
     'The brief must start with a “# ” heading, hold no NUL and be at most 16 KiB.',
-  limit_reached:
+  ),
+  limit_reached: msg(
     'The terminal limit (16) is reached. Close one to start another.',
-  spawn_failed: 'The agent could not be started.',
-  busy: 'A start is already in progress.',
-  session_unknown: 'That session is not known any more.',
-  not_running: 'That session is not running.',
-  still_running: 'A running session cannot be removed. Stop it first.',
-  stop_failed: 'The session could not be stopped.',
-  store_unavailable: 'The Console could not write its own state.',
-  readiness_busy:
+  ),
+  spawn_failed: msg('The agent could not be started.'),
+  busy: msg('A start is already in progress.'),
+  session_unknown: msg('That session is not known any more.'),
+  not_running: msg('That session is not running.'),
+  still_running: msg('A running session cannot be removed. Stop it first.'),
+  stop_failed: msg('The session could not be stopped.'),
+  store_unavailable: msg('The Console could not write its own state.'),
+  readiness_busy: msg(
     'Session storage is busy. Readiness could not be checked; it will be retried.',
-  unavailable:
+  ),
+  unavailable: msg(
     'The Console has no private folder to keep native sessions in, so it cannot start agents.',
-  request_invalid: 'The request was not valid.',
-  host_unavailable:
+  ),
+  request_invalid: msg('The request was not valid.'),
+  host_unavailable: msg(
     'The terminal host is not answering. Nothing was sent; nothing changed.',
-  host_outcome_unknown:
+  ),
+  host_outcome_unknown: msg(
     'The terminal host did not confirm this request: it may or may not have taken effect, and it was not sent again. Check the sessions listed here before repeating it, so nothing runs twice.',
-  host_outdated:
+  ),
+  host_outdated: msg(
     'The terminal host is older than this window and cannot keep these profile options. Update it before using effort or preview-bound profiles; existing sessions are unchanged.',
-  export_failed: 'The file could not be written.',
-  profile_name_invalid:
+  ),
+  export_failed: msg('The file could not be written.'),
+  profile_name_invalid: msg(
     'The name must be 1 to 60 characters, without control characters.',
-  profile_applies_to_invalid: 'Choose at least one agent, each once.',
-  profile_model_invalid:
+  ),
+  profile_applies_to_invalid: msg('Choose at least one agent, each once.'),
+  profile_model_invalid: msg(
     'The model may hold letters, digits and . _ : - / only, and may not start with a dash.',
-  profile_effort_invalid:
+  ),
+  profile_effort_invalid: msg(
     'The effort may hold letters, digits and . _ - only (32 at most), and may not start with a dash.',
-  profile_skill_invalid:
+  ),
+  profile_skill_invalid: msg(
     'A skill name may hold letters, digits and . _ : - only (64 at most).',
-  profile_notes_invalid: 'The notes are too long or hold control characters.',
-  profile_notes_hold_secret:
+  ),
+  profile_notes_invalid: msg(
+    'The notes are too long or hold control characters.',
+  ),
+  profile_notes_hold_secret: msg(
     'The text looks like it holds a secret. A profile never holds one.',
-  profile_extends_unknown: 'The profile it extends does not exist.',
-  profile_profile_cycle:
+  ),
+  profile_extends_unknown: msg('The profile it extends does not exist.'),
+  profile_profile_cycle: msg(
     'A profile cannot extend itself, directly or through others.',
-  profile_too_deep: 'Profiles may extend up to eight levels.',
-  profile_read_only_template:
+  ),
+  profile_too_deep: msg('Profiles may extend up to eight levels.'),
+  profile_read_only_template: msg(
     'A template is read only. Make a copy to change it.',
-  profile_too_many: 'There are too many profiles (100).',
-  profile_version_unknown: 'That version does not exist.',
-  profile_import_invalid: 'That file is not a profile this app can read.',
-  profile_store_unavailable: 'The profiles could not be read or written.',
-  profile_in_use: 'Another profile extends this one. Change that one first.',
-  internal: 'Something went wrong in the desktop.',
+  ),
+  profile_too_many: msg('There are too many profiles (100).'),
+  profile_version_unknown: msg('That version does not exist.'),
+  profile_import_invalid: msg('That file is not a profile this app can read.'),
+  profile_store_unavailable: msg('The profiles could not be read or written.'),
+  profile_in_use: msg(
+    'Another profile extends this one. Change that one first.',
+  ),
+  internal: msg('Something went wrong in the desktop.'),
 };
 export const failureText = (code: string) =>
-  FAILURE_TEXT[code] ?? 'Something went wrong in the desktop.';
+  FAILURE_TEXT[code] ?? msg('Something went wrong in the desktop.');
 
 export const PERMISSION_LABEL: Record<Permission, string> = {
-  ask: 'Ask before acting',
-  read_only: 'Read only (plan)',
-  edits: 'Accept edits (Claude Code only)',
-  bypass: 'Full access: no prompts, no sandbox (bypass)',
+  ask: msg('Ask before acting'),
+  read_only: msg('Read only (plan)'),
+  edits: msg('Accept edits (Claude Code only)'),
+  bypass: msg('Full access: no prompts, no sandbox (bypass)'),
 };
 /** Said wherever full access is chosen or shown: what it costs. */
-export const BYPASS_WARNING =
-  'Full access: the agent asks nothing and runs every command and edit without a sandbox, with your account’s rights.';
+export const BYPASS_WARNING = msg(
+  'Full access: the agent asks nothing and runs every command and edit without a sandbox, with your account’s rights.',
+);
 export const HOOKS_LABEL: Record<HooksMode, string> = {
-  inherit: 'As configured',
-  off: 'Off for this session (Claude Code only)',
+  inherit: msg('As configured'),
+  off: msg('Off for this session (Claude Code only)'),
 };
 
 export function folderName(path: string): string {
@@ -268,12 +303,18 @@ export function modelFacts(
 export function switchHint(agent: AgentId): string {
   switch (agent) {
     case 'claude_code':
-      return 'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.';
+      return msg(
+        'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.',
+      );
     case 'codex':
-      return 'How to change the model of a running Codex session is not verified, so none is suggested.';
+      return msg(
+        'How to change the model of a running Codex session is not verified, so none is suggested.',
+      );
     case 'opencode':
     case 'hermes':
-      return 'How to change the model in a running session is not verified, so none is suggested.';
+      return msg(
+        'How to change the model in a running session is not verified, so none is suggested.',
+      );
   }
 }
 

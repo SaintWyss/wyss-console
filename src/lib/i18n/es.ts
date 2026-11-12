@@ -2084,4 +2084,225 @@ export const ES: Readonly<Record<string, string>> = {
   Send: 'Enviar',
   'Cancel the turn': 'Cancelar el turno',
   'Turn {state}': 'Turno {state}',
+  // ---- native ----
+  // Native sessions: the presenter's states, notes, failures and labels (present.ts)
+  Restarting: 'Reiniciando',
+  Active: 'Activa',
+  'Ended by a signal': 'Terminada por una señal',
+  'Exited (0)': 'Terminó (0)',
+  'Did not start': 'No arrancó',
+  Lost: 'Perdida',
+  'The start was accepted and is being prepared.':
+    'El inicio fue aceptado y se está preparando.',
+  'The agent’s process is alive in its terminal.':
+    'El proceso del agente está vivo en su terminal.',
+  'The process ended by itself.': 'El proceso terminó solo.',
+  'You stopped it.': 'La detuviste vos.',
+  'The process never ran.': 'El proceso nunca corrió.',
+  'The Console was restarted and did not see how it ended. Its terminal went with the window, so it is not running.':
+    'La consola se reinició y no vio cómo terminó. Su terminal se fue con la ventana, así que no está corriendo.',
+  'The Console could not record this start, so a process may exist. Check the sessions below. Nothing is started again automatically, and OpenCode and Hermes wait until the store is confirmed.':
+    'La consola no pudo registrar este inicio, así que puede existir un proceso. Revisá las sesiones de abajo. No se vuelve a iniciar nada solo, y OpenCode y Hermes esperan hasta que se confirme el almacenamiento.',
+  'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.':
+    'El proceso se detuvo, pero la consola no pudo registrarlo. No se volvió a iniciar nada, y OpenCode y Hermes siguen bloqueados hasta que se confirme el almacenamiento.',
+  'Ask before acting': 'Preguntar antes de actuar',
+  'Read only (plan)': 'Solo lectura (plan)',
+  'Accept edits (Claude Code only)': 'Aceptar ediciones (solo Claude Code)',
+  'Full access: no prompts, no sandbox (bypass)':
+    'Acceso total: sin preguntas, sin sandbox (bypass)',
+  'Full access: the agent asks nothing and runs every command and edit without a sandbox, with your account’s rights.':
+    'Acceso total: el agente no pregunta nada y ejecuta cada comando y cada edición sin sandbox, con los permisos de tu cuenta.',
+  'Off for this session (Claude Code only)':
+    'Desactivados en esta sesión (solo Claude Code)',
+  'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.':
+    'Para cambiar el modelo en esta sesión, escribí /model en ella. Claude Code también guarda tu elección como predeterminada.',
+  'How to change the model of a running Codex session is not verified, so none is suggested.':
+    'No está verificado cómo cambiar el modelo de una sesión de Codex en curso, así que no se sugiere ninguno.',
+  'How to change the model in a running session is not verified, so none is suggested.':
+    'No está verificado cómo cambiar el modelo en una sesión en curso, así que no se sugiere ninguno.',
+  'That agent is not installed on this computer.':
+    'Ese agente no está instalado en esta computadora.',
+  'That folder cannot be used. Choose a folder with the folder button.':
+    'Esa carpeta no se puede usar. Elegí una carpeta con el botón de carpeta.',
+  'This profile cannot be applied to that agent.':
+    'Este perfil no se puede aplicar a ese agente.',
+  'That profile no longer exists.': 'Ese perfil ya no existe.',
+  'Review the current profile preview before starting with it.':
+    'Revisá la vista previa actual del perfil antes de iniciar con él.',
+  'The profile changed after its preview. Review the new preview and start again.':
+    'El perfil cambió después de su vista previa. Revisá la nueva vista previa y volvé a iniciar.',
+  'This exact provider build is not verified for profile overrides, so the override was not launched. Choose “No profile — as configured” or use a qualified build.':
+    'Esta versión exacta del proveedor no está verificada para sobrescribir perfiles, así que la sobrescritura no se lanzó. Elegí “Sin perfil — según la configuración” o usá una versión calificada.',
+  'Skill exclusion is not qualified for this exact provider build, so nothing was started with it. Start without applying the selection, or use a qualified build.':
+    'La exclusión de skills no está calificada para esta versión exacta del proveedor, así que no se inició nada con ella. Iniciá sin aplicar la selección, o usá una versión calificada.',
+  'The Arsenal plan changed since it was shown: the library, the installed skills or the provider build moved. Review the new plan and start again.':
+    'El plan de Arsenal cambió desde que se mostró: cambiaron la biblioteca, las skills instaladas o la versión del proveedor. Revisá el plan nuevo y volvé a iniciar.',
+  'The Arsenal plan has items that cannot be carried or names a skill that is not installed, so nothing was started with it.':
+    'El plan de Arsenal tiene elementos que no se pueden llevar o nombra una skill que no está instalada, así que no se inició nada con él.',
+  'The Arsenal library or the installed skills could not be read, so nothing was started with the selection.':
+    'No se pudo leer la biblioteca de Arsenal ni las skills instaladas, así que no se inició nada con la selección.',
+  'That Arsenal selection no longer exists.':
+    'Esa selección de Arsenal ya no existe.',
+  'Arsenal does not read this project folder, so its selection cannot be applied here.':
+    'Arsenal no lee esta carpeta de proyecto, así que su selección no se puede aplicar acá.',
+  'Hermes Native does not have a verified interactive handoff argument. It was not started with this brief.':
+    'Hermes Native no tiene un argumento de traspaso interactivo verificado. No se inició con este brief.',
+  'The brief must start with a “# ” heading, hold no NUL and be at most 16 KiB.':
+    'El brief tiene que empezar con un encabezado “# ”, no tener NUL y pesar 16 KiB como máximo.',
+  'The terminal limit (16) is reached. Close one to start another.':
+    'Se alcanzó el límite de terminales (16). Cerrá una para abrir otra.',
+  'The agent could not be started.': 'No se pudo iniciar el agente.',
+  'A start is already in progress.': 'Ya hay un inicio en curso.',
+  'That session is not known any more.': 'Esa sesión ya no está registrada.',
+  'That session is not running.': 'Esa sesión no está corriendo.',
+  'A running session cannot be removed. Stop it first.':
+    'No se puede quitar una sesión que corre. Detenela primero.',
+  'The session could not be stopped.': 'No se pudo detener la sesión.',
+  'Session storage is busy. Readiness could not be checked; it will be retried.':
+    'El almacenamiento de sesiones está ocupado. No se pudo verificar la disponibilidad; se volverá a intentar.',
+  'The Console has no private folder to keep native sessions in, so it cannot start agents.':
+    'La consola no tiene una carpeta privada donde guardar las sesiones nativas, así que no puede iniciar agentes.',
+  'The request was not valid.': 'La solicitud no era válida.',
+  'The terminal host is not answering. Nothing was sent; nothing changed.':
+    'El host de terminales no responde. No se envió nada; no cambió nada.',
+  'The terminal host did not confirm this request: it may or may not have taken effect, and it was not sent again. Check the sessions listed here before repeating it, so nothing runs twice.':
+    'El host de terminales no confirmó esta solicitud: puede que haya surtido efecto o no, y no se volvió a enviar. Revisá las sesiones listadas acá antes de repetirla, para que nada corra dos veces.',
+  'The terminal host is older than this window and cannot keep these profile options. Update it before using effort or preview-bound profiles; existing sessions are unchanged.':
+    'El host de terminales es más viejo que esta ventana y no puede mantener estas opciones de perfil. Actualizalo antes de usar esfuerzo o perfiles atados a una vista previa; las sesiones existentes no cambian.',
+  'The file could not be written.': 'No se pudo escribir el archivo.',
+  'Choose at least one agent, each once.':
+    'Elegí al menos un agente, cada uno una sola vez.',
+  'The model may hold letters, digits and . _ : - / only, and may not start with a dash.':
+    'El modelo solo puede tener letras, dígitos y . _ : - /, y no puede empezar con guion.',
+  'The effort may hold letters, digits and . _ - only (32 at most), and may not start with a dash.':
+    'El esfuerzo solo puede tener letras, dígitos y . _ - (32 como máximo), y no puede empezar con guion.',
+  'A skill name may hold letters, digits and . _ : - only (64 at most).':
+    'Un nombre de skill solo puede tener letras, dígitos y . _ : - (64 como máximo).',
+  'The notes are too long or hold control characters.':
+    'Las notas son demasiado largas o tienen caracteres de control.',
+  'The text looks like it holds a secret. A profile never holds one.':
+    'El texto parece tener un secreto. Un perfil nunca guarda uno.',
+  'The profile it extends does not exist.': 'El perfil que hereda no existe.',
+  'A profile cannot extend itself, directly or through others.':
+    'Un perfil no puede heredar de sí mismo, ni directa ni indirectamente.',
+  'Profiles may extend up to eight levels.':
+    'Los perfiles pueden heredar hasta ocho niveles.',
+  'A template is read only. Make a copy to change it.':
+    'Una plantilla es de solo lectura. Hacé una copia para cambiarla.',
+  'There are too many profiles (100).': 'Hay demasiados perfiles (100).',
+  'That version does not exist.': 'Esa versión no existe.',
+  'That file is not a profile this app can read.':
+    'Ese archivo no es un perfil que esta app pueda leer.',
+  'The profiles could not be read or written.':
+    'No se pudieron leer ni guardar los perfiles.',
+  'Another profile extends this one. Change that one first.':
+    'Otro perfil hereda de este. Cambiá ese primero.',
+
+  // Native sessions: the profiles view (ProfilesView)
+  'Session profiles': 'Perfiles de sesión',
+  'A profile says what one session should start with. It is applied when the session starts and changes no global file: your Claude Code and Codex settings stay as they are. OpenCode and Hermes Native retain their own controls; unsupported profile fields are refused. A profile holds names and choices, never a secret.':
+    'Un perfil dice con qué debe arrancar una sesión. Se aplica al iniciar la sesión y no cambia ningún archivo global: tus ajustes de Claude Code y Codex quedan como están. OpenCode y Hermes Native conservan sus propios controles; los campos de perfil que no soportan se rechazan. Un perfil guarda nombres y opciones, nunca un secreto.',
+  'New profile': 'Nuevo perfil',
+  'Import…': 'Importar…',
+  'Version {n}': 'Versión {n}',
+  Template: 'Plantilla',
+  Profile: 'Perfil',
+  '· refers to something not present': '· apunta a algo que no está',
+  'Choose a profile or make a new one': 'Elegí un perfil o creá uno nuevo',
+  'Templates are read only. Make a copy to change one.':
+    'Las plantillas son de solo lectura. Hacé una copia para cambiar una.',
+  'Written for': 'Pensado para',
+  Extends: 'Hereda de',
+  Nothing: 'Nada',
+  Model: 'Modelo',
+  'the agent’s own default': 'el predeterminado del agente',
+  'Names are suggestions: Claude Code’s documented levels, its model aliases (':
+    'Los nombres son sugerencias: los niveles documentados de Claude Code, sus alias de modelo (',
+  it: 'el agente',
+  'decides what they mean), and what the managed Codex runtime lists':
+    'decide qué significan), y lo que lista el runtime Codex Managed',
+  'right now': 'ahora mismo',
+  '(not running, so none are offered)':
+    '(no está corriendo, así que no se ofrece ninguno)',
+  '. Wyss Console cannot check a name: the agent says so in its session if it does not know it. Claude Code takes only its documented levels; Codex takes the word as a configuration override for that session only.':
+    '. Wyss Console no puede verificar un nombre: el agente avisa en su sesión si no lo conoce. Claude Code acepta solo sus niveles documentados; Codex toma la palabra como una sobrescritura de configuración solo para esa sesión.',
+  Permissions: 'Permisos',
+  'As configured': 'Según la configuración',
+  'Skills switched off (Claude Code), one per line':
+    'Skills desactivadas (Claude Code), una por línea',
+  Notes: 'Notas',
+  'Inherited values:': 'Valores heredados:',
+  '{field} from “{from}”;': '{field} de “{from}”;',
+  Create: 'Crear',
+  'Save as a new version': 'Guardar como versión nueva',
+  'Make a copy': 'Hacer una copia',
+  Delete: 'Eliminar',
+  Versions: 'Versiones',
+  current: 'actual',
+  'Bring back': 'Volver a esta versión',
+  'Profile exported.': 'Perfil exportado.',
+  'Profile imported. It grants nothing: read what it asks for before using it.':
+    'Perfil importado. No otorga nada: leé lo que pide antes de usarlo.',
+
+  // Native sessions: the handoff panel (HandoffPanel)
+  'Hand off to another agent': 'Traspasar el trabajo a otro agente',
+  'Hand off {agent}’s work': 'Traspasar el trabajo de {agent}',
+  'This starts a': 'Esto inicia una',
+  new: 'nueva',
+  'session of the agent you choose, in the same folder, with the text below as its first message. It is not a transfer: the new agent has only this text and the files, not {agent}’s context, and nothing is moved or ended. Read it and change it before starting. Secrets found in it were removed.':
+    'sesión del agente que elegís, en la misma carpeta, con el texto de abajo como primer mensaje. No es un traspaso: el agente nuevo tiene solo este texto y los archivos, no el contexto de {agent}, y no se mueve ni se termina nada. Leelo y cambialo antes de iniciar. Los secretos que había en él se quitaron.',
+  'Hermes Native remains available as a separate interactive provider. It is omitted here because its pinned CLI does not expose a verified reviewed first-message interface without entering an effectful one-shot mode.':
+    'Hermes Native sigue disponible como proveedor interactivo aparte. Acá se omite porque su CLI fijada no expone una interfaz de primer mensaje verificada y revisada sin entrar en un modo de una sola ejecución con efectos.',
+  'Preparing the brief…': 'Preparando el brief…',
+  'The screen of that session is no longer held, so the brief has the repository state only.':
+    'La pantalla de esa sesión ya no se conserva, así que el brief tiene solo el estado del repositorio.',
+  'Brief (Markdown, starts with “# ”)': 'Brief (Markdown, empieza con “# ”)',
+  'Longer than 16 KiB: shorten it.': 'Más de 16 KiB: acortalo.',
+  Start: 'Iniciar',
+  'No profile — as configured': 'Sin perfil — según la configuración',
+  'Could not verify this profile preview. Refresh Native before starting.':
+    'No se pudo verificar la vista previa de este perfil. Actualizá Native antes de iniciar.',
+  'What the profile does': 'Qué hace el perfil',
+  'Starting…': 'Iniciando…',
+  'Start {agent} with this brief': 'Iniciar {agent} con este brief',
+  'Save to a file…': 'Guardar en un archivo…',
+
+  // Native delegations: the panel and its tally (DelegationsPanel, delegations.ts)
+  'Delegated agents': 'Agentes delegados',
+  'The terminal host did not list delegated agents.':
+    'El host de terminales no pudo listar los agentes delegados.',
+  'None yet. A Claude Code or Codex session started with delegation on can give a task to the other one.':
+    'Todavía no hay ninguno. Una sesión de Claude Code o Codex iniciada con delegación activada puede darle una tarea a la otra.',
+  'From {provider} session {id}': 'Desde la sesión de {provider} {id}',
+  '{count} agent': '{count} agente',
+  '{count} agents': '{count} agentes',
+  Done: 'Terminado',
+  Cancelled: 'Cancelado',
+  'Timed out': 'Agotado',
+  'configuration verified': 'configuración verificada',
+  'configuration did not match': 'la configuración no coincide',
+  'configuration not checked yet': 'configuración sin verificar todavía',
+  'configuration not verifiable': 'la configuración no se puede verificar',
+  running: 'en curso',
+  done: 'terminado(s)',
+  failed: 'fallido(s)',
+  'timed out': 'agotado(s)',
+  interrupted: 'interrumpido(s)',
+  cancelled: 'cancelado(s)',
+  other: 'otro(s)',
+  '{n} completed step(s)': '{n} paso(s) completado(s)',
+  'Observed:': 'Observado:',
+  'effort not reported': 'esfuerzo no informado',
+  'Preset: {name}': 'Preset: {name}',
+  'Selection: {name}': 'Selección: {name}',
+  'none of your own': 'ninguna propia',
+  '{n} installed skill(s) switched off':
+    '{n} skill(s) instalada(s) desactivada(s)',
+  Files: 'Archivos',
+  in: 'en',
+  'Stop this agent? Its unfinished work is lost.':
+    '¿Detener este agente? Su trabajo sin terminar se pierde.',
+  'Stop agent': 'Detener agente',
+  'Stopping…': 'Deteniendo…',
+  Result: 'Resultado',
 };

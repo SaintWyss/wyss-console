@@ -9,6 +9,7 @@ import type {
   ProfileBody,
   StartReply,
 } from '../../contracts/native';
+import { msg } from '../../i18n/msg';
 import {
   NativeCallError,
   chooseProject,
@@ -855,7 +856,7 @@ export class NativeController {
   async exportOne(id: string) {
     try {
       this.notice = (await this.client.exportProfile(id))
-        ? 'Profile exported.'
+        ? msg('Profile exported.')
         : null;
       this.emit();
     } catch (error) {
@@ -867,8 +868,9 @@ export class NativeController {
       const id = await this.client.importProfile();
       if (id) {
         this.editing = id;
-        this.notice =
-          'Profile imported. It grants nothing: read what it asks for before using it.';
+        this.notice = msg(
+          'Profile imported. It grants nothing: read what it asks for before using it.',
+        );
         await this.refreshProfiles();
       }
     } catch (error) {
