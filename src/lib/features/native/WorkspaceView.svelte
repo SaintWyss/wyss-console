@@ -25,7 +25,7 @@
     type SelectionName,
   } from '../terminal/launch';
   import { whenWorkspaceReady } from './bridge';
-  import { msg, t } from '../../i18n/index.svelte';
+  import { msg, t, tPhrase } from '../../i18n/index.svelte';
   import type { Binding } from '../../contracts/arsenal';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
@@ -509,9 +509,9 @@
 
   {#if native.failure}
     <p class="sessions-status failed" role="alert">
-      {failureText(native.failure.code)}
+      {t(failureText(native.failure.code))}
       {#each native.failure.reasons as reason (reason)}
-        <br />{reason}
+        <br />{t(reason)}
       {/each}
     </p>
   {/if}
@@ -1042,9 +1042,11 @@
                       <span
                         class="pill compact"
                         data-tone={label.tone}
-                        title={STATE_NOTE[session.state]}
+                        title={t(STATE_NOTE[session.state])}
                       >
-                        <span class="dot" aria-hidden="true"></span>{label.text}
+                        <span class="dot" aria-hidden="true"></span>{tPhrase(
+                          label.label,
+                        )}
                       </span>
                       <span class="event-meta native-facts">
                         {#if session.profile}Profile {profileName(
@@ -1090,20 +1092,23 @@
                           class="event-meta native-facts"
                           data-testid="models"
                         >
-                          Model: asked for {facts.requested} · set in its files {facts.configured}
-                          · in use: {facts.inUse} · Effort: asked for {facts.requestedEffort}
-                          · set in its files {facts.configuredEffort}
+                          Model: asked for {t(facts.requested)} · set in its files
+                          {t(facts.configured)}
+                          · in use: {t(facts.inUse)} · Effort: asked for {t(
+                            facts.requestedEffort,
+                          )}
+                          · set in its files {t(facts.configuredEffort)}
                         </span>
                         <span
                           class="event-meta native-note"
                           data-testid="switch"
                         >
-                          {switchHint(session.agent_id)}
+                          {t(switchHint(session.agent_id))}
                         </span>
                       {/if}
                       {#if session.state === 'lost'}
                         <span class="event-meta native-note"
-                          >{STATE_NOTE.lost}</span
+                          >{t(STATE_NOTE.lost)}</span
                         >
                       {/if}
                       <span class="native-actions">

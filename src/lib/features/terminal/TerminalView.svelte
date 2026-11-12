@@ -123,7 +123,7 @@
       failure?: { code: string };
     };
     if (e?.failure?.code)
-      return { text: failureText(e.failure.code), translatable: false };
+      return { text: failureText(e.failure.code), translatable: true };
     if (e?.reasons?.length) return { text: e.reasons[0], translatable: false };
     return error instanceof Error
       ? { text: error.message, translatable: false }
@@ -419,8 +419,10 @@
                         : 'Codex'}</span
                   >
                   {#if full}
-                    <span class="badge" data-tone="warn" title={BYPASS_WARNING}
-                      >{t('Full access')}</span
+                    <span
+                      class="badge"
+                      data-tone="warn"
+                      title={t(BYPASS_WARNING)}>{t('Full access')}</span
                     >
                   {/if}
                 </button>
@@ -467,7 +469,7 @@
     <dl class="terminal-legend" aria-label={t('Keyboard shortcuts')}>
       {#each KEY_LEGEND as [chord_, what] (chord_)}
         <dt>{chord_}</dt>
-        <dd>{what}</dd>
+        <dd>{t(what)}</dd>
       {/each}
       <dd class="terminal-legend-note">
         {t('Every other key goes to the program in the terminal.')}

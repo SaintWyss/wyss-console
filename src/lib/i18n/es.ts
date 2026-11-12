@@ -3043,4 +3043,16 @@ export const ES: Readonly<Record<string, string>> = {
     'BLOCKED: el destino Native requiere una frontera de confianza aceptada. El texto se puede copiar para el flujo manual existente.',
   'The clipboard is not available; select and copy the reviewed text.':
     'El portapapeles no está disponible; selecciona y copia el texto revisado.',
+  // ---- final ----
+  'Failed ({code})': 'Falló ({code})',
+  'none (the agent’s own choice)': 'ninguno (la elección del propio agente)',
+  'the profile no longer exists': 'el perfil ya no existe',
+  'the profile has changed since this session started':
+    'el perfil cambió desde que empezó esta sesión',
+  'not read yet (open Configuration)': 'todavía sin leer (abre Configuración)',
+  'not set in its files': 'sin fijar en sus archivos',
+  'not observed by this provider configuration view':
+    'no lo observa esta vista de configuración del proveedor',
+  'not reported by the agent': 'el agente no lo informa',
+  'The launch preview failed.': 'La vista previa del lanzamiento falló.',
 };

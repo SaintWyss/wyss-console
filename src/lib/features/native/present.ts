@@ -8,7 +8,7 @@ import type {
   SessionState,
 } from '../../contracts/native';
 import type { ConfigItem } from '../../contracts/configuration';
-import { msg } from '../../i18n/msg';
+import { msg, type Phrase } from '../../i18n/msg';
 
 export type Tone = 'ok' | 'pending' | 'warn' | 'error' | 'idle';
 
@@ -34,27 +34,33 @@ export const STOP_UNRECORDED = msg(
   'The process was stopped, but the Console could not record that. Nothing was started again, and OpenCode and Hermes stay blocked until the store is confirmed.',
 );
 
-/** A restart's new session is "restarting" until its process runs. */
-export function stateLabel(s: NativeSession): { text: string; tone: Tone } {
+/** A restart's new session is "restarting" until its process runs. The label is a phrase: the view draws it with tPhrase(). */
+export function stateLabel(s: NativeSession): { label: Phrase; tone: Tone } {
   switch (s.state) {
     case 'requested':
       return s.restart_of
-        ? { text: msg('Restarting'), tone: 'pending' }
-        : { text: msg('Starting'), tone: 'pending' };
+        ? { label: { text: msg('Restarting') }, tone: 'pending' }
+        : { label: { text: msg('Starting') }, tone: 'pending' };
     case 'running':
-      return { text: msg('Active'), tone: 'ok' };
+      return { label: { text: msg('Active') }, tone: 'ok' };
     case 'exited':
       if (s.exit_signal)
-        return { text: msg('Ended by a signal'), tone: 'error' };
+        return { label: { text: msg('Ended by a signal') }, tone: 'error' };
       return s.exit_code === 0
-        ? { text: msg('Exited (0)'), tone: 'idle' }
-        : { text: `Failed (${s.exit_code ?? '?'})`, tone: 'error' };
+        ? { label: { text: msg('Exited (0)') }, tone: 'idle' }
+        : {
+            label: {
+              text: msg('Failed ({code})'),
+              values: { code: String(s.exit_code ?? '?') },
+            },
+            tone: 'error',
+          };
     case 'stopped':
-      return { text: msg('Stopped'), tone: 'warn' };
+      return { label: { text: msg('Stopped') }, tone: 'warn' };
     case 'failed_start':
-      return { text: msg('Did not start'), tone: 'error' };
+      return { label: { text: msg('Did not start') }, tone: 'error' };
     case 'lost':
-      return { text: msg('Lost'), tone: 'warn' };
+      return { label: { text: msg('Lost') }, tone: 'warn' };
   }
 }
 
@@ -240,21 +246,23 @@ export function modelFacts(
   profiles: Profile[],
   config: readonly ConfigItem[] | null,
 ): ModelFacts {
-  let requested = 'none (the agent’s own choice)';
-  let requestedEffort = requested;
+  let requested: string = msg('none (the agent’s own choice)');
+  let requestedEffort: string = requested;
   if (session.profile) {
     const profile = profiles.find((p) => p.id === session.profile?.id);
-    if (!profile) requested = requestedEffort = 'the profile no longer exists';
+    if (!profile)
+      requested = requestedEffort = msg('the profile no longer exists');
     else if (profile.current !== session.profile.version)
-      requested = requestedEffort =
-        'the profile has changed since this session started';
+      requested = requestedEffort = msg(
+        'the profile has changed since this session started',
+      );
     else {
       if (profile.body.model) requested = profile.body.model;
       if (profile.body.effort) requestedEffort = profile.body.effort;
     }
   }
-  let configured = 'not read yet (open Configuration)';
-  let configuredEffort = configured;
+  let configured: string = msg('not read yet (open Configuration)');
+  let configuredEffort: string = configured;
   if (config !== null) {
     const provider =
       session.agent_id === 'claude_code'
@@ -279,11 +287,12 @@ export function modelFacts(
         session.agent_id === 'claude_code'
           ? 'effortLevel'
           : 'model_reasoning_effort';
-      configured = keyed('model') ?? 'not set in its files';
-      configuredEffort = keyed(effortKey) ?? 'not set in its files';
+      configured = keyed('model') ?? msg('not set in its files');
+      configuredEffort = keyed(effortKey) ?? msg('not set in its files');
     } else {
-      configured = configuredEffort =
-        'not observed by this provider configuration view';
+      configured = configuredEffort = msg(
+        'not observed by this provider configuration view',
+      );
     }
   }
   return {
@@ -291,7 +300,7 @@ export function modelFacts(
     requestedEffort,
     configured,
     configuredEffort,
-    inUse: 'not reported by the agent',
+    inUse: msg('not reported by the agent'),
   };
 }
 

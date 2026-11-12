@@ -31,8 +31,11 @@ import { catalogueFailure, entryRow } from '../src/lib/features/models/present';
 import {
   BYPASS_WARNING,
   FAILURE_TEXT,
+  modelFacts,
   PERMISSION_LABEL,
   START_UNRECORDED,
+  STATE_NOTE,
+  stateLabel,
   switchHint,
 } from '../src/lib/features/native/present';
 import { delegationTally } from '../src/lib/features/native/delegations';
@@ -382,6 +385,30 @@ it('draws the native profile and session sentences in Spanish', () => {
   expect(t(switchHint('claude_code'))).toBe(
     'To change the model in this session, type /model in it. Claude Code also saves your choice as its default.',
   );
+});
+
+it('draws the native state phrase, facts and notes in Spanish, with their places', () => {
+  const exited = {
+    state: 'exited',
+    exit_code: 2,
+    exit_signal: null,
+    restart_of: null,
+  } as unknown as Parameters<typeof stateLabel>[0];
+  const bare = { agent_id: 'codex', profile: null } as unknown as Parameters<
+    typeof modelFacts
+  >[0];
+  setLanguage('es');
+  expect(tPhrase(stateLabel(exited).label)).toBe('Falló (2)');
+  expect(t(STATE_NOTE.exited)).toBe('El proceso terminó solo.');
+  expect(t(FAILURE_TEXT.internal)).toBe('Algo salió mal en el escritorio.');
+  expect(t(START_UNRECORDED)).toMatch(/^La consola no pudo registrar/);
+  const facts = modelFacts(bare, [], null);
+  expect(t(facts.requested)).toBe('ninguno (la elección del propio agente)');
+  expect(t(facts.inUse)).toBe('el agente no lo informa');
+  setLanguage('en');
+  expect(tPhrase(stateLabel(exited).label)).toBe('Failed (2)');
+  expect(t(facts.requested)).toBe('none (the agent’s own choice)');
+  expect(t(facts.inUse)).toBe('not reported by the agent');
 });
 
 it('draws the delegation tally words in Spanish, counted in English too', () => {

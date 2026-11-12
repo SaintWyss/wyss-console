@@ -129,27 +129,32 @@ describe('the contract', () => {
 describe('what the overview says', () => {
   it('names each state in words that do not claim more than is known', () => {
     expect(stateLabel(session({ state: 'running' }))).toEqual({
-      text: 'Active',
+      label: { text: 'Active' },
       tone: 'ok',
     });
     expect(
-      stateLabel(session({ state: 'requested', restart_of: 'x' })).text,
+      stateLabel(session({ state: 'requested', restart_of: 'x' })).label.text,
     ).toBe('Restarting');
-    expect(stateLabel(session({ state: 'requested' })).text).toBe('Starting');
+    expect(stateLabel(session({ state: 'requested' })).label.text).toBe(
+      'Starting',
+    );
     expect(stateLabel(session({ state: 'exited', exit_code: 0 })).tone).toBe(
       'idle',
     );
-    expect(stateLabel(session({ state: 'exited', exit_code: 3 })).text).toBe(
-      'Failed (3)',
-    );
+    // The exit code is a place of the phrase, so the view translates the sentence and fills it.
+    expect(
+      stateLabel(session({ state: 'exited', exit_code: 3 })).label,
+    ).toEqual({ text: 'Failed ({code})', values: { code: '3' } });
     expect(
       stateLabel(
         session({ state: 'exited', exit_code: 1, exit_signal: 'Killed' }),
-      ).text,
+      ).label.text,
     ).toBe('Ended by a signal');
-    expect(stateLabel(session({ state: 'stopped' })).text).toBe('Stopped');
+    expect(stateLabel(session({ state: 'stopped' })).label.text).toBe(
+      'Stopped',
+    );
     // After a crash of the window a session is lost, never "exited".
-    expect(stateLabel(session({ state: 'lost' })).text).toBe('Lost');
+    expect(stateLabel(session({ state: 'lost' })).label.text).toBe('Lost');
   });
   it('groups by project and warns where two sessions run on one folder', () => {
     const a = session({ id: '1'.repeat(32), project: '/p', started_at: 5 });

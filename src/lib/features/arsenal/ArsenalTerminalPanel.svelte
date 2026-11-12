@@ -13,6 +13,7 @@
   } from '../../desktop/arsenal-client';
   import { failureMessage } from './messages';
   import { FAILURE_TEXT } from '../native/present';
+  import { msg, t } from '../../i18n/index.svelte';
   import {
     ENFORCEMENT_LABEL,
     ITEM_STATE_LABEL,
@@ -173,7 +174,7 @@
         const code =
           (error as { failure?: { code?: string } }).failure?.code ??
           'internal';
-        previewFailed = FAILURE_TEXT[code] ?? 'The launch preview failed.';
+        previewFailed = FAILURE_TEXT[code] ?? msg('The launch preview failed.');
         previewing = false;
       },
     );
@@ -334,7 +335,7 @@
           {#if previewing}
             <p class="event-meta" role="status">Checking the launch preview…</p>
           {:else if previewFailed}
-            <p class="native-warning" role="alert">{previewFailed}</p>
+            <p class="native-warning" role="alert">{t(previewFailed)}</p>
           {:else if preview && !preview.can_start}
             <p class="native-warning" role="alert">
               The launch preview refuses this combination:
