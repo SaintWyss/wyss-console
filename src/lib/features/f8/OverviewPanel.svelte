@@ -74,22 +74,26 @@
 
   /** What to do next, said once, from what was read: never a guess about what will succeed. */
   const next = $derived.by(() => {
-    if (!open) return 'This session is closed.';
+    if (!open) return t('This session is closed.');
     if (!ready)
       return busy
-        ? 'The runtime is changing state.'
-        : 'Start the runtime to work in this session.';
+        ? t('The runtime is changing state.')
+        : t('Start the runtime to work in this session.');
     if (!leaseActive)
-      return 'Grant an execution lease so the session may bind a workspace and run turns.';
+      return t(
+        'Grant an execution lease so the session may bind a workspace and run turns.',
+      );
     if (binding.state === 'unbound')
-      return 'Bind a project folder to this session.';
+      return t('Bind a project folder to this session.');
     if (binding.state === 'bound_detached')
-      return 'Attach the session to the running runtime.';
+      return t('Attach the session to the running runtime.');
     if (binding.state === 'indeterminate')
-      return 'The authority could not confirm the last binding attempt. Nothing asks again by itself.';
+      return t(
+        'The authority could not confirm the last binding attempt. Nothing asks again by itself.',
+      );
     if (binding.state === 'creating')
-      return 'The authority is binding the workspace.';
-    return 'Ready. Open the Conversation tab to give Codex an objective.';
+      return t('The authority is binding the workspace.');
+    return t('Ready. Open the Conversation tab to give Codex an objective.');
   });
 </script>
 
@@ -98,41 +102,47 @@
 
   <section class="rt-card" aria-labelledby="rt-provider-support">
     <header>
-      <h4 id="rt-provider-support">Provider support</h4>
+      <h4 id="rt-provider-support">{t('Provider support')}</h4>
     </header>
     <p class="rt-alert" data-testid="claude-managed-unavailable" role="note">
-      Claude Code Managed is not implemented in this authority. This session
-      remains Codex; Native use requires a separate, explicit launch.
+      {t(
+        'Claude Code Managed is not implemented in this authority. This session remains Codex; Native use requires a separate, explicit launch.',
+      )}
     </p>
   </section>
 
   <section class="rt-card" aria-labelledby="rt-runtime">
     <header>
-      <h4 id="rt-runtime">Runtime</h4>
+      <h4 id="rt-runtime">{t('Runtime')}</h4>
       <span class="pill compact" data-tone={RUNTIME_STATE[runtime.actual].tone}>
         <span class="dot" aria-hidden="true"></span>
         {t(RUNTIME_STATE[runtime.actual].label)}
       </span>
     </header>
     <dl class="session-facts">
-      <dt>Generation</dt>
+      <dt>{t('Generation')}</dt>
       <dd>
-        {runtime.generation === 0 ? 'None yet' : runtime.generation}
+        {runtime.generation === 0 ? t('None yet') : runtime.generation}
         <span class="fact-note"
-          >Each start is a new generation; an earlier one never comes back.</span
+          >{t(
+            'Each start is a new generation; an earlier one never comes back.',
+          )}</span
         >
       </dd>
-      <dt>Mode</dt>
+      <dt>{t('Mode')}</dt>
       <dd>{runtime.profile ? PROFILE_LABEL[runtime.profile] : '—'}</dd>
-      <dt>Version</dt>
+      <dt>{t('Version')}</dt>
       <dd>{runtime.version ?? '—'}</dd>
       {#if runtime.workspace}
-        <dt>Isolated for</dt>
+        <dt>{t('Isolated for')}</dt>
         <dd class="mono" dir="ltr">{visible(runtime.workspace)}</dd>
       {/if}
-      <dt>Wanted</dt>
+      <dt>{t('Wanted')}</dt>
       <dd>
-        {runtime.desired === 'running' ? 'Running' : 'Stopped'} · revision {runtime.revision}
+        {runtime.desired === 'running' ? t('Running') : t('Stopped')} · {t(
+          'revision',
+        )}
+        {runtime.revision}
       </dd>
     </dl>
     {#if runtime.diagnostic}
@@ -147,34 +157,36 @@
     {/if}
     {#if runtime.exhausted}
       <p class="rt-alert" role="note">
-        This session has used every launch the authority allows it. No further
-        runtime is started for it; a new session can be created.
+        {t(
+          'This session has used every launch the authority allows it. No further runtime is started for it; a new session can be created.',
+        )}
       </p>
     {/if}
 
     {#if confirming === 'stop'}
-      <div class="close-confirm" role="group" aria-label="Confirm stop">
+      <div class="close-confirm" role="group" aria-label={t('Confirm stop')}>
         <p>
-          Stop this runtime? Its process is ended and reaped. A turn that runs
-          is not stopped under it: the authority refuses until that turn ends.
+          {t(
+            'Stop this runtime? Its process is ended and reaped. A turn that runs is not stopped under it: the authority refuses until that turn ends.',
+          )}
         </p>
         <div class="session-actions">
           <button
             type="button"
             class="action danger"
             disabled={!acts}
-            onclick={() => controller.stopRuntime()}>Stop runtime</button
+            onclick={() => controller.stopRuntime()}>{t('Stop runtime')}</button
           >
           <button
             type="button"
             class="action"
-            onclick={() => controller.confirm(null)}>Keep running</button
+            onclick={() => controller.confirm(null)}>{t('Keep running')}</button
           >
         </div>
       </div>
     {:else if open && idle}
       <fieldset class="mode-choice">
-        <legend>Mode</legend>
+        <legend>{t('Mode')}</legend>
         {#each AGENT_MODES as m (m)}
           <label class="mode-option">
             <input
@@ -192,9 +204,9 @@
       </fieldset>
       {#if mode === 'local_tools'}
         <p class="composer-note">
-          Local Tools gives Codex more to work with, not more authority: every
-          command and file change waits for your approval. The runtime is
-          isolated for one folder.
+          {t(
+            'Local Tools gives Codex more to work with, not more authority: every command and file change waits for your approval. The runtime is isolated for one folder.',
+          )}
         </p>
       {/if}
       <div class="session-actions">
@@ -205,7 +217,7 @@
             disabled={!acts || f8.composer.choosing}
             aria-busy={f8.composer.choosing}
             onclick={() => controller.chooseFolder()}
-            >{folder ? 'Change folder' : 'Choose folder'}</button
+            >{folder ? t('Change folder') : t('Choose folder')}</button
           >
         {/if}
         <button
@@ -214,26 +226,29 @@
           disabled={!acts ||
             runtime.exhausted ||
             (mode === 'local_tools' && folder === null)}
-          onclick={() => controller.startRuntime()}>Start runtime</button
+          onclick={() => controller.startRuntime()}>{t('Start runtime')}</button
         >
         {#if runtime.desired === 'running'}
           <button
             type="button"
             class="action"
             disabled={!acts}
-            onclick={() => controller.confirm('stop')}>Stop runtime</button
+            onclick={() => controller.confirm('stop')}
+            >{t('Stop runtime')}</button
           >
         {/if}
       </div>
       {#if runtime.desired === 'running'}
         <p class="composer-note">
-          The runtime is not running but is still wanted, for example after the
-          authority restarted. Stop it to close this session.
+          {t(
+            'The runtime is not running but is still wanted, for example after the authority restarted. Stop it to close this session.',
+          )}
         </p>
       {/if}
       {#if mode === 'local_tools'}
         <p class="composer-note">
-          Folder: <span class="mono">{folder ?? 'none selected'}</span>
+          {t('Folder:')}
+          <span class="mono">{folder ?? t('none selected')}</span>
         </p>
       {/if}
       {#if f8.composer.chooseFailure}
@@ -247,7 +262,7 @@
           type="button"
           class="action"
           disabled={!acts || busy}
-          onclick={() => controller.confirm('stop')}>Stop runtime</button
+          onclick={() => controller.confirm('stop')}>{t('Stop runtime')}</button
         >
       </div>
     {/if}
@@ -255,7 +270,7 @@
 
   <section class="rt-card" aria-labelledby="rt-lease">
     <header>
-      <h4 id="rt-lease">Execution lease</h4>
+      <h4 id="rt-lease">{t('Execution lease')}</h4>
       {#if lease}
         <span
           class="pill compact"
@@ -267,46 +282,53 @@
       {:else}
         <span class="pill compact" data-tone="idle">
           <span class="dot" aria-hidden="true"></span>
-          None
+          {t('None')}
         </span>
       {/if}
     </header>
     {#if lease && leaseActive}
-      <ul class="rt-chips" aria-label="Granted">
+      <ul class="rt-chips" aria-label={t('Granted')}>
         {#each lease.scopes as scope (scope)}
           <li title={t(SCOPE_NOTE[scope])}>{t(SCOPE_LABEL[scope])}</li>
         {/each}
       </ul>
       <p class="composer-note">
-        Valid until <time datetime={lease.expires_at}
-          >{localClock(lease.expires_at)}</time
-        >. When it ends or is revoked, a turn that runs under it ends, and so
-        does the approval it waits on.
+        {t('Valid until')}
+        <time datetime={lease.expires_at}>{localClock(lease.expires_at)}</time
+        >{t(
+          '. When it ends or is revoked, a turn that runs under it ends, and so does the approval it waits on.',
+        )}
       </p>
       {#if confirming === 'revoke'}
-        <div class="close-confirm" role="group" aria-label="Confirm revoke">
+        <div
+          class="close-confirm"
+          role="group"
+          aria-label={t('Confirm revoke')}
+        >
           <p>
-            Revoke the lease? The turn that runs under it ends and its pending
-            approval is invalidated, in the same commit.
+            {t(
+              'Revoke the lease? The turn that runs under it ends and its pending approval is invalidated, in the same commit.',
+            )}
           </p>
           <div class="session-actions">
             <button
               type="button"
               class="action danger"
               disabled={!acts}
-              onclick={() => controller.revokeLease()}>Revoke lease</button
+              onclick={() => controller.revokeLease()}
+              >{t('Revoke lease')}</button
             >
             <button
               type="button"
               class="action"
-              onclick={() => controller.confirm(null)}>Keep it</button
+              onclick={() => controller.confirm(null)}>{t('Keep it')}</button
             >
           </div>
         </div>
       {:else}
         <div class="session-actions">
           <label class="rt-select">
-            <span>Renew for</span>
+            <span>{t('Renew for')}</span>
             <select
               value={f8.lease.ttl}
               disabled={!acts}
@@ -321,19 +343,19 @@
             type="button"
             class="action"
             disabled={!acts || !ready}
-            onclick={() => controller.renewLease()}>Renew</button
+            onclick={() => controller.renewLease()}>{t('Renew')}</button
           >
           <button
             type="button"
             class="action danger"
             disabled={!acts}
-            onclick={() => controller.confirm('revoke')}>Revoke</button
+            onclick={() => controller.confirm('revoke')}>{t('Revoke')}</button
           >
         </div>
       {/if}
     {:else if open}
       <fieldset class="rt-scopes">
-        <legend>Allow</legend>
+        <legend>{t('Allow')}</legend>
         {#each LEASE_SCOPES as scope (scope)}
           <label class="mode-option">
             <input
@@ -349,7 +371,7 @@
       </fieldset>
       <div class="session-actions">
         <label class="rt-select">
-          <span>For</span>
+          <span>{t('For')}</span>
           <select
             value={f8.lease.ttl}
             disabled={!acts}
@@ -364,35 +386,36 @@
           type="button"
           class="action primary"
           disabled={!acts || !ready || f8.lease.scopes.length === 0}
-          onclick={() => controller.grantLease()}>Grant lease</button
+          onclick={() => controller.grantLease()}>{t('Grant lease')}</button
         >
       </div>
       <p class="composer-note">
-        A lease is a permission with an end, never a standing one. It needs a
-        ready runtime{ready ? '' : ' — start it first'}.
+        {t(
+          'A lease is a permission with an end, never a standing one. It needs a ready runtime',
+        )}{ready ? '' : ` — ${t('start it first')}`}.
       </p>
     {/if}
   </section>
 
   <section class="rt-card" aria-labelledby="rt-workspace">
     <header>
-      <h4 id="rt-workspace">Workspace</h4>
+      <h4 id="rt-workspace">{t('Workspace')}</h4>
       <span class="pill compact" data-tone={BINDING_STATE[binding.state].tone}>
         <span class="dot" aria-hidden="true"></span>
         {t(BINDING_STATE[binding.state].label)}
       </span>
     </header>
     <dl class="session-facts">
-      <dt>Folder</dt>
+      <dt>{t('Folder')}</dt>
       <dd class:mono={!!binding.workspace}>
-        {binding.workspace ? visible(binding.workspace) : 'None'}
+        {binding.workspace ? visible(binding.workspace) : t('None')}
         {#if binding.workspace}
           <span class="fact-note">{folderName(binding.workspace)}</span>
         {/if}
       </dd>
-      <dt>Attached as</dt>
+      <dt>{t('Attached as')}</dt>
       <dd>{binding.mode ? ATTACHMENT_LABEL[binding.mode] : '—'}</dd>
-      <dt>Model in use</dt>
+      <dt>{t('Model in use')}</dt>
       <dd data-testid="observed-model">
         {tPhrase(
           observedModelLine({
@@ -404,32 +427,33 @@
     </dl>
     {#if binding.state === 'indeterminate'}
       <div class="session-uncertain" role="status">
-        <p class="uncertain-title">Binding outcome uncertain</p>
+        <p class="uncertain-title">{t('Binding outcome uncertain')}</p>
         <p>
-          The authority asked Codex to create a thread and could not confirm
-          what Codex did. A second request could create a second thread, so
-          nothing asks again by itself.
+          {t(
+            'The authority asked Codex to create a thread and could not confirm what Codex did. A second request could create a second thread, so nothing asks again by itself.',
+          )}
         </p>
       </div>
     {/if}
     {#if confirming === 'abandon'}
-      <div class="close-confirm" role="group" aria-label="Confirm discard">
+      <div class="close-confirm" role="group" aria-label={t('Confirm discard')}>
         <p>
-          Discard the uncertain attempt? The authority records that it was
-          abandoned. If Codex did create a thread for it, the empty thread is
-          left behind. The session can then be bound again.
+          {t(
+            'Discard the uncertain attempt? The authority records that it was abandoned. If Codex did create a thread for it, the empty thread is left behind. The session can then be bound again.',
+          )}
         </p>
         <div class="session-actions">
           <button
             type="button"
             class="action danger"
             disabled={!acts}
-            onclick={() => controller.abandonBinding()}>Discard attempt</button
+            onclick={() => controller.abandonBinding()}
+            >{t('Discard attempt')}</button
           >
           <button
             type="button"
             class="action"
-            onclick={() => controller.confirm(null)}>Keep it</button
+            onclick={() => controller.confirm(null)}>{t('Keep it')}</button
           >
         </div>
       </div>
@@ -442,20 +466,22 @@
             disabled={!acts || f8.composer.choosing}
             aria-busy={f8.composer.choosing}
             onclick={() => controller.chooseFolder()}
-            >{folder ? 'Change folder' : 'Choose folder'}</button
+            >{folder ? t('Change folder') : t('Choose folder')}</button
           >
           <button
             type="button"
             class="action primary"
             disabled={!acts || !ready || !leaseActive || folder === null}
-            onclick={() => controller.bindWorkspace()}>Bind workspace</button
+            onclick={() => controller.bindWorkspace()}
+            >{t('Bind workspace')}</button
           >
         {:else if binding.state === 'bound_detached'}
           <button
             type="button"
             class="action primary"
             disabled={!acts || !ready || !leaseActive}
-            onclick={() => controller.resumeBinding()}>Attach to runtime</button
+            onclick={() => controller.resumeBinding()}
+            >{t('Attach to runtime')}</button
           >
         {:else if binding.state === 'indeterminate'}
           <button
@@ -463,14 +489,16 @@
             class="action"
             disabled={!acts}
             onclick={() => controller.confirm('abandon')}
-            >Discard attempt</button
+            >{t('Discard attempt')}</button
           >
         {/if}
       </div>
       {#if binding.state === 'unbound'}
         <p class="composer-note">
-          Folder: <span class="mono">{folder ?? 'none selected'}</span>. The
-          authority decides whether it can be a workspace.
+          {t('Folder:')}
+          <span class="mono">{folder ?? t('none selected')}</span>. {t(
+            'The authority decides whether it can be a workspace.',
+          )}
         </p>
       {/if}
     {/if}
@@ -478,7 +506,7 @@
 
   <section class="rt-card" aria-labelledby="rt-gates">
     <header>
-      <h4 id="rt-gates">What the authority would allow now</h4>
+      <h4 id="rt-gates">{t('What the authority would allow now')}</h4>
     </header>
     <ul class="rt-gates">
       {#each GATE_ACTIONS as action (action)}
@@ -489,7 +517,7 @@
             data-tone={gate?.reason === 'allowed' ? 'ok' : 'idle'}
           >
             <span class="dot" aria-hidden="true"></span>
-            {gate?.reason === 'allowed' ? 'Allowed' : 'Not now'}
+            {gate?.reason === 'allowed' ? t('Allowed') : t('Not now')}
           </span>
           <span class="rt-gate-name">{t(SCOPE_LABEL[action])}</span>
           {#if gate && gate.reason !== 'allowed'}
@@ -499,34 +527,36 @@
       {/each}
     </ul>
     <p class="composer-note">
-      This is a reading, not a permission: the authority checks again at the
-      moment of every action.
+      {t(
+        'This is a reading, not a permission: the authority checks again at the moment of every action.',
+      )}
     </p>
   </section>
 
   {#if open}
     <section class="rt-card" aria-labelledby="rt-close">
       <header>
-        <h4 id="rt-close">Close session</h4>
+        <h4 id="rt-close">{t('Close session')}</h4>
       </header>
       {#if confirming === 'close'}
-        <div class="close-confirm" role="group" aria-label="Confirm close">
+        <div class="close-confirm" role="group" aria-label={t('Confirm close')}>
           <p>
-            Close this session? It cannot be reopened, and its execution lease
-            is revoked. The authority refuses while its runtime runs or a turn
-            is active.
+            {t(
+              'Close this session? It cannot be reopened, and its execution lease is revoked. The authority refuses while its runtime runs or a turn is active.',
+            )}
           </p>
           <div class="session-actions">
             <button
               type="button"
               class="action danger"
               disabled={!acts}
-              onclick={() => controller.closeSession()}>Close session</button
+              onclick={() => controller.closeSession()}
+              >{t('Close session')}</button
             >
             <button
               type="button"
               class="action"
-              onclick={() => controller.confirm(null)}>Keep open</button
+              onclick={() => controller.confirm(null)}>{t('Keep open')}</button
             >
           </div>
         </div>
@@ -536,11 +566,11 @@
             type="button"
             class="action"
             disabled={!acts || !idle}
-            onclick={() => controller.confirm('close')}>Close…</button
+            onclick={() => controller.confirm('close')}>{t('Close…')}</button
           >
         </div>
         {#if !idle}
-          <p class="composer-note">Stop the runtime first.</p>
+          <p class="composer-note">{t('Stop the runtime first.')}</p>
         {/if}
       {/if}
     </section>

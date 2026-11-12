@@ -1589,4 +1589,85 @@ export const ES: Readonly<Record<string, string>> = {
   'Newest first': 'Más recientes primero',
   '· {count} window back': '· {count} ventana atrás',
   '· {count} windows back': '· {count} ventanas atrás',
+
+  // Overview (F8): the session overview panel
+  Conversation: 'Conversación',
+  'The runtime is changing state.': 'El runtime está cambiando de estado.',
+  'Start the runtime to work in this session.':
+    'Iniciá el runtime para trabajar en esta sesión.',
+  'Grant an execution lease so the session may bind a workspace and run turns.':
+    'Otorgá una concesión de ejecución para que la sesión pueda asociar un workspace y correr turnos.',
+  'Bind a project folder to this session.':
+    'Asociá una carpeta de proyecto a esta sesión.',
+  'Attach the session to the running runtime.':
+    'Conectá la sesión al runtime en ejecución.',
+  'The authority could not confirm the last binding attempt. Nothing asks again by itself.':
+    'La autoridad no pudo confirmar el último intento de asociación. Nada vuelve a preguntar por sí solo.',
+  'The authority is binding the workspace.':
+    'La autoridad está asociando el workspace.',
+  'Ready. Open the Conversation tab to give Codex an objective.':
+    'Listo. Abrí la pestaña Conversación para darle un objetivo a Codex.',
+  'Provider support': 'Soporte del proveedor',
+  'Claude Code Managed is not implemented in this authority. This session remains Codex; Native use requires a separate, explicit launch.':
+    'Claude Code Managed no está implementado en esta autoridad. Esta sesión sigue siendo Codex; el uso Native requiere un lanzamiento aparte y explícito.',
+  Generation: 'Generación',
+  'None yet': 'Todavía ninguna',
+  'Each start is a new generation; an earlier one never comes back.':
+    'Cada inicio es una generación nueva; una anterior nunca vuelve.',
+  'Isolated for': 'Aislado para',
+  Wanted: 'Pedido',
+  revision: 'revisión',
+  'This session has used every launch the authority allows it. No further runtime is started for it; a new session can be created.':
+    'Esta sesión usó todos los lanzamientos que la autoridad permite. No se inicia más runtime para ella; se puede crear una sesión nueva.',
+  'Confirm stop': 'Confirmar detención',
+  'Stop this runtime? Its process is ended and reaped. A turn that runs is not stopped under it: the authority refuses until that turn ends.':
+    '¿Detener este runtime? Su proceso se termina y se libera. Un turno en curso no se corta por debajo: la autoridad lo rechaza hasta que ese turno termine.',
+  'Stop runtime': 'Detener runtime',
+  'Keep running': 'Seguir corriendo',
+  'Local Tools gives Codex more to work with, not more authority: every command and file change waits for your approval. The runtime is isolated for one folder.':
+    'Local Tools le da a Codex más con qué trabajar, no más autoridad: cada comando y cada cambio de archivo espera tu aprobación. El runtime queda aislado para una sola carpeta.',
+  'Start runtime': 'Iniciar runtime',
+  'The runtime is not running but is still wanted, for example after the authority restarted. Stop it to close this session.':
+    'El runtime no está corriendo, pero sigue pedido; por ejemplo, después de que la autoridad se reinició. Detenelo para cerrar esta sesión.',
+  Folder: 'Carpeta',
+  'Folder:': 'Carpeta:',
+  'none selected': 'ninguna seleccionada',
+  'Execution lease': 'Concesión de ejecución',
+  Granted: 'Otorgadas',
+  'Valid until': 'Válida hasta',
+  '. When it ends or is revoked, a turn that runs under it ends, and so does the approval it waits on.':
+    '. Cuando termina o se revoca, el turno que corre bajo ella termina, y también la aprobación que espera.',
+  'Confirm revoke': 'Confirmar revocación',
+  'Revoke the lease? The turn that runs under it ends and its pending approval is invalidated, in the same commit.':
+    '¿Revocar la concesión? El turno que corre bajo ella termina y su aprobación pendiente se invalida, en el mismo paso.',
+  'Revoke lease': 'Revocar concesión',
+  'Renew for': 'Renovar por',
+  Renew: 'Renovar',
+  Revoke: 'Revocar',
+  Allow: 'Permitir',
+  For: 'Por',
+  'Grant lease': 'Otorgar concesión',
+  'A lease is a permission with an end, never a standing one. It needs a ready runtime':
+    'Una concesión es un permiso con fin, nunca permanente. Necesita un runtime listo',
+  'start it first': 'iniciarlo primero',
+  'Attached as': 'Conectada como',
+  'Model in use': 'Modelo en uso',
+  'Binding outcome uncertain': 'Resultado de la asociación incierto',
+  'The authority asked Codex to create a thread and could not confirm what Codex did. A second request could create a second thread, so nothing asks again by itself.':
+    'La autoridad le pidió a Codex que creara un hilo y no pudo confirmar qué hizo Codex. Un segundo pedido podría crear un segundo hilo, así que nada vuelve a pedirlo por sí solo.',
+  'Discard the uncertain attempt? The authority records that it was abandoned. If Codex did create a thread for it, the empty thread is left behind. The session can then be bound again.':
+    '¿Descartar el intento incierto? La autoridad registra que se abandonó. Si Codex sí creó un hilo para él, el hilo vacío queda. Después la sesión se puede volver a asociar.',
+  'Bind workspace': 'Asociar workspace',
+  'Attach to runtime': 'Conectar al runtime',
+  'The authority decides whether it can be a workspace.':
+    'La autoridad decide si puede ser un workspace.',
+  'What the authority would allow now': 'Lo que la autoridad permitiría ahora',
+  Allowed: 'Permitido',
+  'Not now': 'Ahora no',
+  'This is a reading, not a permission: the authority checks again at the moment of every action.':
+    'Esto es una lectura, no un permiso: la autoridad vuelve a verificar en el momento de cada acción.',
+  'Close this session? It cannot be reopened, and its execution lease is revoked. The authority refuses while its runtime runs or a turn is active.':
+    '¿Cerrar esta sesión? No se puede reabrir, y su concesión de ejecución se revoca. La autoridad rechaza el cierre mientras su runtime corre o hay un turno activo.',
+  'Close…': 'Cerrar…',
+  'Stop the runtime first.': 'Detené el runtime primero.',
 };
