@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SyncNote, SyncStatus } from '../../contracts/arsenal';
+  import { msg, t } from '../../i18n/index.svelte';
   import { ago, syncSummary } from './sync-present';
 
   let {
@@ -14,10 +15,10 @@
   const summary = $derived(syncSummary(sync, now()));
   const notes: { title: string; items: SyncNote[] }[] = $derived(
     [
-      { title: 'Waiting', items: sync.pending },
-      { title: 'Conflicts kept both versions', items: sync.conflicts },
-      { title: 'Refused', items: sync.rejected },
-      { title: 'Deleted on another computer', items: sync.removed },
+      { title: msg('Waiting'), items: sync.pending },
+      { title: msg('Conflicts kept both versions'), items: sync.conflicts },
+      { title: msg('Refused'), items: sync.rejected },
+      { title: msg('Deleted on another computer'), items: sync.removed },
     ].filter((group) => group.items.length > 0),
   );
 </script>
@@ -25,7 +26,7 @@
 <section
   class="arsenal-sync stripe"
   data-tone={summary.tone}
-  aria-label="Synchronization"
+  aria-label={t('Synchronization')}
 >
   <p class="arsenal-sync-line" role="status" aria-live="polite">
     <span class="badge" data-tone={summary.tone}
@@ -34,26 +35,36 @@
     <span class="arsenal-sync-text">{summary.text}</span>
   </p>
   <details class="arsenal-sync-details">
-    <summary>Synchronization details</summary>
+    <summary>{t('Synchronization details')}</summary>
     <dl class="sync-facts">
-      <dt>This computer</dt>
-      <dd>{sync.host} · {sync.published} change(s) published</dd>
-      <dt>Shared folder</dt>
-      <dd><code>{sync.folder}</code> (Syncthing carries it)</dd>
-      <dt>Last check</dt>
+      <dt>{t('This computer')}</dt>
       <dd>
-        {sync.last_success ? ago(sync.last_success, now()) : 'not yet'}
+        {t('{host} · {count} change(s) published', {
+          host: sync.host,
+          count: sync.published,
+        })}
+      </dd>
+      <dt>{t('Shared folder')}</dt>
+      <dd><code>{sync.folder}</code> {t('(Syncthing carries it)')}</dd>
+      <dt>{t('Last check')}</dt>
+      <dd>
+        {sync.last_success ? ago(sync.last_success, now()) : t('not yet')}
       </dd>
       {#each sync.peers as peer (peer.device)}
         <dt>{peer.host}</dt>
         <dd>
-          applied {peer.applied_mine} of {peer.published_mine} change(s) from here
-          {#if peer.last_heard}· last heard {ago(peer.last_heard, now())}{/if}
+          {t('applied {applied} of {published} change(s) from here', {
+            applied: peer.applied_mine,
+            published: peer.published_mine,
+          })}
+          {#if peer.last_heard}· {t('last heard {time}', {
+              time: ago(peer.last_heard, now()),
+            })}{/if}
         </dd>
       {/each}
     </dl>
     {#each notes as group (group.title)}
-      <h4>{group.title}</h4>
+      <h4>{t(group.title)}</h4>
       <ul class="arsenal-sync-notes">
         {#each group.items as item (item.at + item.kind + item.name + item.detail)}
           <li>
@@ -64,7 +75,9 @@
         {/each}
       </ul>
     {/each}
-    <button class="action" type="button" onclick={onsyncnow}>Check now</button>
+    <button class="action" type="button" onclick={onsyncnow}
+      >{t('Check now')}</button
+    >
   </details>
 </section>
 

@@ -3140,4 +3140,21 @@ export const ES: Readonly<Record<string, string>> = {
   'Start again': 'Iniciar de nuevo',
   'Hand off…': 'Transferir…',
   'Native sessions': 'Sesiones Native',
+  // ---- arsenal sync ----
+  Synchronization: 'Sincronización',
+  Waiting: 'En espera',
+  'Conflicts kept both versions': 'Conflictos: se conservaron ambas versiones',
+  'Deleted on another computer': 'Borrados en otra computadora',
+  'Synchronization details': 'Detalles de la sincronización',
+  'This computer': 'Esta computadora',
+  '{host} · {count} change(s) published':
+    '{host} · {count} cambio(s) publicado(s)',
+  'Shared folder': 'Carpeta compartida',
+  '(Syncthing carries it)': '(Syncthing lo transporta)',
+  'Last check': 'Última comprobación',
+  'not yet': 'todavía no',
+  'applied {applied} of {published} change(s) from here':
+    'aplicó {applied} de {published} cambio(s) de esta computadora',
+  'last heard {time}': 'última señal {time}',
+  'Check now': 'Comprobar ahora',
 };
