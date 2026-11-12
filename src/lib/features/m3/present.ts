@@ -87,31 +87,54 @@ export function reasonText(code: string): string {
   return REASON[code] ?? code;
 }
 
-/** A reported count; a missing one is "not reported", never zero. */
-export function counter(value: number | null): string {
-  return value === null ? 'not reported' : value.toLocaleString('en-US');
+/**
+ * A reported count; a missing one is "not reported", never zero. A number is not a sentence, so
+ * it is drawn as it is written.
+ */
+export function counter(value: number | null): Phrase {
+  return value === null
+    ? { text: msg('not reported') }
+    : { text: value.toLocaleString('en-US') };
 }
 
 /**
  * A running total over turns. It is exact only when every turn reported the counter; otherwise it
  * says how many did not.
  */
-export function running(a: Aggregate): string {
-  if (a.reported_turns === 0 && a.unreported_turns === 0) return '—';
-  if (a.reported_turns === 0) return 'not reported';
-  return a.unreported_turns === 0
-    ? a.sum.toLocaleString('en-US')
-    : `at least ${a.sum.toLocaleString('en-US')} (${a.unreported_turns} turn${a.unreported_turns === 1 ? '' : 's'} did not report)`;
+export function running(a: Aggregate): Phrase {
+  if (a.reported_turns === 0 && a.unreported_turns === 0) return { text: '—' };
+  if (a.reported_turns === 0) return { text: msg('not reported') };
+  if (a.unreported_turns === 0) return { text: a.sum.toLocaleString('en-US') };
+  const values = {
+    sum: a.sum.toLocaleString('en-US'),
+    count: a.unreported_turns,
+  };
+  return a.unreported_turns === 1
+    ? {
+        text: msg('at least {sum} ({count} turn did not report)'),
+        values,
+      }
+    : {
+        text: msg('at least {sum} ({count} turns did not report)'),
+        values,
+      };
 }
 
-export function tokenLine(t: Tokens): string {
+/** One phrase per token counter, joined with " · " by the view (tJoin). */
+export function tokenLine(t: Tokens): Phrase[] {
   return [
-    `in ${counter(t.input)}`,
-    `out ${counter(t.output)}`,
-    `cache write ${counter(t.cache_creation)}`,
-    `cache read ${counter(t.cache_read)}`,
-    `reasoning ${counter(t.reasoning)}`,
-  ].join(' · ');
+    { text: msg('in {count}'), values: { count: counter(t.input) } },
+    { text: msg('out {count}'), values: { count: counter(t.output) } },
+    {
+      text: msg('cache write {count}'),
+      values: { count: counter(t.cache_creation) },
+    },
+    {
+      text: msg('cache read {count}'),
+      values: { count: counter(t.cache_read) },
+    },
+    { text: msg('reasoning {count}'), values: { count: counter(t.reasoning) } },
+  ];
 }
 
 export const COMPLETENESS_LABEL: Record<string, string> = {

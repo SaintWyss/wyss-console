@@ -1772,4 +1772,48 @@ export const ES: Readonly<Record<string, string>> = {
   '{value} was in the request the provider received. That is not proof it took effect.':
     '{value} estaba en el pedido que recibió el proveedor. Eso no prueba que haya tenido efecto.',
   'The provider reported {value}.': 'El proveedor informó {value}.',
+
+  // The usage panel: the running totals, the turns, the limits and the SDK estimate
+  Input: 'Entrada',
+  Output: 'Salida',
+  'Cache write': 'Escritura de caché',
+  'Cache read': 'Lectura de caché',
+  Reasoning: 'Razonamiento',
+  allowed: 'permitido',
+  'allowed warning': 'permitido con advertencia',
+  rejected: 'rechazado',
+  'not reported': 'sin dato',
+  'in {count}': 'entrada {count}',
+  'out {count}': 'salida {count}',
+  'cache write {count}': 'escritura de caché {count}',
+  'cache read {count}': 'lectura de caché {count}',
+  'reasoning {count}': 'razonamiento {count}',
+  'at least {sum} ({count} turn did not report)':
+    'al menos {sum} ({count} turno no informó)',
+  'at least {sum} ({count} turns did not report)':
+    'al menos {sum} ({count} turnos no informaron)',
+  'No usage reported yet. A figure appears only when the provider reports it; one it did not report is shown as “not reported”, never as zero.':
+    'Todavía no se informó uso. Una cifra aparece solo cuando el proveedor la informa; una que no informó se muestra como “sin dato”, nunca como cero.',
+  'Running totals': 'Totales acumulados',
+  'Running totals over {count} turn, as Claude reported them. Nothing is added across providers or sessions.':
+    'Totales acumulados de {count} turno, tal como los informó Claude. No se suma nada entre proveedores ni sesiones.',
+  'Running totals over {count} turns, as Claude reported them. Nothing is added across providers or sessions.':
+    'Totales acumulados de {count} turnos, tal como los informó Claude. No se suma nada entre proveedores ni sesiones.',
+  'Usage per turn': 'Uso por turno',
+  'Answered by {models} (named by the provider)':
+    'Respondió {models} (nombrado por el proveedor)',
+  'Limits the provider reported': 'Límites que informó el proveedor',
+  'Utilization not reported': 'Uso sin dato',
+  '{percent} % used': '{percent} % usado',
+  'reset time not reported': 'hora de reinicio sin dato',
+  'resets {time}': 'se reinicia {time}',
+  'An allowance, not a price. Reported {time}.':
+    'Es un cupo, no un precio. Informado {time}.',
+  'Estimate computed by the SDK': 'Estimación calculada por el SDK',
+  'The Agent SDK adds a price estimate of its own to each result. It is not billing and not your subscription’s allowance, and this Console holds no price table to check it.':
+    'El Agent SDK agrega una estimación de precio propia a cada resultado. No es facturación ni el cupo de tu suscripción, y esta Consola no tiene una tabla de precios para verificarla.',
+  '{count} provider request checked · tools offered: {tools}':
+    '{count} pedido al proveedor revisado · herramientas ofrecidas: {tools}',
+  '{count} provider requests checked · tools offered: {tools}':
+    '{count} pedidos al proveedor revisados · herramientas ofrecidas: {tools}',
 };

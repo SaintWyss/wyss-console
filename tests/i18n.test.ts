@@ -33,7 +33,12 @@ import {
   failureText,
   outcomeText,
 } from '../src/lib/features/configuration/present';
-import { effortLine, rerouteLine } from '../src/lib/features/m3/present';
+import {
+  effortLine,
+  rerouteLine,
+  running,
+  tokenLine,
+} from '../src/lib/features/m3/present';
 import { parseModelCatalogue } from '../src/lib/contracts/models';
 import catalogues from './fixtures/model-catalogue-v1.json';
 
@@ -288,6 +293,34 @@ it('draws the model reroute and effort sentences in Spanish, with their places',
     'Requested claude-sonnet-5-5; the provider named claude-haiku-5-5.',
   );
   expect(tPhrase(effort)).toBe('The provider reported high.');
+});
+
+it('draws the usage counts and running totals in Spanish, with their places', () => {
+  const usageTokens = {
+    input: 1200,
+    output: null,
+    cache_creation: null,
+    cache_read: 40,
+    reasoning: 0,
+  };
+  const partial = { sum: 11, reported_turns: 2, unreported_turns: 1 };
+  const several = { sum: 30, reported_turns: 1, unreported_turns: 2 };
+  setLanguage('es');
+  expect(tJoin(tokenLine(usageTokens))).toBe(
+    'entrada 1,200 · salida sin dato · escritura de caché sin dato · lectura de caché 40 · razonamiento 0',
+  );
+  expect(tPhrase(running(partial))).toBe('al menos 11 (1 turno no informó)');
+  expect(tPhrase(running(several))).toBe(
+    'al menos 30 (2 turnos no informaron)',
+  );
+  setLanguage('en');
+  expect(tJoin(tokenLine(usageTokens))).toBe(
+    'in 1,200 · out not reported · cache write not reported · cache read 40 · reasoning 0',
+  );
+  expect(tPhrase(running(partial))).toBe('at least 11 (1 turn did not report)');
+  expect(tPhrase(running(several))).toBe(
+    'at least 30 (2 turns did not report)',
+  );
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {
