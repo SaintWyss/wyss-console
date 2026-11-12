@@ -22,16 +22,16 @@
 <div class="rt-models">
   {#if runtime.actual !== 'ready'}
     <div class="sessions-empty">
-      <p class="empty-title">No models to show</p>
+      <p class="empty-title">{t('No models to show')}</p>
       <p>
-        The models are what a running runtime listed when it started. A runtime
-        that has stopped has no list, and an earlier one is never shown for a
-        later one.
+        {t(
+          'The models are what a running runtime listed when it started. A runtime that has stopped has no list, and an earlier one is never shown for a later one.',
+        )}
       </p>
     </div>
   {:else if models.status === 'reading' || models.status === 'idle'}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Reading the models…</p>
+      <p class="empty-title">{t('Reading the models…')}</p>
     </div>
   {:else if models.status === 'failed' && models.failure}
     <div class="sessions-empty" role="alert">
@@ -39,7 +39,7 @@
       <button
         type="button"
         class="action"
-        onclick={() => controller.loadModels()}>Try again</button
+        onclick={() => controller.loadModels()}>{t('Try again')}</button
       >
     </div>
   {:else if models.info}
@@ -52,21 +52,23 @@
       )}
     </p>
     <p class="composer-note">
-      Runtime {models.info.version} · generation {models.info.fence.generation}.
+      {t('Runtime {version} · generation {generation}.', {
+        version: models.info.version,
+        generation: models.info.fence.generation,
+      })}
       {#if models.info.complete === false}
-        The runtime listed more models than the authority took.
+        {t('The runtime listed more models than the authority took.')}
       {/if}
-      A listed model is offered, not entitled: nothing here says the account may use
-      it. Protocol 2 has no request that selects a model or a reasoning effort, so
-      a turn uses what the runtime defaults to, and this view only reports what is
-      offered and what the runtime says it uses.
+      {t(
+        'A listed model is offered, not entitled: nothing here says the account may use it. Protocol 2 has no request that selects a model or a reasoning effort, so a turn uses what the runtime defaults to, and this view only reports what is offered and what the runtime says it uses.',
+      )}
     </p>
     {#if models.info.entries.length === 0}
       <div class="sessions-empty">
-        <p class="empty-title">The runtime listed no models.</p>
+        <p class="empty-title">{t('The runtime listed no models.')}</p>
       </div>
     {:else}
-      <ul class="rt-model-list" aria-label="Models offered by the runtime">
+      <ul class="rt-model-list" aria-label={t('Models offered by the runtime')}>
         {#each models.info.entries as entry (entry.model_id)}
           <li class="rt-model">
             <p class="rt-model-name">
@@ -74,7 +76,7 @@
               {#if entry.is_default}
                 <span class="pill compact" data-tone="ok">
                   <span class="dot" aria-hidden="true"></span>
-                  Runtime default
+                  {t('Runtime default')}
                 </span>
               {/if}
             </p>
@@ -84,24 +86,28 @@
                 : ''}
             </p>
             {#if entry.efforts !== null}
-              <ul class="rt-chips" aria-label="Supported reasoning efforts">
+              <ul
+                class="rt-chips"
+                aria-label={t('Supported reasoning efforts')}
+              >
                 {#each entry.efforts as effort (effort)}
                   <li class:default={effort === entry.default_effort}>
                     {effort}{effort === entry.default_effort
-                      ? ' · default'
+                      ? ` · ${t('default')}`
                       : ''}
                   </li>
                 {/each}
                 {#if entry.efforts.length === 0}
-                  <li>no efforts listed</li>
+                  <li>{t('no efforts listed')}</li>
                 {/if}
               </ul>
             {/if}
             {#if entry.replaced_by}
               <p class="fact-note">
-                The runtime marks <span class="mono">{entry.replaced_by}</span>
-                as its replacement{entry.retires_at
-                  ? `, retiring ${entry.retires_at}`
+                {t('The runtime marks')}
+                <span class="mono">{entry.replaced_by}</span>
+                {t('as its replacement')}{entry.retires_at
+                  ? t(', retiring {date}', { date: entry.retires_at })
                   : ''}.
               </p>
             {/if}

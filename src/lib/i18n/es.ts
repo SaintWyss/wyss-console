@@ -1757,4 +1757,25 @@ export const ES: Readonly<Record<string, string>> = {
     'Codex pidió algo que no se puede aprobar.',
   'Codex acted outside what the session allows.':
     'Codex actuó fuera de lo que la sesión permite.',
+
+  // Models (F8): the models view
+  'No models to show': 'No hay modelos para mostrar',
+  'The models are what a running runtime listed when it started. A runtime that has stopped has no list, and an earlier one is never shown for a later one.':
+    'Los modelos son lo que un runtime en ejecución listó al arrancar. Un runtime que se detuvo no tiene lista, y una anterior nunca se muestra para uno posterior.',
+  'Reading the models…': 'Leyendo los modelos…',
+  'Runtime {version} · generation {generation}.':
+    'Runtime {version} · generación {generation}.',
+  'The runtime listed more models than the authority took.':
+    'El runtime listó más modelos de los que la autoridad tomó.',
+  'A listed model is offered, not entitled: nothing here says the account may use it. Protocol 2 has no request that selects a model or a reasoning effort, so a turn uses what the runtime defaults to, and this view only reports what is offered and what the runtime says it uses.':
+    'Un modelo listado se ofrece, no está habilitado: nada acá dice que la cuenta pueda usarlo. El protocolo 2 no tiene un pedido que elija un modelo ni un esfuerzo de razonamiento, así que un turno usa el que el runtime tiene por defecto, y esta vista solo informa lo que se ofrece y lo que el runtime dice que usa.',
+  'The runtime listed no models.': 'El runtime no listó modelos.',
+  'Models offered by the runtime': 'Modelos ofrecidos por el runtime',
+  'Runtime default': 'Predeterminado del runtime',
+  'Supported reasoning efforts': 'Esfuerzos de razonamiento soportados',
+  default: 'predeterminado',
+  'no efforts listed': 'no hay esfuerzos listados',
+  'The runtime marks': 'El runtime marca',
+  'as its replacement': 'como su reemplazo',
+  ', retiring {date}': ', que se retira el {date}',
 };
