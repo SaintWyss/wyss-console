@@ -2275,14 +2275,14 @@ export const ES: Readonly<Record<string, string>> = {
   Family: 'Familia',
   'No capabilities match.': 'Ninguna capacidad coincide.',
   'Move to group…': 'Mover a grupo…',
-  'Everything installed for this provider: rules, skills and agents.':
-    'Todo lo instalado para este proveedor: reglas, skills y agentes.',
-  'Always on. Standing instructions the agent reads when the session starts, such as invariantes.md. They set how it works; nothing runs.':
-    'Siempre activas. Instrucciones fijas que el agente lee al arrancar la sesión, como invariantes.md. Marcan cómo trabaja; no ejecutan nada.',
-  'On demand. A guide for one kind of task; the agent loads it only when the task calls for it.':
-    'A pedido. Una guía para un tipo de tarea; el agente la carga solo cuando la tarea la necesita.',
-  'Delegated. A helper with its own role; the main agent hands it a subtask and gets the result back.':
-    'Delegados. Un ayudante con su propio rol; el agente principal le pasa una subtarea y recibe el resultado.',
+  'Shows everything at once: rules, skills and agents.':
+    'Muestra todo junto: reglas, skills y agentes.',
+  'A rule is a file of permanent instructions, such as invariantes.md. The agent reads it when every session starts and follows it the whole time. It does not run anything.':
+    'Una regla es un archivo de instrucciones permanentes, como invariantes.md. El agente lo lee al arrancar cada sesión y lo cumple todo el tiempo. No ejecuta nada.',
+  'A skill is a how-to manual for one kind of task, such as designing a screen or finding a bug. The agent opens it only when the task you give it needs it.':
+    'Una skill es un manual de cómo hacer un tipo de tarea, como diseñar una pantalla o encontrar un error. El agente la abre solo cuando la tarea que le das la necesita.',
+  'An agent is a helper with a job of its own, such as reviewing code. The main agent hands it part of the work; it does it on its own and returns the result.':
+    'Un agente es un ayudante con un trabajo propio, como revisar código. El agente principal le pasa una parte del trabajo; él la hace por su cuenta y devuelve el resultado.',
   'Only changes where it is listed on this screen, not what it does. Saved on this computer.':
     'Solo cambia dónde aparece en esta pantalla, no lo que hace. Se guarda en esta computadora.',
   'Back to automatic group': 'Volver al grupo automático',

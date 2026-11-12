@@ -227,29 +227,16 @@ describe('Presets screen', () => {
     expect(chips[0].getAttribute('title')).toContain(
       'rules, skills and agents',
     );
-    expect(chips[1].getAttribute('title')).toContain('Always on');
-    expect(chips[2].getAttribute('title')).toContain('On demand');
-    expect(chips[3].getAttribute('title')).toContain('hands it a subtask');
+    expect(chips[1].getAttribute('title')).toContain('A rule is a file');
+    expect(chips[2].getAttribute('title')).toContain('A skill is a how-to');
+    expect(chips[3].getAttribute('title')).toContain('An agent is a helper');
   });
 
-  it('explains what each type does, marks the chosen one, and what Move to group does', () => {
+  it('explains types only on hover, and what Move to group does', () => {
     const rule = item('invariantes', { kind: 'rule' });
     const { root } = render(stateWith({ library: [frontend, rule] }));
     flushSync();
-    const rows = [...root.querySelectorAll('.filters .kind-help-row')];
-    expect(rows.map((row) => text(row.querySelector('dt')))).toEqual([
-      'Rules',
-      'Skills',
-      'Agents',
-    ]);
-    expect(text(rows[0])).toContain('Always on');
-    expect(text(rows[1])).toContain('On demand');
-    expect(text(rows[2])).toContain('hands it a subtask');
-    expect(rows.map((row) => row.getAttribute('data-active'))).toEqual([
-      'true',
-      'false',
-      'false',
-    ]);
+    expect(root.querySelector('.kind-help')).toBeNull();
     const move = [...root.querySelectorAll('button')].find(
       (node) => text(node) === 'Move to group…',
     )!;
