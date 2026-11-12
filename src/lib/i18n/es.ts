@@ -824,4 +824,49 @@ export const ES: Readonly<Record<string, string>> = {
     'Un perfil pasa estos nombres al agente cuando arranca una sesión. Wyss Console no puede comprobarlos: si el agente no conoce uno, lo dice en su propia sesión. Nada cambia los archivos propios del agente.',
   'Agents you start in a terminal do not report the model they use, and this app adds no hook and reads no terminal to find out. What you see for them is what was asked for and what their files say, never what is in use.':
     'Los agentes que arrancás en una terminal no informan el modelo que usan, y esta app no agrega ningún hook ni lee la terminal para saberlo. Lo que se ve de ellos es lo que se pidió y lo que dicen sus archivos, nunca lo que está en uso.',
+
+  // Credentials: the API keys the desktop keeps sealed
+  'API credentials': 'Credenciales de API',
+  'API keys for the AI services, kept sealed on this computer (the key that seals them is in your Secret Service). A key is typed in a window of its own and is never shown again, never sent to this page and never written unsealed. Only a name, the service and a short checksum are listed. Nothing here starts an agent with a key.':
+    'Claves de API de los servicios de IA, guardadas selladas en esta computadora (la clave que las sella está en tu Secret Service). Una clave se escribe en una ventana propia y nunca se vuelve a mostrar, nunca se envía a esta página y nunca se escribe sin sellar. Solo se listan un nombre, el servicio y un checksum corto. Acá nada arranca un agente con una clave.',
+  'The name must be 1 to 60 characters, without control characters.':
+    'El nombre tiene que tener de 1 a 60 caracteres, sin caracteres de control.',
+  'The key may not be empty, hold spaces or line breaks, or be longer than 4096 characters.':
+    'La clave no puede estar vacía, tener espacios o saltos de línea, ni superar los 4096 caracteres.',
+  'That key is not kept any more.': 'Esa clave ya no está guardada.',
+  'There are too many keys (100).': 'Hay demasiadas claves (100).',
+  'No key store (the Secret Service) is available, so nothing was kept. A key is never kept unsealed.':
+    'No hay un almacén de claves (el Secret Service) disponible, así que no se guardó nada. Una clave nunca se guarda sin sellar.',
+  'The key that sealed this record is gone from the key store. Replace the key.':
+    'La clave que selló este registro ya no está en el almacén de claves. Reemplazá la clave.',
+  'The record is damaged. Replace the key.':
+    'El registro está dañado. Reemplazá la clave.',
+  'The Console could not write its own state.':
+    'La consola no pudo escribir su propio estado.',
+  'Something went wrong in the desktop.': 'Algo salió mal en el escritorio.',
+  Other: 'Otro',
+  'Add a key': 'Agregar una clave',
+  'Enter the key…': 'Ingresar la clave…',
+  'Reading…': 'Leyendo…',
+  'No keys yet': 'Todavía no hay claves',
+  'Add one above. Its value is asked for in a separate window.':
+    'Agregá una arriba. Su valor se pide en una ventana aparte.',
+  Keys: 'Claves',
+  'New name': 'Nombre nuevo',
+  checksum: 'checksum',
+  'kept {date}': 'guardada el {date}',
+  'changed {date}': 'cambiada el {date}',
+  'Save name': 'Guardar nombre',
+  'Replace key…': 'Reemplazar clave…',
+  Rename: 'Renombrar',
+  Check: 'Verificar',
+  'Delete…': 'Eliminar…',
+  'Key kept, sealed.': 'Clave guardada, sellada.',
+  'Key replaced.': 'Clave reemplazada.',
+  'Renamed.': 'Renombrada.',
+  'Key deleted.': 'Clave eliminada.',
+  'The key opens and matches its checksum.':
+    'La clave se abre y coincide con su checksum.',
+  'The record is damaged: replace the key.':
+    'El registro está dañado: reemplazá la clave.',
 };

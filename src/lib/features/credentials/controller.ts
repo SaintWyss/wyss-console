@@ -5,6 +5,7 @@ import type {
 } from '../../contracts/api-keys';
 import * as desktop from '../../desktop/credentials-client';
 import { CredentialCallError } from '../../desktop/credentials-client';
+import { msg } from '../../i18n/msg';
 
 export interface CredentialsClient {
   list(): Promise<Credential[]>;
@@ -96,30 +97,30 @@ export class CredentialsController {
   }
   add(name: string, provider: Provider) {
     return this.act(async () =>
-      (await this.client.add(name, provider)) ? 'Key kept, sealed.' : null,
+      (await this.client.add(name, provider)) ? msg('Key kept, sealed.') : null,
     );
   }
   replace(id: string) {
     return this.act(async () =>
-      (await this.client.replace(id)) ? 'Key replaced.' : null,
+      (await this.client.replace(id)) ? msg('Key replaced.') : null,
     );
   }
   rename(id: string, name: string) {
     return this.act(async () => {
       await this.client.rename(id, name);
-      return 'Renamed.';
+      return msg('Renamed.');
     });
   }
   remove(id: string) {
     return this.act(async () =>
-      (await this.client.remove(id)) ? 'Key deleted.' : null,
+      (await this.client.remove(id)) ? msg('Key deleted.') : null,
     );
   }
   verify(id: string) {
     return this.act(async () =>
       (await this.client.verify(id))
-        ? 'The key opens and matches its checksum.'
-        : 'The record is damaged: replace the key.',
+        ? msg('The key opens and matches its checksum.')
+        : msg('The record is damaged: replace the key.'),
     );
   }
   dispose() {

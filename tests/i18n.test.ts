@@ -133,6 +133,16 @@ it('draws the models sentences in Spanish, with their efforts and places', () =>
   );
 });
 
+it('draws the credentials notices and their dates in Spanish', () => {
+  setLanguage('es');
+  expect(t('Key kept, sealed.')).toBe('Clave guardada, sellada.');
+  expect(t('kept {date}', { date: '11 nov 2026' })).toBe(
+    'guardada el 11 nov 2026',
+  );
+  setLanguage('en');
+  expect(t('kept {date}', { date: '11 nov 2026' })).toBe('kept 11 nov 2026');
+});
+
 it('has a Spanish sentence for every sentence the window can show', () => {
   const missing = [...sentences()]
     .filter(([text]) => !Object.hasOwn(ES, text))

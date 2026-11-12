@@ -1,5 +1,7 @@
 <script lang="ts">
   import { PROVIDERS, type Provider } from '../../contracts/api-keys';
+  import { t } from '../../i18n/index.svelte';
+  import { msg } from '../../i18n/msg';
   import type { CredentialsController, CredentialsState } from './controller';
 
   let {
@@ -12,27 +14,32 @@
     visible: boolean;
   } = $props();
 
+  /** The services' names are their own; only the word for the one that is not named is ours. */
   const PROVIDER_LABEL: Record<Provider, string> = {
     anthropic: 'Anthropic',
     openai: 'OpenAI',
     google: 'Google',
     openrouter: 'OpenRouter',
-    other: 'Other',
+    other: msg('Other'),
   };
   const FAILURE_TEXT: Record<string, string> = {
-    name_invalid:
+    name_invalid: msg(
       'The name must be 1 to 60 characters, without control characters.',
-    secret_invalid:
+    ),
+    secret_invalid: msg(
       'The key may not be empty, hold spaces or line breaks, or be longer than 4096 characters.',
-    unknown: 'That key is not kept any more.',
-    too_many: 'There are too many keys (100).',
-    key_store_unavailable:
+    ),
+    unknown: msg('That key is not kept any more.'),
+    too_many: msg('There are too many keys (100).'),
+    key_store_unavailable: msg(
       'No key store (the Secret Service) is available, so nothing was kept. A key is never kept unsealed.',
-    key_lost:
+    ),
+    key_lost: msg(
       'The key that sealed this record is gone from the key store. Replace the key.',
-    damaged: 'The record is damaged. Replace the key.',
-    store_unavailable: 'The Console could not write its own state.',
-    internal: 'Something went wrong in the desktop.',
+    ),
+    damaged: msg('The record is damaged. Replace the key.'),
+    store_unavailable: msg('The Console could not write its own state.'),
+    internal: msg('Something went wrong in the desktop.'),
   };
   let name = $state('');
   let provider = $state<Provider>('anthropic');
@@ -51,24 +58,22 @@
 
 <section
   class="native-feature"
-  aria-label="API credentials"
+  aria-label={t('API credentials')}
   hidden={!visible}
   inert={!visible}
 >
   <p class="native-note">
-    API keys for the AI services, kept sealed on this computer (the key that
-    seals them is in your Secret Service). A key is typed in a window of its own
-    and is never shown again, never sent to this page and never written
-    unsealed. Only a name, the service and a short checksum are listed. Nothing
-    here starts an agent with a key.
+    {t(
+      'API keys for the AI services, kept sealed on this computer (the key that seals them is in your Secret Service). A key is typed in a window of its own and is never shown again, never sent to this page and never written unsealed. Only a name, the service and a short checksum are listed. Nothing here starts an agent with a key.',
+    )}
   </p>
   {#if credentials.failure}
     <p class="sessions-status failed" role="alert">
-      {FAILURE_TEXT[credentials.failure]}
+      {t(FAILURE_TEXT[credentials.failure])}
     </p>
   {/if}
   {#if credentials.notice}
-    <p class="sessions-status" role="status">{credentials.notice}</p>
+    <p class="sessions-status" role="status">{t(credentials.notice)}</p>
   {/if}
 
   <form
@@ -78,9 +83,9 @@
       void add();
     }}
   >
-    <h3>Add a key</h3>
+    <h3>{t('Add a key')}</h3>
     <div class="native-field">
-      <label for="cred-name">Name</label>
+      <label for="cred-name">{t('Name')}</label>
       <input
         id="cred-name"
         type="text"
@@ -90,10 +95,10 @@
       />
     </div>
     <div class="native-field">
-      <label for="cred-provider">Service</label>
+      <label for="cred-provider">{t('Service')}</label>
       <select id="cred-provider" bind:value={provider}>
         {#each PROVIDERS as word (word)}
-          <option value={word}>{PROVIDER_LABEL[word]}</option>
+          <option value={word}>{t(PROVIDER_LABEL[word])}</option>
         {/each}
       </select>
     </div>
@@ -103,22 +108,22 @@
         class="action primary"
         disabled={credentials.busy || name.trim() === ''}
       >
-        Enter the key…
+        {t('Enter the key…')}
       </button>
     </div>
   </form>
 
   {#if credentials.phase === 'loading' || credentials.phase === 'idle'}
     <div class="sessions-empty" role="status" aria-busy="true">
-      <p class="empty-title">Reading…</p>
+      <p class="empty-title">{t('Reading…')}</p>
     </div>
   {:else if credentials.items.length === 0}
     <div class="sessions-empty">
-      <p class="empty-title">No keys yet</p>
-      <p>Add one above. Its value is asked for in a separate window.</p>
+      <p class="empty-title">{t('No keys yet')}</p>
+      <p>{t('Add one above. Its value is asked for in a separate window.')}</p>
     </div>
   {:else}
-    <ul class="events-list" aria-label="Keys">
+    <ul class="events-list" aria-label={t('Keys')}>
       {#each credentials.items as item (item.id)}
         <li class="native-row" data-state="running">
           <span class="event-title">
@@ -126,21 +131,22 @@
               <input
                 type="text"
                 maxlength="60"
-                aria-label="New name"
+                aria-label={t('New name')}
                 bind:value={renamed}
               />
             {:else}{item.name}{/if}
           </span>
           <span class="pill compact" data-tone="idle"
-            ><span class="dot" aria-hidden="true"></span>{PROVIDER_LABEL[
-              item.provider
-            ]}</span
+            ><span class="dot" aria-hidden="true"></span>{t(
+              PROVIDER_LABEL[item.provider],
+            )}</span
           >
           <span class="event-meta native-facts">
-            checksum <span class="mono">{item.fingerprint}</span> · kept {day(
-              item.created_at,
+            {t('checksum')} <span class="mono">{item.fingerprint}</span> · {t(
+              'kept {date}',
+              { date: day(item.created_at) },
             )}{item.updated_at !== item.created_at
-              ? ` · changed ${day(item.updated_at)}`
+              ? ` · ${t('changed {date}', { date: day(item.updated_at) })}`
               : ''}
           </span>
           <span class="native-actions">
@@ -152,19 +158,20 @@
                 onclick={async () => {
                   await controller.rename(item.id, renamed);
                   renaming = null;
-                }}>Save name</button
+                }}>{t('Save name')}</button
               >
               <button
                 type="button"
                 class="action"
-                onclick={() => (renaming = null)}>Cancel</button
+                onclick={() => (renaming = null)}>{t('Cancel')}</button
               >
             {:else}
               <button
                 type="button"
                 class="action"
                 disabled={credentials.busy}
-                onclick={() => controller.replace(item.id)}>Replace key…</button
+                onclick={() => controller.replace(item.id)}
+                >{t('Replace key…')}</button
               >
               <button
                 type="button"
@@ -173,19 +180,20 @@
                 onclick={() => {
                   renaming = item.id;
                   renamed = item.name;
-                }}>Rename</button
+                }}>{t('Rename')}</button
               >
               <button
                 type="button"
                 class="action"
                 disabled={credentials.busy}
-                onclick={() => controller.verify(item.id)}>Check</button
+                onclick={() => controller.verify(item.id)}>{t('Check')}</button
               >
               <button
                 type="button"
                 class="action"
                 disabled={credentials.busy}
-                onclick={() => controller.remove(item.id)}>Delete…</button
+                onclick={() => controller.remove(item.id)}
+                >{t('Delete…')}</button
               >
             {/if}
           </span>
