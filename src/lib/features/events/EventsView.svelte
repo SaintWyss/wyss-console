@@ -511,8 +511,8 @@
             {@const now = answer.detail.approval}
             <p class="session-hint" role="status">
               {t('Now:')}
-              {APPROVAL_STATE[now.state].label}.
-              {now.reason ? APPROVAL_REASON[now.reason] : ''}
+              {t(APPROVAL_STATE[now.state].label)}.
+              {now.reason ? t(APPROVAL_REASON[now.reason]) : ''}
               {answer.detail.command === null && answer.detail.files === null
                 ? t('The authority no longer holds what it was about.')
                 : t('What it is about is shown in Approvals.')}
