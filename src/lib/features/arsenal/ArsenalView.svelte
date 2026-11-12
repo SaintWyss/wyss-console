@@ -1886,8 +1886,7 @@
   .arsenal-status {
     font-size: var(--text-md);
   }
-  .arsenal-detail h4,
-  .arsenal-editor h4 {
+  .arsenal-detail h4 {
     margin: 6px 0 0;
     font-size: var(--text-sm);
     font-weight: 600;
