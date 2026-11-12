@@ -1816,4 +1816,42 @@ export const ES: Readonly<Record<string, string>> = {
     '{count} pedido al proveedor revisado · herramientas ofrecidas: {tools}',
   '{count} provider requests checked · tools offered: {tools}':
     '{count} pedidos al proveedor revisados · herramientas ofrecidas: {tools}',
+
+  // The fixture console: the simulated runtime, its conversation, its held actions and the prompt
+  Refused: 'Rechazado',
+  Accept: 'Aceptar',
+  Decline: 'Rechazar',
+  starting: 'iniciando',
+  completed: 'completado',
+  failed: 'fallido',
+  interrupted: 'interrumpido',
+  '{label}. It drives the real Claude Agent SDK against a mock provider on this machine. Nothing here is leased, fenced or recorded by the authority, and no real provider is contacted.':
+    '{label}. Maneja el Claude Agent SDK real contra un proveedor simulado en esta máquina. Nada de acá tiene concesión, fencing ni lo registra la autoridad, y no se contacta ningún proveedor real.',
+  'Start Claude Inference': 'Iniciar Claude Inference',
+  'Start Claude Local tools': 'Iniciar Claude Local tools',
+  'Stop the runtime': 'Detener el runtime',
+  'The runtime was refused and stopped before it could be used':
+    'El runtime fue rechazado y se detuvo antes de poder usarse',
+  'The runtime failed and was stopped': 'El runtime falló y se detuvo',
+  ': {detail}': ': {detail}',
+  Conversation: 'Conversación',
+  'Send a prompt to the runtime.': 'Mandá un mensaje al runtime.',
+  'Start a runtime to talk to it.': 'Iniciá un runtime para hablar con él.',
+  'File change proposed by Claude': 'Cambio de archivo propuesto por Claude',
+  'Command proposed by Claude': 'Comando propuesto por Claude',
+  'Runs in': 'Corre en',
+  ', with no network.': ', sin red.',
+  'This action is not one this window can show completely, so it cannot be accepted.':
+    'Esta ventana no puede mostrar esta acción completa, así que no se puede aceptar.',
+  'The fingerprint the decision is bound to':
+    'La huella a la que queda atada la decisión',
+  'fingerprint {fingerprint}…': 'huella {fingerprint}…',
+  'Nobody can say whether this happened. It will not be run again; check the workspace before asking for anything similar.':
+    'Nadie puede decir si esto pasó. No se va a volver a ejecutar; revisá el workspace antes de pedir algo parecido.',
+  Prompt: 'Mensaje',
+  'Ask Claude something': 'Preguntale algo a Claude',
+  'Start a runtime first': 'Iniciá un runtime primero',
+  Send: 'Enviar',
+  'Cancel the turn': 'Cancelar el turno',
+  'Turn {state}': 'Turno {state}',
 };
