@@ -164,12 +164,7 @@
         profiles: readProfiles,
         remembered: (project, agent) =>
           arsenalClient.projectSelection(project, agent).catch(() => null),
-        presetNamed: async (name, agent) => {
-          const named = (await arsenalClient.selections()).filter(
-            (s) => s.name === name && s.provider === agent,
-          );
-          return named.length === 1 ? named[0].id : null;
-        },
+        selections: () => arsenalClient.selections(),
         plan: (selection, agent, project) =>
           arsenalClient.terminalPlan(selection, agent, project),
         preview: (agent, profile, arsenal) =>

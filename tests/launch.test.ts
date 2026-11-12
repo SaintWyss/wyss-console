@@ -4,6 +4,7 @@ import {
   LaunchRefusal,
   openLaunch,
   type LaunchDeps,
+  type SelectionName,
 } from '../src/lib/features/terminal/launch';
 import type { Launch } from '../src/lib/desktop/launch-client';
 import type { Profile, StartReply } from '../src/lib/contracts/native';
@@ -48,6 +49,11 @@ const session = (
   preset: null,
   ...over,
 });
+const selectionOf = (
+  id: string,
+  name: string,
+  provider: 'claude_code' | 'codex',
+): SelectionName => ({ id, name, provider });
 function deps(
   launch: Launch,
   before = [{ command: 'scan', result: 'ok' }],
@@ -56,15 +62,19 @@ function deps(
     canApply = true,
     canStart = true,
     presetId = 'sel-preset' as string | null,
+    selections = null as SelectionName[] | null,
   } = {},
 ) {
   const reply = { session: { id: 's1' } } as unknown as StartReply;
+  // By default one Codex selection named Estudio exists, with the id presetId (none when null).
+  const named: SelectionName[] =
+    selections ?? (presetId ? [selectionOf(presetId, 'Estudio', 'codex')] : []);
   const d: LaunchDeps = {
     getLaunch: vi.fn(async () => launch),
     runBefore: vi.fn(async () => before),
     profiles: vi.fn(async () => PROFILES),
     remembered: vi.fn(async () => selection),
-    presetNamed: vi.fn(async () => presetId),
+    selections: vi.fn(async () => named),
     plan: vi.fn(
       async () =>
         ({
@@ -143,7 +153,7 @@ describe('openLaunch', () => {
       selection: 'sel-remembered',
     });
     await openLaunch('codex', d);
-    expect(d.presetNamed).toHaveBeenCalledWith('Estudio', 'codex');
+    expect(d.selections).toHaveBeenCalled();
     expect(d.remembered).not.toHaveBeenCalled();
     expect(d.plan).toHaveBeenCalledWith('sel-preset', 'codex', '/home/me');
   });
@@ -151,7 +161,7 @@ describe('openLaunch', () => {
   it('a launch with no preset keeps the one its folder remembers', async () => {
     const { d } = deps(session(), undefined, { selection: 'sel-remembered' });
     await openLaunch('codex', d);
-    expect(d.presetNamed).not.toHaveBeenCalled();
+    expect(d.selections).not.toHaveBeenCalled();
     expect(d.plan).toHaveBeenCalledWith('sel-remembered', 'codex', '/home/me');
   });
 
@@ -171,6 +181,38 @@ describe('openLaunch', () => {
     expect(d.runBefore).not.toHaveBeenCalled();
     expect(d.plan).not.toHaveBeenCalled();
     expect(d.start).not.toHaveBeenCalled();
+  });
+
+  it('two selections of this agent with the preset name stop the launch before anything runs, and say to delete the extra ones', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selections: [
+        selectionOf('a', 'Estudio', 'codex'),
+        selectionOf('b', 'Estudio', 'codex'),
+      ],
+    });
+    const refusal = await openLaunch('codex', d).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(LaunchRefusal);
+    // Its own sentence, not the "no preset" one: the owner has one too many, not none.
+    const { template, values } = refusal as LaunchRefusal;
+    expect(template).toContain('More than one preset');
+    expect(template).not.toContain('No preset named');
+    expect(values).toEqual({ name: 'Estudio' });
+    expect(d.runBefore).not.toHaveBeenCalled();
+    expect(d.plan).not.toHaveBeenCalled();
+    expect(d.start).not.toHaveBeenCalled();
+  });
+
+  it('a same-named preset of the other agent is not a second match', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selections: [
+        selectionOf('a', 'Estudio', 'claude_code'),
+        selectionOf('b', 'Estudio', 'codex'),
+      ],
+    });
+    await openLaunch('codex', d);
+    expect(d.plan).toHaveBeenCalledWith('b', 'codex', '/home/me');
   });
 
   it('a profile that does not exist for the agent stops before anything runs', async () => {

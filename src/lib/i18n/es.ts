@@ -850,4 +850,6 @@ export const ES: Readonly<Record<string, string>> = {
     'No hay un perfil llamado “{name}” para este agente. Créalo en Perfiles o cambia el archivo del lanzamiento.',
   'No preset named “{name}” for this agent. Create it in Arsenal, or change the launch file.':
     'No hay un preset llamado “{name}” para este agente. Créalo en Arsenal o cambia el archivo del lanzamiento.',
+  'More than one preset is named “{name}” for this agent. Delete the extra ones in Arsenal, then start again.':
+    'Hay más de un preset llamado “{name}” para este agente. Borra los sobrantes en Arsenal y vuelve a iniciar.',
 };

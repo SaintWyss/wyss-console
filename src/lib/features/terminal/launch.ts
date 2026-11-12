@@ -4,20 +4,23 @@ import type {
   Preview,
   StartReply,
 } from '../../contracts/native';
-import type { TerminalPlan } from '../../contracts/arsenal';
+import type { Selection, TerminalPlan } from '../../contracts/arsenal';
 import type { ArsenalStart } from '../../desktop/native-client';
 import type { BeforeOutcome, Launch } from '../../desktop/launch-client';
 import { msg } from '../../i18n/msg';
+
+/** The part of an Arsenal selection a launch needs to find its preset. */
+export type SelectionName = Pick<Selection, 'id' | 'name' | 'provider'>;
 
 /** What opening a launch needs; the desktop's functions in the window, fakes in tests. */
 export interface LaunchDeps {
   getLaunch(id: string): Promise<Launch>;
   runBefore(id: string): Promise<BeforeOutcome[]>;
   profiles(): Promise<Profile[]>;
+  /** The Arsenal selections of every provider; a launch finds its preset among them by name. */
+  selections(): Promise<SelectionName[]>;
   /** The Arsenal selection the folder's last terminal of this agent started with. */
   remembered(project: string, agent: AgentId): Promise<string | null>;
-  /** The selection id of the preset with this name for this agent; null when there is none. */
-  presetNamed(name: string, agent: AgentId): Promise<string | null>;
   plan(
     selection: string,
     agent: AgentId,
@@ -76,7 +79,7 @@ export interface Opened {
 
 /** The profile a session launch names, by its name, for its agent. */
 export function profileFor(
-  profiles: Profile[],
+  profiles: readonly Profile[],
   name: string,
   agent: AgentId,
 ): Profile | undefined {
@@ -113,6 +116,61 @@ export function isFullAccess(launch: Launch, profiles: Profile[]): boolean {
   return !!profile && effectivePermission(profiles, profile) === 'bypass';
 }
 
+/** The selections of a provider named like a launch's preset: exactly one, none, or several. */
+export type PresetMatch =
+  { state: 'one'; id: string } | { state: 'none' } | { state: 'several' };
+
+export function presetMatch(
+  selections: readonly SelectionName[],
+  name: string,
+  agent: AgentId,
+): PresetMatch {
+  const named = selections.filter(
+    (s) => s.name === name && s.provider === agent,
+  );
+  if (named.length === 0) return { state: 'none' };
+  if (named.length > 1) return { state: 'several' };
+  return { state: 'one', id: named[0].id };
+}
+
+/**
+ * Why a launch cannot start, from what the desktop holds: a commands launch always can; a session
+ * launch needs its profile to exist for its agent, and its preset to name exactly one selection of
+ * that agent. The reason is a sentence the view draws through t(); null when the launch may start.
+ */
+export function launchBlock(
+  launch: Launch,
+  profiles: readonly Profile[],
+  selections: readonly SelectionName[],
+): LaunchRefusal | null {
+  if (launch.kind !== 'session') return null;
+  if (launch.profile && !profileFor(profiles, launch.profile, launch.agent))
+    return new LaunchRefusal(
+      msg(
+        'No profile named “{name}” for this agent. Create it in Profiles, or change the launch file.',
+      ),
+      { name: launch.profile },
+    );
+  if (launch.preset) {
+    const match = presetMatch(selections, launch.preset, launch.agent);
+    if (match.state === 'none')
+      return new LaunchRefusal(
+        msg(
+          'No preset named “{name}” for this agent. Create it in Arsenal, or change the launch file.',
+        ),
+        { name: launch.preset },
+      );
+    if (match.state === 'several')
+      return new LaunchRefusal(
+        msg(
+          'More than one preset is named “{name}” for this agent. Delete the extra ones in Arsenal, then start again.',
+        ),
+        { name: launch.preset },
+      );
+  }
+  return null;
+}
+
 /**
  * Opens a launch by its id: re-read from its file, then a terminal with its commands typed, or
  * its `before` commands run and its agent started with the profile it names and the Arsenal
@@ -132,30 +190,20 @@ export async function openLaunch(
     return { notes: [] };
   }
   const { agent, directory } = launch;
-  let profileId: string | null = null;
-  if (launch.profile) {
-    const profile = profileFor(await deps.profiles(), launch.profile, agent);
-    if (!profile)
-      throw new LaunchRefusal(
-        msg(
-          'No profile named “{name}” for this agent. Create it in Profiles, or change the launch file.',
-        ),
-        { name: launch.profile },
-      );
-    profileId = profile.id;
-  }
-  // The preset the launch names wins over the one its folder remembers. A name with no preset
-  // for this agent stops the launch before anything runs, with the reason.
+  // A profile or a preset the desktop does not hold, or a preset name held twice, stops the launch
+  // before anything runs, with the reason.
+  const profiles = launch.profile ? await deps.profiles() : [];
+  const selections = launch.preset ? await deps.selections() : [];
+  const refusal = launchBlock(launch, profiles, selections);
+  if (refusal) throw refusal;
+  const profileId = launch.profile
+    ? (profileFor(profiles, launch.profile, agent)?.id ?? null)
+    : null;
+  // The preset the launch names wins over the one its folder remembers.
   let selection: string | null;
   if (launch.preset) {
-    selection = await deps.presetNamed(launch.preset, agent);
-    if (!selection)
-      throw new LaunchRefusal(
-        msg(
-          'No preset named “{name}” for this agent. Create it in Arsenal, or change the launch file.',
-        ),
-        { name: launch.preset },
-      );
+    const match = presetMatch(selections, launch.preset, agent);
+    selection = match.state === 'one' ? match.id : null;
   } else {
     selection = await deps.remembered(directory, agent);
   }
