@@ -1589,4 +1589,93 @@ export const ES: Readonly<Record<string, string>> = {
   'Newest first': 'Más recientes primero',
   '· {count} window back': '· {count} ventana atrás',
   '· {count} windows back': '· {count} ventanas atrás',
+
+  // ---- m3 ----
+  // Availability, usage, approvals and refusals the presenter hands over
+  Available: 'Disponible',
+  Unverified: 'Sin verificar',
+  Blocked: 'Bloqueado',
+  Unsupported: 'No compatible',
+  'final figures from the provider': 'cifras finales del proveedor',
+  'the provider reported an error': 'el proveedor informó un error',
+  'interrupted: streaming figures only':
+    'interrumpido: solo cifras de streaming',
+  'the provider reported nothing': 'el proveedor no informó nada',
+  running: 'en curso',
+  '5-hour window': 'Ventana de 5 horas',
+  '7-day window': 'Ventana de 7 días',
+  '7-day window (Opus)': 'Ventana de 7 días (Opus)',
+  '7-day window (Sonnet)': 'Ventana de 7 días (Sonnet)',
+  Overage: 'Excedente',
+  'Waiting for your decision': 'Esperando tu decisión',
+  'Accepted — running': 'Aceptada — en ejecución',
+  Done: 'Hecho',
+  'Declined — nothing ran': 'Rechazada — no se ejecutó nada',
+  'Cancelled — nothing ran': 'Cancelada — no se ejecutó nada',
+  'Could not be done — nothing changed': 'No se pudo hacer — no cambió nada',
+  'Unknown whether it happened — it will not be repeated':
+    'No se sabe si pasó — no se va a repetir',
+  'Refused before asking you': 'Rechazada antes de consultarte',
+  'A fixture runtime is already running.':
+    'Ya hay un runtime simulado corriendo.',
+  'There is no running fixture runtime.':
+    'No hay ningún runtime simulado corriendo.',
+  'The runtime is not ready for a prompt.':
+    'El runtime todavía no está listo para un mensaje.',
+  'The prompt is empty or too long.':
+    'El mensaje está vacío o es demasiado largo.',
+  'No turn is running.': 'No hay ningún turno en curso.',
+  'That action is not waiting for a decision.':
+    'Esa acción no está esperando una decisión.',
+  'That is not a decision.': 'Eso no es una decisión.',
+  'The worker refused the decision; it is not retried.':
+    'El worker rechazó la decisión; no se reintenta.',
+  'The runtime refused the turn.': 'El runtime rechazó el turno.',
+  'The runtime could not be started.': 'No se pudo iniciar el runtime.',
+  'That profile does not exist.': 'Ese perfil no existe.',
+  'The decision this needs has not been accepted.':
+    'La decisión que hace falta no se aceptó.',
+  'The window could not reach the service.':
+    'La ventana no pudo llegar al servicio.',
+
+  // Reasons the projection carries, in words
+  'The decision on Claude Managed security and authentication has not been accepted.':
+    'No se aceptó la decisión sobre seguridad y autenticación de Claude Managed.',
+  'The authority’s store only accepts Codex runtimes; holding a Claude runtime needs a store change the owner has not approved.':
+    'El almacén de la autoridad solo acepta runtimes de Codex; tener un runtime de Claude necesita un cambio de almacén que el dueño no aprobó.',
+  'No authorized run against the real provider has been recorded for this profile.':
+    'No hay registro de una corrida autorizada contra el proveedor real para este perfil.',
+  'How a provider key would reach a Claude runtime has not been decided; keys stay sealed and none is delivered.':
+    'Todavía no se decidió cómo llegaría la clave del proveedor a un runtime de Claude; las claves siguen selladas y no se entrega ninguna.',
+  'No reviewer other than the author has inspected this runtime and its network confinement.':
+    'Ningún revisor distinto del autor revisó este runtime ni su aislamiento de red.',
+  'Choosing a model or reasoning effort for a Managed turn needs a decision the owner has not accepted.':
+    'Elegir un modelo o un esfuerzo de razonamiento para un turno Managed necesita una decisión que el dueño no aceptó.',
+  'The privacy and retention policy for a usage history has not been accepted.':
+    'No se aceptó la política de privacidad y retención del historial de uso.',
+  'No Claude Agent SDK installation was named for this Console.':
+    'No se indicó ninguna instalación del Claude Agent SDK para esta Consola.',
+  'The protocol-2 authority is not connected.':
+    'La autoridad de protocolo 2 no está conectada.',
+  'This platform has no accepted evidence.':
+    'Esta plataforma no tiene evidencia aceptada.',
+  'The installation is being checked.': 'Se está verificando la instalación.',
+  'The SDK version is not the one this build was qualified against.':
+    'La versión del SDK no es la que se calificó para esta build.',
+  'The bundled Claude Code version is not the qualified one.':
+    'La versión de Claude Code incluida no es la calificada.',
+  'The bundled Claude Code executable is not the pinned one.':
+    'El ejecutable de Claude Code incluido no es el fijado.',
+  'A file of the SDK installation does not match what pip recorded.':
+    'Un archivo de la instalación del SDK no coincide con lo que registró pip.',
+  'The SDK installation holds a file no package vouches for.':
+    'La instalación del SDK tiene un archivo que ningún paquete respalda.',
+  'An administrator’s Claude Code policy exists on this machine; it can add hooks and tools no option turns off.':
+    'Hay una política de Claude Code del administrador en esta máquina; puede agregar hooks y herramientas que ninguna opción apaga.',
+  'The credential file is not private, plain and non-empty.':
+    'El archivo de credenciales no es privado, plano ni vacío.',
+  'A path of the installation is not safe to use.':
+    'Una ruta de la instalación no es segura para usar.',
+  'The named folder is not an isolated Python virtual environment.':
+    'La carpeta indicada no es un entorno virtual de Python aislado.',
 };

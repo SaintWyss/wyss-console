@@ -5,6 +5,7 @@ import type {
   RerouteInfo,
   Tokens,
 } from '../../contracts/m3';
+import { msg } from '../../i18n/msg';
 
 /** Presentation only: nothing here is read back as state. */
 
@@ -21,49 +22,66 @@ export const AVAILABILITY_LABEL: Record<
   Availability,
   { label: string; tone: 'ok' | 'pending' | 'error' | 'idle' }
 > = {
-  available: { label: 'Available', tone: 'ok' },
-  unverified: { label: 'Unverified', tone: 'pending' },
-  blocked: { label: 'Blocked', tone: 'error' },
-  unsupported: { label: 'Unsupported', tone: 'idle' },
+  available: { label: msg('Available'), tone: 'ok' },
+  unverified: { label: msg('Unverified'), tone: 'pending' },
+  blocked: { label: msg('Blocked'), tone: 'error' },
+  unsupported: { label: msg('Unsupported'), tone: 'idle' },
 };
 
 /** Every reason code the projection can carry, in words. An unknown code is shown as itself. */
 const REASON: Record<string, string> = {
-  adr0053_not_accepted:
+  adr0053_not_accepted: msg(
     'The decision on Claude Managed security and authentication has not been accepted.',
-  store_cannot_hold_claude:
+  ),
+  store_cannot_hold_claude: msg(
     'The authority’s store only accepts Codex runtimes; holding a Claude runtime needs a store change the owner has not approved.',
-  real_provider_evidence_missing:
+  ),
+  real_provider_evidence_missing: msg(
     'No authorized run against the real provider has been recorded for this profile.',
-  credential_delivery_not_accepted:
+  ),
+  credential_delivery_not_accepted: msg(
     'How a provider key would reach a Claude runtime has not been decided; keys stay sealed and none is delivered.',
-  independent_review_missing:
+  ),
+  independent_review_missing: msg(
     'No reviewer other than the author has inspected this runtime and its network confinement.',
-  adr0054_not_accepted:
+  ),
+  adr0054_not_accepted: msg(
     'Choosing a model or reasoning effort for a Managed turn needs a decision the owner has not accepted.',
-  metrics_policy_not_accepted:
+  ),
+  metrics_policy_not_accepted: msg(
     'The privacy and retention policy for a usage history has not been accepted.',
-  sdk_not_configured:
+  ),
+  sdk_not_configured: msg(
     'No Claude Agent SDK installation was named for this Console.',
-  authority_not_connected: 'The protocol-2 authority is not connected.',
-  platform_unsupported: 'This platform has no accepted evidence.',
-  verifying: 'The installation is being checked.',
-  sdk_version_unsupported:
+  ),
+  authority_not_connected: msg('The protocol-2 authority is not connected.'),
+  platform_unsupported: msg('This platform has no accepted evidence.'),
+  verifying: msg('The installation is being checked.'),
+  sdk_version_unsupported: msg(
     'The SDK version is not the one this build was qualified against.',
-  cli_version_unsupported:
+  ),
+  cli_version_unsupported: msg(
     'The bundled Claude Code version is not the qualified one.',
-  cli_digest_mismatch:
+  ),
+  cli_digest_mismatch: msg(
     'The bundled Claude Code executable is not the pinned one.',
-  record_mismatch:
+  ),
+  record_mismatch: msg(
     'A file of the SDK installation does not match what pip recorded.',
-  unlisted_file: 'The SDK installation holds a file no package vouches for.',
-  managed_policy_present:
+  ),
+  unlisted_file: msg(
+    'The SDK installation holds a file no package vouches for.',
+  ),
+  managed_policy_present: msg(
     'An administrator’s Claude Code policy exists on this machine; it can add hooks and tools no option turns off.',
-  credential_unusable:
+  ),
+  credential_unusable: msg(
     'The credential file is not private, plain and non-empty.',
-  unsafe_path: 'A path of the installation is not safe to use.',
-  not_a_virtual_environment:
+  ),
+  unsafe_path: msg('A path of the installation is not safe to use.'),
+  not_a_virtual_environment: msg(
     'The named folder is not an isolated Python virtual environment.',
+  ),
 };
 export function reasonText(code: string): string {
   return REASON[code] ?? code;
@@ -97,11 +115,11 @@ export function tokenLine(t: Tokens): string {
 }
 
 export const COMPLETENESS_LABEL: Record<string, string> = {
-  complete: 'final figures from the provider',
-  provider_error: 'the provider reported an error',
-  interrupted: 'interrupted: streaming figures only',
-  unreported: 'the provider reported nothing',
-  running: 'running',
+  complete: msg('final figures from the provider'),
+  provider_error: msg('the provider reported an error'),
+  interrupted: msg('interrupted: streaming figures only'),
+  unreported: msg('the provider reported nothing'),
+  running: msg('running'),
 };
 
 export function rerouteLine(r: RerouteInfo): string {
@@ -137,11 +155,11 @@ export function localTime(unixSeconds: number): string {
 }
 
 export const WINDOW_LABEL: Record<string, string> = {
-  five_hour: '5-hour window',
-  seven_day: '7-day window',
-  seven_day_opus: '7-day window (Opus)',
-  seven_day_sonnet: '7-day window (Sonnet)',
-  overage: 'Overage',
+  five_hour: msg('5-hour window'),
+  seven_day: msg('7-day window'),
+  seven_day_opus: msg('7-day window (Opus)'),
+  seven_day_sonnet: msg('7-day window (Sonnet)'),
+  overage: msg('Overage'),
 };
 
 // ---- a held action, as the window reads it -------------------------------------------------------
@@ -198,17 +216,20 @@ export const APPROVAL_STATE_LABEL: Record<
   string,
   { label: string; tone: 'ok' | 'pending' | 'error' | 'idle' }
 > = {
-  pending: { label: 'Waiting for your decision', tone: 'pending' },
-  accepted: { label: 'Accepted — running', tone: 'pending' },
-  confirmed: { label: 'Done', tone: 'ok' },
-  declined: { label: 'Declined — nothing ran', tone: 'idle' },
-  cancelled: { label: 'Cancelled — nothing ran', tone: 'idle' },
-  failed: { label: 'Could not be done — nothing changed', tone: 'error' },
-  indeterminate: {
-    label: 'Unknown whether it happened — it will not be repeated',
+  pending: { label: msg('Waiting for your decision'), tone: 'pending' },
+  accepted: { label: msg('Accepted — running'), tone: 'pending' },
+  confirmed: { label: msg('Done'), tone: 'ok' },
+  declined: { label: msg('Declined — nothing ran'), tone: 'idle' },
+  cancelled: { label: msg('Cancelled — nothing ran'), tone: 'idle' },
+  failed: {
+    label: msg('Could not be done — nothing changed'),
     tone: 'error',
   },
-  refused: { label: 'Refused before asking you', tone: 'idle' },
+  indeterminate: {
+    label: msg('Unknown whether it happened — it will not be repeated'),
+    tone: 'error',
+  },
+  refused: { label: msg('Refused before asking you'), tone: 'idle' },
 };
 
 export const PROFILE_LABEL: Record<string, string> = {
@@ -219,17 +240,17 @@ export const PROFILE_LABEL: Record<string, string> = {
 };
 
 export const REFUSAL_LABEL: Record<string, string> = {
-  already_running: 'A fixture runtime is already running.',
-  not_running: 'There is no running fixture runtime.',
-  not_ready: 'The runtime is not ready for a prompt.',
-  invalid_prompt: 'The prompt is empty or too long.',
-  no_active_turn: 'No turn is running.',
-  not_pending: 'That action is not waiting for a decision.',
-  invalid_decision: 'That is not a decision.',
-  decision_refused: 'The worker refused the decision; it is not retried.',
-  turn_refused: 'The runtime refused the turn.',
-  start_refused: 'The runtime could not be started.',
-  unknown_profile: 'That profile does not exist.',
-  gate_closed: 'The decision this needs has not been accepted.',
-  unreachable: 'The window could not reach the service.',
+  already_running: msg('A fixture runtime is already running.'),
+  not_running: msg('There is no running fixture runtime.'),
+  not_ready: msg('The runtime is not ready for a prompt.'),
+  invalid_prompt: msg('The prompt is empty or too long.'),
+  no_active_turn: msg('No turn is running.'),
+  not_pending: msg('That action is not waiting for a decision.'),
+  invalid_decision: msg('That is not a decision.'),
+  decision_refused: msg('The worker refused the decision; it is not retried.'),
+  turn_refused: msg('The runtime refused the turn.'),
+  start_refused: msg('The runtime could not be started.'),
+  unknown_profile: msg('That profile does not exist.'),
+  gate_closed: msg('The decision this needs has not been accepted.'),
+  unreachable: msg('The window could not reach the service.'),
 };
