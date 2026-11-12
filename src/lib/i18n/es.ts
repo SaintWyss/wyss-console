@@ -1747,4 +1747,7 @@ export const ES: Readonly<Record<string, string>> = {
   Versions: 'Versiones',
   current: 'actual',
   'Bring back': 'Volver a esta versión',
+  'Profile exported.': 'Perfil exportado.',
+  'Profile imported. It grants nothing: read what it asks for before using it.':
+    'Perfil importado. No otorga nada: leé lo que pide antes de usarlo.',
 };
