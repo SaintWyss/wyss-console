@@ -1678,4 +1678,28 @@ export const ES: Readonly<Record<string, string>> = {
     'Una ruta de la instalación no es segura para usar.',
   'The named folder is not an isolated Python virtual environment.':
     'La carpeta indicada no es un entorno virtual de Python aislado.',
+
+  // History settings and the provider profile cards
+  'Keep a local usage history': 'Guardar un historial de uso local',
+  'Why it cannot be turned on': 'Por qué no se puede activar',
+  Off: 'Desactivado',
+  Recording: 'Guardando',
+  'Partial: a storage problem stopped it':
+    'Parcial: un problema de almacenamiento lo detuvo',
+  'It is off by default and nothing is stored while it is off. If you turn it on it keeps provider-reported counters and limits only: no prompts, no answers, no reasoning, no commands, no paths and no account names. At most {records} records or {days} days, whichever comes first, and what it removes is counted. It is a separate file; it never touches the audit trail or the vault.':
+    'Está desactivado por defecto y, mientras esté desactivado, no se guarda nada. Si lo activás, guarda solo contadores y límites que informa el proveedor: nada de mensajes, respuestas, razonamiento, comandos, rutas ni nombres de cuenta. Como máximo {records} registros o {days} días, lo que pase antes, y lo que se quita se cuenta. Es un archivo aparte; nunca toca el registro de auditoría ni la bóveda.',
+  Export: 'Exportar',
+  'Delete the history': 'Borrar el historial',
+  'Provider profiles': 'Perfiles del proveedor',
+  'No build verified on this machine.':
+    'No hay build verificado en esta máquina.',
+  'Why it is not available': 'Por qué no está disponible',
+  Evidence: 'Evidencia',
+  'Fixtures:': 'Simulado:',
+  'Real provider:': 'Proveedor real:',
+  'Start it from Runtimes; this view does not start anything.':
+    'Iniciala desde Runtimes; esta vista no inicia nada.',
+  passed: 'aprobado',
+  'not run': 'sin correr',
+  'not applicable': 'no aplica',
 };
