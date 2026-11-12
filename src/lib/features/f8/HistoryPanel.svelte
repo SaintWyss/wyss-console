@@ -31,21 +31,21 @@
 </script>
 
 <div class="rt-history">
-  <div class="events-filters" role="group" aria-label="History">
+  <div class="events-filters" role="group" aria-label={t('History')}>
     <label class="mode-option rt-own">
       <input type="checkbox" bind:checked={own} />
-      <span class="mode-name">This session only</span>
+      <span class="mode-name">{t('This session only')}</span>
     </label>
     <span class="events-note"
       >{own
-        ? 'Narrows the window loaded here, not all of history.'
-        : 'Every session.'}</span
+        ? t('Narrows the window loaded here, not all of history.')
+        : t('Every session.')}</span
     >
     <button
       type="button"
       class="action"
       disabled={!connected || history.status === 'reading'}
-      onclick={() => controller.newestHistory()}>Newest</button
+      onclick={() => controller.newestHistory()}>{t('Newest')}</button
     >
   </div>
 
@@ -55,7 +55,7 @@
       <button
         type="button"
         class="action"
-        onclick={() => controller.newestHistory()}>Try again</button
+        onclick={() => controller.newestHistory()}>{t('Try again')}</button
       >
     </div>
   {/if}
@@ -68,27 +68,27 @@
     >
       <p class="empty-title">
         {history.status === 'failed'
-          ? 'History is unavailable'
-          : 'Reading history…'}
+          ? t('History is unavailable')
+          : t('Reading history…')}
       </p>
     </div>
   {:else if page.events.length === 0}
     <div class="sessions-empty">
-      <p class="empty-title">No events yet.</p>
-      <p>The authority records every state change it commits.</p>
+      <p class="empty-title">{t('No events yet.')}</p>
+      <p>{t('The authority records every state change it commits.')}</p>
     </div>
   {:else}
     {#if page.gap}
       <p class="events-note" role="note">
-        History before the oldest event shown is not available.
+        {t('History before the oldest event shown is not available.')}
       </p>
     {/if}
     {#if rows.length === 0}
       <p class="events-note">
-        No event in this window belongs to this session.
+        {t('No event in this window belongs to this session.')}
       </p>
     {:else}
-      <ul class="events-list" aria-label="Events, newest first">
+      <ul class="events-list" aria-label={t('Events, newest first')}>
         {#each rows as event (event.sequence)}
           <li>
             <div class="event-row" role="group">
@@ -108,7 +108,8 @@
               <span class="event-meta">
                 {t(CATEGORY_LABEL[event.category])}
                 {#if event.session && !own}
-                  · session <span class="mono">{short(event.session)}</span>
+                  · {t('session')}
+                  <span class="mono">{short(event.session)}</span>
                 {/if}
                 · #{event.sequence}
                 {#if eventDay(event.at)}· {eventDay(event.at)}{/if}
@@ -120,15 +121,17 @@
     {/if}
     <div class="sessions-pager">
       <p>
-        Newest first{history.depth > 0
-          ? ` · ${history.depth} window${history.depth === 1 ? '' : 's'} back`
-          : ''}
+        {t('Newest first')}{#if history.depth > 0}
+          {history.depth === 1
+            ? t('· {count} window back', { count: history.depth })
+            : t('· {count} windows back', { count: history.depth })}
+        {/if}
       </p>
       <button
         type="button"
         class="action"
         disabled={!page.older || history.status === 'reading' || !connected}
-        onclick={() => controller.loadHistory(true)}>Older</button
+        onclick={() => controller.loadHistory(true)}>{t('Older')}</button
       >
     </div>
   {/if}

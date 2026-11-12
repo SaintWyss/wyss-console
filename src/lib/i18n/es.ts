@@ -1571,4 +1571,22 @@ export const ES: Readonly<Record<string, string>> = {
   'No runtime yet': 'Todavía no hay runtime',
   '{state} · generation {generation}{profile}':
     '{state} · generación {generation}{profile}',
+
+  // History (F8): the session history panel
+  'This session only': 'Solo esta sesión',
+  'Narrows the window loaded here, not all of history.':
+    'Acota la ventana cargada acá, no todo el historial.',
+  'Every session.': 'Todas las sesiones.',
+  Newest: 'Más reciente',
+  'History is unavailable': 'El historial no está disponible',
+  'Reading history…': 'Leyendo el historial…',
+  'The authority records every state change it commits.':
+    'La autoridad registra cada cambio de estado que confirma.',
+  'History before the oldest event shown is not available.':
+    'El historial anterior al evento más viejo mostrado no está disponible.',
+  'No event in this window belongs to this session.':
+    'Ningún evento de esta ventana pertenece a esta sesión.',
+  'Newest first': 'Más recientes primero',
+  '· {count} window back': '· {count} ventana atrás',
+  '· {count} windows back': '· {count} ventanas atrás',
 };
