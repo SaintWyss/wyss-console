@@ -1702,4 +1702,24 @@ export const ES: Readonly<Record<string, string>> = {
   passed: 'aprobado',
   'not run': 'sin correr',
   'not applicable': 'no aplica',
+
+  // The providers view: the installation line, the stale and empty states, the sections
+  'Managed profiles': 'Perfiles Managed',
+  'Claude Agent SDK {sdk} (Claude Code {cli}) verified':
+    'Claude Agent SDK {sdk} (Claude Code {cli}) verificado',
+  'checking the Claude installation…': 'revisando la instalación de Claude…',
+  'Claude installation refused: {reason}':
+    'instalación de Claude rechazada: {reason}',
+  'no Claude installation named': 'no se indicó ninguna instalación de Claude',
+  'Reading the providers…': 'Leyendo los proveedores…',
+  'What is shown was read earlier and may have changed; no action is offered from it.':
+    'Lo que se muestra se leyó antes y puede haber cambiado; desde acá no se ofrece ninguna acción.',
+  'The provider state could not be read.':
+    'No se pudo leer el estado del proveedor.',
+  'Claude runtime (fixture)': 'Runtime de Claude (simulado)',
+  'A profile can start only when it is available. “Blocked” names the decision or evidence that is missing; fixtures never stand in for a run against the real provider.':
+    'Un perfil solo puede iniciarse cuando está disponible. “Bloqueado” indica la decisión o la evidencia que falta; los simulados nunca reemplazan una corrida contra el proveedor real.',
+  'Model and effort': 'Modelo y esfuerzo',
+  'Usage and limits': 'Uso y límites',
+  'Usage history': 'Historial de uso',
 };

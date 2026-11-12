@@ -1,5 +1,6 @@
 import type { M3Client } from '../../desktop/m3-client';
 import type { Ack, Decision, M3State } from '../../contracts/m3';
+import { msg } from '../../i18n/msg';
 
 export type M3Status = 'idle' | 'loading' | 'ready' | 'failed';
 
@@ -106,7 +107,7 @@ export class M3Controller {
       if (mine !== this.generation || this.disposed) return;
       this.set({
         status: this.view.state ? 'ready' : 'failed',
-        failure: 'The provider state could not be read.',
+        failure: msg('The provider state could not be read.'),
         stale: this.view.state !== null,
       });
     }
