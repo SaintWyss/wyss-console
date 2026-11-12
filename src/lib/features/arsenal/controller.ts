@@ -503,27 +503,30 @@ export class ArsenalController {
         notice: { tone: 'ok', text: msg('Preset saved') },
       });
       await this.loadSelections();
-      return true;
+      return saved;
     } catch (error) {
       this.set({
         busy: null,
         notice: { tone: 'error', text: failureMessage(error) },
       });
-      return false;
+      return null;
     }
   }
 
-  async deleteSelection(id: string) {
+  /** Deletes a preset. Answers whether it was deleted; a refused delete leaves the list as it was. */
+  async deleteSelection(id: string): Promise<boolean> {
     try {
       await this.client.deleteSelection(id);
-      this.set({
-        notice: { tone: 'ok', text: 'Selection deleted.' },
-        preview: null,
-      });
-      await this.loadSelections();
     } catch (error) {
       this.set({ notice: { tone: 'error', text: failureMessage(error) } });
+      return false;
     }
+    this.set({
+      notice: { tone: 'ok', text: 'Selection deleted.' },
+      preview: null,
+    });
+    await this.loadSelections();
+    return true;
   }
 
   async loadPreview(id: string) {

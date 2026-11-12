@@ -473,7 +473,7 @@ describe('Arsenal controller', () => {
       items: [{ capability: 'cap-design', revision: null }],
       composites: [],
     });
-    expect(saved).toBe(true);
+    expect(saved?.id).toBe('sel-1');
     expect(last().notice?.text).toBe('Preset saved');
     expect(client.selections).toHaveBeenCalledTimes(2);
   });

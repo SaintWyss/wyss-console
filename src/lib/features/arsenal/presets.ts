@@ -11,6 +11,19 @@ import { GROUPS, familyFor, groupFor, type Family, type Group } from './groups';
 /** The cells a group's meter draws: one per chosen capability, never more than this many. */
 export const METER_CELLS = 5;
 
+/** The longest text a capability row says it is for. */
+export const SUMMARY_LIMIT = 110;
+
+/**
+ * What a capability row says it is for: the first sentence of its description, at most
+ * `SUMMARY_LIMIT` characters. Empty when the file has no description.
+ */
+export function summaryOf(description: string): string {
+  const firstLine = description.trim().split('\n')[0] ?? '';
+  const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? '';
+  return sentence.slice(0, SUMMARY_LIMIT);
+}
+
 /** The families the chooser can filter by, in the order the contract shows them. */
 export const FAMILIES: readonly Exclude<Family, null>[] = [
   'GSD',

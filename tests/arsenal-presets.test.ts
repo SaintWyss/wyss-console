@@ -13,6 +13,7 @@ import {
   keptComposites,
   meterFill,
   planKey,
+  summaryOf,
   totalsOf,
   type Draft,
 } from '../src/lib/features/arsenal/presets';
@@ -257,6 +258,22 @@ describe('isDirty', () => {
       ),
     ).toBe(true);
     expect(isDirty({ ...saved, composites: [] }, saved)).toBe(true);
+  });
+});
+
+describe('summaryOf', () => {
+  it('says the first sentence of the description, and nothing when there is none', () => {
+    expect(
+      summaryOf('Visual direction for new UI. Use it before building screens.'),
+    ).toBe('Visual direction for new UI.');
+    expect(summaryOf('  Plans the phase\nsecond line  ')).toBe(
+      'Plans the phase',
+    );
+    expect(summaryOf('')).toBe('');
+  });
+
+  it('never says more than the limit of characters', () => {
+    expect(summaryOf('a'.repeat(300))).toHaveLength(110);
   });
 });
 
