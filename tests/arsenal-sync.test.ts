@@ -5,8 +5,14 @@ import { syncSummary } from '../src/lib/features/arsenal/sync-present';
 import { ArsenalController } from '../src/lib/features/arsenal/controller';
 import { parseSyncStatus, type SyncStatus } from '../src/lib/contracts/arsenal';
 import type { ArsenalClient } from '../src/lib/desktop/arsenal-client';
+import { tPhrase } from '../src/lib/i18n/index.svelte';
 
 const NOW = 2_000_000_000;
+/** The summary as the window draws it, in the language in force. */
+const summarize = (sync: SyncStatus, now: number) => {
+  const s = syncSummary(sync, now);
+  return { ...s, label: tPhrase(s.label), text: tPhrase(s.text) };
+};
 const status = (over: Partial<SyncStatus> = {}): SyncStatus => ({
   enabled: true,
   folder: '~/.local/share/wyss-console-sync/arsenal',
@@ -42,11 +48,11 @@ afterEach(() => {
 });
 
 it('says in sync only when the other computer acknowledged applying everything', () => {
-  expect(syncSummary(status(), NOW)).toMatchObject({
+  expect(summarize(status(), NOW)).toMatchObject({
     tone: 'ok',
     label: 'In sync',
   });
-  const behind = syncSummary(
+  const behind = summarize(
     status({ peers: [{ ...status().peers[0]!, applied_mine: 1 }] }),
     NOW,
   );
@@ -54,7 +60,7 @@ it('says in sync only when the other computer acknowledged applying everything',
   expect(behind.label).toBe('Published');
   expect(behind.text).toContain('Santiago-PC has not applied 3 changes');
   expect(behind.text).not.toMatch(/applied everything/);
-  expect(syncSummary(status({ peers: [] }), NOW).label).toBe(
+  expect(summarize(status({ peers: [] }), NOW).label).toBe(
     'This computer only',
   );
 });
@@ -66,16 +72,14 @@ it('puts errors, waiting changes and recent conflicts before anything else', () 
     name: 'Frontend',
     detail: 'kept both',
   };
-  expect(syncSummary(status({ error: 'library: busy' }), NOW).tone).toBe(
-    'error',
-  );
-  expect(syncSummary(status({ pending: [note] }), NOW).label).toBe('Receiving');
-  const conflict = syncSummary(status({ conflicts: [note] }), NOW);
+  expect(summarize(status({ error: 'library: busy' }), NOW).tone).toBe('error');
+  expect(summarize(status({ pending: [note] }), NOW).label).toBe('Receiving');
+  const conflict = summarize(status({ conflicts: [note] }), NOW);
   expect(conflict).toMatchObject({ tone: 'warn', label: 'Needs a look' });
   expect(conflict.text).toContain('1 conflict kept both versions');
   // An old conflict stays in the details, not in the headline.
   expect(
-    syncSummary(status({ conflicts: [{ ...note, at: NOW - 3 * 86400 }] }), NOW)
+    summarize(status({ conflicts: [{ ...note, at: NOW - 3 * 86400 }] }), NOW)
       .tone,
   ).toBe('ok');
   // Every state has a word and a symbol, not a color alone.
@@ -84,7 +88,7 @@ it('puts errors, waiting changes and recent conflicts before anything else', () 
     status({ peers: [] }),
     status({ pending: [note] }),
   ]) {
-    const summary = syncSummary(s, NOW);
+    const summary = summarize(s, NOW);
     expect(summary.label.length).toBeGreaterThan(0);
     expect(summary.symbol.trim().length).toBeGreaterThan(0);
   }
@@ -171,7 +175,7 @@ it('reports what another computer deleted, and that a copy is kept here', () => 
         'deleted on Santiago-PC; a copy is kept in ~/.local/state/wyss-console/arsenal-sync/trash/x.json',
     },
   ];
-  const summary = syncSummary(status({ removed }), NOW);
+  const summary = summarize(status({ removed }), NOW);
   expect(summary.label).toBe('Needs a look');
   expect(summary.text).toContain(
     'deleted on another computer, a copy kept here',

@@ -3214,4 +3214,37 @@ export const ES: Readonly<Record<string, string>> = {
   'The session ended.': 'La sesión terminó.',
   'The terminal host refused the input.':
     'El host de la terminal rechazó la entrada.',
+  'Sync error': 'Error de sincronización',
+  'The last run failed: {error}.': 'La última corrida falló: {error}.',
+  Receiving: 'Recibiendo',
+  '{changes} waiting for files still on their way.':
+    '{changes} en espera de archivos que todavía vienen en camino.',
+  '{count} change': '{count} cambio',
+  '{count} changes': '{count} cambios',
+  '{count} items': '{count} elementos',
+  '{count} item': '{count} elemento',
+  '{conflicts} kept both versions':
+    '{conflicts}: se conservaron ambas versiones',
+  '{items} refused': '{items} rechazado(s)',
+  '{items} deleted on another computer, a copy kept here':
+    '{items} borrado(s) en otra computadora, con una copia guardada acá',
+  '{parts}. See the details.': '{parts}. Mirá los detalles.',
+  '{first}; {rest}': '{first}; {rest}',
+  'This computer only': 'Solo esta computadora',
+  'No other computer has written to the shared folder yet.':
+    'Ninguna otra computadora escribió todavía en la carpeta compartida.',
+  Published: 'Publicado',
+  '{hosts} has not applied {changes} from here yet.':
+    '{hosts} todavía no aplicó {changes} de esta computadora.',
+  '{hosts} has not applied {changes} from here yet (last heard {time}).':
+    '{hosts} todavía no aplicó {changes} de esta computadora (última señal {time}).',
+  'In sync': 'Sincronizado',
+  '{hosts} applied everything published here; checked {when}.':
+    '{hosts} aplicó todo lo publicado acá; comprobado {when}.',
+  '{hosts} applied everything published here.':
+    '{hosts} aplicó todo lo publicado acá.',
+  'just now': 'recién',
+  '{minutes} min ago': 'hace {minutes} min',
+  '{hours} h ago': 'hace {hours} h',
+  '{days} d ago': 'hace {days} d',
 };

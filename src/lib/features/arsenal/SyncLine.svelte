@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { SyncNote, SyncStatus } from '../../contracts/arsenal';
-  import { msg, t } from '../../i18n/index.svelte';
+  import { msg, t, tPhrase } from '../../i18n/index.svelte';
   import { ago, syncSummary } from './sync-present';
 
   let {
@@ -30,9 +30,10 @@
 >
   <p class="arsenal-sync-line" role="status" aria-live="polite">
     <span class="badge" data-tone={summary.tone}
-      ><span aria-hidden="true">{summary.symbol}</span> {summary.label}</span
+      ><span aria-hidden="true">{summary.symbol}</span>
+      {tPhrase(summary.label)}</span
     >
-    <span class="arsenal-sync-text">{summary.text}</span>
+    <span class="arsenal-sync-text">{tPhrase(summary.text)}</span>
   </p>
   <details class="arsenal-sync-details">
     <summary>{t('Synchronization details')}</summary>
@@ -48,7 +49,9 @@
       <dd><code>{sync.folder}</code> {t('(Syncthing carries it)')}</dd>
       <dt>{t('Last check')}</dt>
       <dd>
-        {sync.last_success ? ago(sync.last_success, now()) : t('not yet')}
+        {sync.last_success
+          ? tPhrase(ago(sync.last_success, now()))
+          : t('not yet')}
       </dd>
       {#each sync.peers as peer (peer.device)}
         <dt>{peer.host}</dt>
@@ -69,7 +72,9 @@
         {#each group.items as item (item.at + item.kind + item.name + item.detail)}
           <li>
             <strong>{item.name}</strong>
-            <span class="sync-muted">({item.kind}, {ago(item.at, now())})</span>
+            <span class="sync-muted"
+              >({item.kind}, {tPhrase(ago(item.at, now()))})</span
+            >
             — {item.detail}
           </li>
         {/each}
