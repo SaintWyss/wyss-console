@@ -454,6 +454,7 @@
       controller={nativeController}
       onconsole={() => go('console')}
       onupdate={runInConsole}
+      onarsenal={() => go('arsenal')}
       configItems={configuration.reply?.inventory.items ?? null}
     />
     <SessionsView

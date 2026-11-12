@@ -30,6 +30,8 @@
     previewer,
     onchange,
     client = arsenalClient,
+    selected = $bindable(''),
+    choices = true,
   }: {
     agent: AgentId | null;
     /** The launcher's project path for this terminal. */
@@ -43,11 +45,14 @@
     previewer: (start: ArsenalStart) => Promise<Preview>;
     onchange: (choice: ArsenalChoice | null) => void;
     client?: ArsenalClient;
+    /** The selection id; '' is none. The owner of the choice (Workspace's preset card) may bind it. */
+    selected?: string;
+    /** False when another control chooses the selection: the radio list and its reload are not drawn. */
+    choices?: boolean;
   } = $props();
 
   let selections = $state<Selection[]>([]);
   let loadFailed = $state<string | null>(null);
-  let selected = $state<string>('');
   let plan = $state<TerminalPlan | null>(null);
   let planFailed = $state<string | null>(null);
   let planning = $state(false);
@@ -202,43 +207,46 @@
       configured.
     </p>
   {:else}
-    <div class="native-row">
-      <!-- Radios, not a drop-down: every choice is visible and each one is a control of its own. -->
-      <div
-        id="native-arsenal"
-        class="arsenal-choices"
-        role="radiogroup"
-        aria-labelledby="native-arsenal-label"
-      >
-        <label class="arsenal-check">
-          <input
-            type="radio"
-            name="native-arsenal"
-            value=""
-            bind:group={selected}
-          />
-          None — skills as installed
-        </label>
-        {#each offered as selection (selection.id)}
+    {#if choices}
+      <div class="native-row">
+        <!-- Radios, not a drop-down: every choice is visible and each one is a control of its own. -->
+        <div
+          id="native-arsenal"
+          class="arsenal-choices"
+          role="radiogroup"
+          aria-labelledby="native-arsenal-label"
+        >
           <label class="arsenal-check">
             <input
               type="radio"
               name="native-arsenal"
-              value={selection.id}
+              value=""
               bind:group={selected}
             />
-            {selection.name}
+            None — skills as installed
           </label>
-        {/each}
+          {#each offered as selection (selection.id)}
+            <label class="arsenal-check">
+              <input
+                type="radio"
+                name="native-arsenal"
+                value={selection.id}
+                bind:group={selected}
+              />
+              {selection.name}
+            </label>
+          {/each}
+        </div>
+        <button type="button" class="action" onclick={load}>Reload</button>
       </div>
-      <button type="button" class="action" onclick={load}>Reload</button>
-    </div>
-    {#if loadFailed}
-      <p class="native-warning" role="alert">{loadFailed}</p>
-    {:else if offered.length === 0}
-      <p class="event-meta">
-        No saved selection for this provider. Make one in Arsenal › Selections.
-      </p>
+      {#if loadFailed}
+        <p class="native-warning" role="alert">{loadFailed}</p>
+      {:else if offered.length === 0}
+        <p class="event-meta">
+          No saved selection for this provider. Make one in Arsenal ›
+          Selections.
+        </p>
+      {/if}
     {/if}
 
     {#if planning}

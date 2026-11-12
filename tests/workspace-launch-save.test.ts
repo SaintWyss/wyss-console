@@ -10,6 +10,7 @@ import {
 } from '../src/lib/desktop/launch-client';
 import { arsenalClient } from '../src/lib/desktop/arsenal-client';
 import { openLaunch } from '../src/lib/features/terminal/launch';
+import { onOffCounts } from '../src/lib/features/arsenal/terminal';
 
 vi.mock('../src/lib/desktop/launch-client', async (importOriginal) => {
   const actual =
@@ -239,5 +240,80 @@ describe('Saved launches on Workspace', () => {
       document.querySelector('.launch-saved [role="alert"]')?.textContent,
     ).toBe('The saved launches did not load.');
     expect(row('Estudiar')).toBeNull();
+  });
+});
+
+describe('The preset card on Workspace', () => {
+  const presetSelect = () =>
+    document.querySelector<HTMLSelectElement>('#native-preset');
+  beforeEach(() => {
+    vi.mocked(listLaunches).mockResolvedValue({
+      folder: '/home/u',
+      launches: [],
+      refused: [],
+    } as never);
+    vi.spyOn(arsenalClient, 'selections').mockResolvedValue([
+      { id: 'sel-estudio', name: 'Estudio', provider: 'claude_code' },
+      { id: 'sel-otro', name: 'Otro', provider: 'codex' },
+    ] as never);
+  });
+
+  it('offers the presets of this agent after None, and Edit in Arsenal goes to Arsenal', async () => {
+    const onarsenal = vi.fn();
+    component = mount(NativeHarness, {
+      target: document.body,
+      props: { client: fakeClient(), onarsenal },
+    });
+    await settle();
+    // The card is for Claude Code (the start's agent): Codex's preset is not offered here.
+    expect(Array.from(presetSelect()!.options).map((o) => o.text)).toEqual([
+      'None — all installed skills',
+      'Estudio',
+    ]);
+    button('Edit in Arsenal').click();
+    expect(onarsenal).toHaveBeenCalledTimes(1);
+  });
+
+  it('choosing a preset plans it for this agent and this folder', async () => {
+    vi.spyOn(arsenalClient, 'terminalPlan').mockRejectedValue(
+      new Error('no plan'),
+    );
+    await shown();
+    const select = presetSelect()!;
+    select.value = 'sel-estudio';
+    select.dispatchEvent(new Event('change'));
+    await settle();
+    expect(arsenalClient.terminalPlan).toHaveBeenCalledWith(
+      'sel-estudio',
+      'claude_code',
+      '/home/u',
+    );
+  });
+
+  it('a folder with no preset for this agent says so, and still offers Edit in Arsenal', async () => {
+    vi.spyOn(arsenalClient, 'selections').mockResolvedValue([
+      { id: 'sel-otro', name: 'Otro', provider: 'codex' },
+    ] as never);
+    component = mount(NativeHarness, {
+      target: document.body,
+      props: { client: fakeClient(), onarsenal: () => undefined },
+    });
+    await settle();
+    expect(text(document.querySelector('.launch-preset'))).toContain(
+      'No presets for Claude Code.',
+    );
+    expect(button('Edit in Arsenal')).toBeDefined();
+  });
+});
+
+describe('Preset totals', () => {
+  it('counts the skills a plan leaves on, and those it switches off or the settings already did', () => {
+    expect(
+      onOffCounts({
+        kept: ['a', 'b', 'c'],
+        inherited_off: ['b'],
+        excluded: ['d', 'e'],
+      } as never),
+    ).toEqual({ on: 2, off: 3 });
   });
 });

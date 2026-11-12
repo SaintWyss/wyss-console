@@ -860,4 +860,7 @@ export const ES: Readonly<Record<string, string>> = {
   'Starting…': 'Iniciando…',
   'Terminal commands · {folder}': 'Comandos de terminal · {folder}',
   'Preset {name}': 'Preset {name}',
+  Preset: 'Preset',
+  'Edit in Arsenal': 'Editar en Arsenal',
+  'No presets for {agent}.': 'No hay presets para {agent}.',
 };

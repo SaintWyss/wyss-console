@@ -3,7 +3,11 @@
   import HandoffPanel from './HandoffPanel.svelte';
   import ArsenalTerminalPanel from '../arsenal/ArsenalTerminalPanel.svelte';
   import DelegationsPanel from './DelegationsPanel.svelte';
-  import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
+  import {
+    onOffCounts,
+    sessionArsenalLine,
+    type ArsenalChoice,
+  } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
   import {
     deleteLaunch,
@@ -51,6 +55,7 @@
     onconsole,
     onupdate,
     configItems = null,
+    onarsenal,
   }: {
     native: NativeState;
     controller: NativeController;
@@ -61,6 +66,8 @@
     onupdate?: (title: string, cwd: string, input: string) => void;
     /** What the agents' files hold, once Configuration has been read; else null. */
     configItems?: readonly ConfigItem[] | null;
+    /** Opens Arsenal on its Presets tab: the preset card's "Edit in Arsenal". */
+    onarsenal?: () => void;
   } = $props();
 
   let agent = $state<AgentId | null>(null);
@@ -75,6 +82,8 @@
   let now = $state(Date.now());
   let arsenalChoice = $state<ArsenalChoice | null>(null);
   let arsenalNote = $state<string | null>(null);
+  // The preset the start uses: '' is none. The card's select and the Skills panel share it.
+  let presetId = $state('');
   // Skills stay folded; they open by themselves only when the choice blocks Start.
   let skillsOpen = $state(false);
   let evidenceOpen = $state(false);
@@ -374,6 +383,12 @@
   let deletingLaunch = $state<string | null>(null);
   let deleteFailure = $state<RowShown | null>(null);
   const savedRows = $derived(savedLaunches?.launches ?? []);
+  // The presets the card offers: the saved Arsenal selections of this agent's provider.
+  const presetsOfAgent = $derived(
+    launchAgent
+      ? savedSelections.filter((s) => s.provider === launchAgent)
+      : [],
+  );
   /** What the desktop answered, as a sentence the view draws: its reason, or the window's own. */
   function explain(error: unknown, fallback: string): Shown {
     if (error instanceof LaunchRefusal)
@@ -693,6 +708,40 @@
           {/if}
         </div>
 
+        {#if launchAgent}
+          <div class="launch-block launch-preset">
+            <h4 id="step-preset">{t('Preset')}</h4>
+            <div class="native-row">
+              <label class="visually-hidden" for="native-preset"
+                >{t('Preset')}</label
+              >
+              <select id="native-preset" bind:value={presetId}>
+                <option value="">{t('None — all installed skills')}</option>
+                {#each presetsOfAgent as preset (preset.id)}
+                  <option value={preset.id}>{preset.name}</option>
+                {/each}
+              </select>
+              {#if onarsenal}
+                <button type="button" class="action" onclick={onarsenal}
+                  >{t('Edit in Arsenal')}</button
+                >
+              {/if}
+            </div>
+            {#if presetsOfAgent.length === 0}
+              <p class="event-meta">
+                {t('No presets for {agent}.', {
+                  agent: AGENT_LABEL[launchAgent],
+                })}
+              </p>
+            {:else if arsenalChoice?.pending === true}
+              <p class="event-meta" aria-live="polite">{t('Checking…')}</p>
+            {:else if arsenalChoice && !arsenalChoice.pending && presetId}
+              <p class="event-meta" aria-live="polite">
+                {t('{on} on · {off} off', onOffCounts(arsenalChoice.plan))}
+              </p>
+            {/if}
+          </div>
+        {/if}
         <details class="launch-skills" bind:open={skillsOpen}>
           <summary>
             <h4 id="step-skills">Skills</h4>
@@ -714,6 +763,8 @@
               agent
                 ? controller.preview(agent, profile, start)
                 : Promise.reject(new Error('agent'))}
+            bind:selected={presetId}
+            choices={false}
             onchange={(choice) => (arsenalChoice = choice)}
           />
         </details>
