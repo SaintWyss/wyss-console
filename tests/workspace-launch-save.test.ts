@@ -1,13 +1,36 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import NativeHarness from './NativeHarness.svelte';
 import { fakeClient } from './native-harness';
-import { LaunchError, saveLaunch } from '../src/lib/desktop/launch-client';
+import {
+  deleteLaunch,
+  LaunchError,
+  listLaunches,
+  saveLaunch,
+} from '../src/lib/desktop/launch-client';
+import { arsenalClient } from '../src/lib/desktop/arsenal-client';
+import { openLaunch } from '../src/lib/features/terminal/launch';
 
 vi.mock('../src/lib/desktop/launch-client', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../src/lib/desktop/launch-client')>();
-  return { ...actual, saveLaunch: vi.fn() };
+  return {
+    ...actual,
+    saveLaunch: vi.fn(),
+    deleteLaunch: vi.fn(),
+    listLaunches: vi.fn(async () => ({
+      folder: '/home/u',
+      launches: [],
+      refused: [],
+    })),
+  };
+});
+vi.mock('../src/lib/features/terminal/launch', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('../src/lib/features/terminal/launch')
+    >();
+  return { ...actual, openLaunch: vi.fn(async () => ({ notes: [] })) };
 });
 
 let component: ReturnType<typeof mount> | undefined;
@@ -101,5 +124,120 @@ describe('Save as launch… on Workspace', () => {
     expect(formAlert()).toBe('no preset named “Estudio” for this agent.');
     expect(document.querySelector('.launch-save')).not.toBeNull();
     expect(button('Save launch').disabled).toBe(false);
+  });
+});
+
+describe('Saved launches on Workspace', () => {
+  const launchFile = (over: Record<string, unknown> = {}) => ({
+    id: 'estudiar',
+    name: 'Estudiar',
+    directory: '/home/u',
+    kind: 'session',
+    agent: 'claude_code',
+    profile: null,
+    before: [],
+    preset: 'Estudio',
+    ...over,
+  });
+  const listing = (...launches: unknown[]) =>
+    ({ folder: '/home/u', launches, refused: [] }) as never;
+  const row = (name: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('.launch-saved li')).find(
+      (li) => text(li).includes(name),
+    ) ?? null;
+  const rowButton = (name: string, label: string) =>
+    Array.from(
+      row(name)?.querySelectorAll<HTMLButtonElement>('button') ?? [],
+    ).find((b) => text(b) === label) ?? null;
+  const oneEstudio = [
+    { id: 'sel-estudio', name: 'Estudio', provider: 'claude_code' },
+  ];
+
+  beforeEach(() => {
+    vi.spyOn(arsenalClient, 'selections').mockResolvedValue(
+      oneEstudio as never,
+    );
+  });
+
+  it('lists the folder launches with what each one uses, and starts one through the same opening as Launch ▾', async () => {
+    vi.mocked(listLaunches).mockResolvedValue(listing(launchFile()));
+    await shown();
+    expect(text(row('Estudiar'))).toContain(
+      'Claude Code · u · No profile — as configured · Preset Estudio',
+    );
+    expect(rowButton('Estudiar', 'Start')!.disabled).toBe(false);
+    rowButton('Estudiar', 'Start')!.click();
+    await settle();
+    expect(openLaunch).toHaveBeenCalledWith(
+      'estudiar',
+      expect.objectContaining({ getLaunch: expect.any(Function) }),
+    );
+  });
+
+  it('says so when the folder has no launch yet', async () => {
+    vi.mocked(listLaunches).mockResolvedValue(listing());
+    await shown();
+    expect(text(document.querySelector('.launch-saved'))).toContain(
+      'No saved launches yet.',
+    );
+  });
+
+  it('a preset name held twice blocks Start on that launch and says why', async () => {
+    vi.mocked(listLaunches).mockResolvedValue(listing(launchFile()));
+    vi.spyOn(arsenalClient, 'selections').mockResolvedValue([
+      { id: 'a', name: 'Estudio', provider: 'claude_code' },
+      { id: 'b', name: 'Estudio', provider: 'claude_code' },
+    ] as never);
+    await shown();
+    expect(rowButton('Estudiar', 'Start')!.disabled).toBe(true);
+    expect(text(row('Estudiar'))).toContain(
+      'More than one preset is named “Estudio” for this agent.',
+    );
+  });
+
+  it('Delete asks in line with Cancel focused, and a refusal shows the desktop reason and keeps the row', async () => {
+    vi.mocked(listLaunches).mockResolvedValue(listing(launchFile()));
+    vi.mocked(deleteLaunch).mockRejectedValueOnce(
+      new LaunchError('launch_delete_refused', [
+        'it has a before line, so it is not removed here.',
+      ]),
+    );
+    await shown();
+    rowButton('Estudiar', 'Delete')!.click();
+    await settle();
+    expect(text(row('Estudiar'))).toContain('Delete Estudiar?');
+    expect(document.activeElement).toBe(rowButton('Estudiar', 'Cancel'));
+    rowButton('Estudiar', 'Delete')!.click();
+    await settle();
+    expect(deleteLaunch).toHaveBeenCalledWith('estudiar');
+    expect(row('Estudiar')).not.toBeNull();
+    expect(text(row('Estudiar'))).toContain(
+      'it has a before line, so it is not removed here.',
+    );
+  });
+
+  it('a launch the desktop deletes leaves the list', async () => {
+    vi.mocked(listLaunches)
+      .mockResolvedValueOnce(listing(launchFile()))
+      .mockResolvedValue(listing());
+    vi.mocked(deleteLaunch).mockResolvedValueOnce(undefined);
+    await shown();
+    rowButton('Estudiar', 'Delete')!.click();
+    await settle();
+    rowButton('Estudiar', 'Delete')!.click();
+    await settle();
+    expect(row('Estudiar')).toBeNull();
+    expect(text(document.querySelector('.launch-saved'))).toContain(
+      'No saved launches yet.',
+    );
+  });
+
+  it('when the folder cannot be read the list says so, without the window guessing', async () => {
+    vi.mocked(listLaunches).mockRejectedValueOnce(new LaunchError('internal'));
+    await shown();
+    expect(
+      document.querySelector('.launch-saved [role="alert"]')?.textContent,
+    ).toBe('The saved launches did not load.');
+    expect(row('Estudiar')).toBeNull();
   });
 });

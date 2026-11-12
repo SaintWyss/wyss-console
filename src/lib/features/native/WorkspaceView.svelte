@@ -5,8 +5,23 @@
   import DelegationsPanel from './DelegationsPanel.svelte';
   import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
-  import { LaunchError, saveLaunch } from '../../desktop/launch-client';
-  import { t } from '../../i18n/index.svelte';
+  import {
+    deleteLaunch,
+    LaunchError,
+    listLaunches,
+    saveLaunch,
+    type Launch,
+    type LaunchList,
+  } from '../../desktop/launch-client';
+  import { desktopLaunchDeps } from '../terminal/launch-deps';
+  import {
+    launchBlock,
+    LaunchRefusal,
+    openLaunch,
+    type SelectionName,
+  } from '../terminal/launch';
+  import { whenWorkspaceReady } from './bridge';
+  import { msg, t } from '../../i18n/index.svelte';
   import type { Binding } from '../../contracts/arsenal';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
@@ -328,6 +343,7 @@
       });
       launchForm = null;
       launchSaved = saved.name;
+      void readSaved();
     } catch (error) {
       if (error instanceof LaunchError && error.code === 'exists')
         form.exists = true;
@@ -339,6 +355,125 @@
     } finally {
       form.busy = false;
     }
+  }
+
+  // Saved launches (arsenal-UI-SPEC, phase D): the owner's launch files, and the Arsenal selections
+  // they name. Read while this view is shown, and again after a launch is saved or deleted.
+  type Shown = {
+    text: string;
+    translatable: boolean;
+    values?: Record<string, string>;
+  };
+  type RowShown = Shown & { id: string };
+  let savedLaunches = $state<LaunchList | null>(null);
+  let savedSelections = $state<SelectionName[]>([]);
+  let savedFailure = $state<Shown | null>(null);
+  let startingLaunch = $state<string | null>(null);
+  let startFailure = $state<RowShown | null>(null);
+  let confirmingDelete = $state<string | null>(null);
+  let deletingLaunch = $state<string | null>(null);
+  let deleteFailure = $state<RowShown | null>(null);
+  const savedRows = $derived(savedLaunches?.launches ?? []);
+  /** What the desktop answered, as a sentence the view draws: its reason, or the window's own. */
+  function explain(error: unknown, fallback: string): Shown {
+    if (error instanceof LaunchRefusal)
+      return { text: error.template, translatable: true, values: error.values };
+    if (error instanceof LaunchError && error.reasons[0])
+      return { text: error.reasons[0], translatable: false };
+    if (
+      error instanceof Error &&
+      !(error instanceof LaunchError) &&
+      error.message
+    )
+      return { text: error.message, translatable: false };
+    return { text: fallback, translatable: true };
+  }
+  const shownText = (shown: Shown) =>
+    shown.translatable ? t(shown.text, shown.values) : shown.text;
+  async function readSaved() {
+    try {
+      savedLaunches = await listLaunches();
+      savedSelections = await arsenalClient.selections();
+      savedFailure = null;
+    } catch (error) {
+      savedFailure = explain(error, msg('The saved launches did not load.'));
+    }
+  }
+  $effect(() => {
+    if (visible) untrack(() => void readSaved());
+  });
+  /** Why a saved launch cannot start now, from the profiles and selections this window holds. */
+  const blockOf = (launch: Launch) =>
+    launchBlock(launch, native.profiles, savedSelections);
+  function summaryOf(launch: Launch): string {
+    if (launch.kind === 'commands')
+      return t('Terminal commands · {folder}', {
+        folder: folderName(launch.directory),
+      });
+    return [
+      AGENT_LABEL[launch.agent],
+      folderName(launch.directory),
+      launch.profile ?? t('No profile — as configured'),
+      launch.preset
+        ? t('Preset {name}', { name: launch.preset })
+        : t('None — all installed skills'),
+    ].join(' · ');
+  }
+  async function startSaved(launch: Launch) {
+    if (startingLaunch) return;
+    startingLaunch = launch.id;
+    startFailure = null;
+    try {
+      // The same start as Launch ▾: the tab is made once the Console is mounted, then the Console shows.
+      const opened = await openLaunch(
+        launch.id,
+        desktopLaunchDeps({
+          openTerminal: (title, cwd, input) => {
+            whenWorkspaceReady((m) => {
+              m.launch(title, cwd, input);
+            });
+          },
+          openNative: (reply) => {
+            whenWorkspaceReady((m) => {
+              const tab = m.tabOf(reply.session.id);
+              if (tab) m.activate(tab);
+              else m.createNative(reply);
+            });
+          },
+        }),
+      );
+      arsenalNote =
+        opened.notes.map((note) => t(note.text, note.values)).join(' ') || null;
+      onconsole();
+    } catch (error) {
+      startFailure = {
+        id: launch.id,
+        ...explain(error, msg('The launch could not be opened.')),
+      };
+    } finally {
+      startingLaunch = null;
+    }
+  }
+  async function removeLaunch(launch: Launch) {
+    if (deletingLaunch) return;
+    deletingLaunch = launch.id;
+    deleteFailure = null;
+    try {
+      await deleteLaunch(launch.id);
+      confirmingDelete = null;
+      await readSaved();
+    } catch (error) {
+      deleteFailure = {
+        id: launch.id,
+        ...explain(error, msg('The launch could not be deleted.')),
+      };
+    } finally {
+      deletingLaunch = null;
+    }
+  }
+  /** The confirmation's Cancel takes the focus when it appears, as the contract asks. */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
   }
 </script>
 
@@ -711,6 +846,85 @@
             })}
           </p>
         {/if}
+        <div class="launch-block launch-saved">
+          <h4 id="step-saved">{t('Saved launches')}</h4>
+          {#if savedFailure}
+            <p class="native-warning" role="alert">{shownText(savedFailure)}</p>
+          {:else if savedLaunches === null}
+            <p class="event-meta" role="status">{t('Reading launches…')}</p>
+          {:else if savedRows.length === 0}
+            <p class="event-meta">{t('No saved launches yet.')}</p>
+          {:else}
+            <ul class="events-list" aria-labelledby="step-saved">
+              {#each savedRows as launch (launch.id)}
+                {@const block = blockOf(launch)}
+                <li class="native-row">
+                  <span class="event-title">{launch.name}</span>
+                  <span class="event-meta native-facts"
+                    >{summaryOf(launch)}</span
+                  >
+                  {#if block}
+                    <span class="native-warning" role="note"
+                      >{t(block.template, block.values)}</span
+                    >
+                  {/if}
+                  {#if startFailure?.id === launch.id}
+                    <span class="native-warning" role="alert"
+                      >{shownText(startFailure)}</span
+                    >
+                  {/if}
+                  {#if deleteFailure?.id === launch.id}
+                    <span class="native-warning" role="alert"
+                      >{shownText(deleteFailure)}</span
+                    >
+                  {/if}
+                  <span class="native-actions">
+                    {#if confirmingDelete === launch.id}
+                      <span class="event-meta"
+                        >{t('Delete {name}?', { name: launch.name })}</span
+                      >
+                      <button
+                        type="button"
+                        class="action danger"
+                        disabled={deletingLaunch !== null}
+                        onclick={() => removeLaunch(launch)}
+                        >{deletingLaunch === launch.id
+                          ? t('Deleting…')
+                          : t('Delete')}</button
+                      >
+                      <button
+                        type="button"
+                        class="action"
+                        use:focusOnMount
+                        onclick={() => (confirmingDelete = null)}
+                        >{t('Cancel')}</button
+                      >
+                    {:else}
+                      <button
+                        type="button"
+                        class="action"
+                        disabled={startingLaunch !== null ||
+                          native.starting ||
+                          !!block}
+                        onclick={() => startSaved(launch)}
+                        >{startingLaunch === launch.id
+                          ? t('Starting…')
+                          : t('Start')}</button
+                      >
+                      <button
+                        type="button"
+                        class="action"
+                        disabled={deletingLaunch !== null}
+                        onclick={() => (confirmingDelete = launch.id)}
+                        >{t('Delete')}</button
+                      >
+                    {/if}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
       </section>
 
       <div class="native-side">

@@ -11,19 +11,10 @@
   import type { ConsoleSessionId } from '../../contracts/identities';
   import { registerWorkspace } from '../native/bridge';
   import TerminalPanel from './TerminalPanel.svelte';
-  import {
-    getLaunch,
-    listLaunches,
-    runBefore,
-    type LaunchList,
-  } from '../../desktop/launch-client';
-  import {
-    previewProfile,
-    readProfiles,
-    startNative,
-  } from '../../desktop/native-client';
+  import { listLaunches, type LaunchList } from '../../desktop/launch-client';
+  import { readProfiles } from '../../desktop/native-client';
   import type { Profile } from '../../contracts/native';
-  import { arsenalClient } from '../../desktop/arsenal-client';
+  import { desktopLaunchDeps } from './launch-deps';
   import { BYPASS_WARNING, failureText } from '../native/present';
   import {
     isFullAccess,
@@ -158,32 +149,13 @@
     launchNote = null;
     launchError = null;
     try {
-      const opened = await openLaunch(id, {
-        getLaunch,
-        runBefore,
-        profiles: readProfiles,
-        remembered: (project, agent) =>
-          arsenalClient.projectSelection(project, agent).catch(() => null),
-        selections: () => arsenalClient.selections(),
-        plan: (selection, agent, project) =>
-          arsenalClient.terminalPlan(selection, agent, project),
-        preview: (agent, profile, arsenal) =>
-          previewProfile(agent, profile, arsenal),
-        start: (agent, project, profile, preview, arsenal) =>
-          startNative(
-            agent,
-            project,
-            profile,
-            { rows: 24, cols: 80 },
-            null,
-            preview,
-            arsenal,
-          ),
-        bind: (session, selection, hash) =>
-          arsenalClient.bindTerminal(session, selection, hash),
-        openTerminal: (title, cwd, input) => m.launch(title, cwd, input),
-        openNative: (reply) => m.createNative(reply),
-      });
+      const opened = await openLaunch(
+        id,
+        desktopLaunchDeps({
+          openTerminal: (title, cwd, input) => m.launch(title, cwd, input),
+          openNative: (reply) => m.createNative(reply),
+        }),
+      );
       launchesOpen = false;
       launchNote = opened.notes.length > 0 ? opened.notes : null;
     } catch (error) {

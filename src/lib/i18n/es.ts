@@ -852,4 +852,12 @@ export const ES: Readonly<Record<string, string>> = {
     'No hay un preset llamado “{name}” para este agente. Créalo en Arsenal o cambia el archivo del lanzamiento.',
   'More than one preset is named “{name}” for this agent. Delete the extra ones in Arsenal, then start again.':
     'Hay más de un preset llamado “{name}” para este agente. Borra los sobrantes en Arsenal y vuelve a iniciar.',
+  'Saved launches': 'Lanzamientos guardados',
+  'No saved launches yet.': 'Todavía no hay lanzamientos guardados.',
+  'The saved launches did not load.':
+    'Los lanzamientos guardados no se cargaron.',
+  'The launch could not be deleted.': 'No se pudo borrar el lanzamiento.',
+  'Starting…': 'Iniciando…',
+  'Terminal commands · {folder}': 'Comandos de terminal · {folder}',
+  'Preset {name}': 'Preset {name}',
 };
