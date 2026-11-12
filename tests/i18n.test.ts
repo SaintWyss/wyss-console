@@ -34,10 +34,15 @@ import {
   outcomeText,
 } from '../src/lib/features/configuration/present';
 import {
+  APPROVAL_STATE_LABEL,
+  AVAILABILITY_LABEL,
   effortLine,
+  REFUSAL_LABEL,
+  reasonText,
   rerouteLine,
   running,
   tokenLine,
+  WINDOW_LABEL,
 } from '../src/lib/features/m3/present';
 import { parseModelCatalogue } from '../src/lib/contracts/models';
 import catalogues from './fixtures/model-catalogue-v1.json';
@@ -320,6 +325,29 @@ it('draws the usage counts and running totals in Spanish, with their places', ()
   expect(tPhrase(running(partial))).toBe('at least 11 (1 turn did not report)');
   expect(tPhrase(running(several))).toBe(
     'at least 30 (2 turns did not report)',
+  );
+});
+
+it('draws the m3 labels, reasons and refusals in Spanish, and keeps the English', () => {
+  setLanguage('es');
+  expect(t(AVAILABILITY_LABEL.blocked.label)).toBe('Bloqueado');
+  expect(t(WINDOW_LABEL.five_hour)).toBe('Ventana de 5 horas');
+  expect(t(APPROVAL_STATE_LABEL.indeterminate.label)).toBe(
+    'No se sabe si pasó — no se va a repetir',
+  );
+  expect(t(REFUSAL_LABEL.unreachable)).toBe(
+    'La ventana no pudo llegar al servicio.',
+  );
+  expect(t(reasonText('sdk_not_configured'))).toBe(
+    'No se indicó ninguna instalación del Claude Agent SDK para esta Consola.',
+  );
+  // A code the presenter does not know is shown as it arrived.
+  expect(t(reasonText('unknown_code'))).toBe('unknown_code');
+  setLanguage('en');
+  expect(t(AVAILABILITY_LABEL.blocked.label)).toBe('Blocked');
+  expect(t(WINDOW_LABEL.five_hour)).toBe('5-hour window');
+  expect(t(reasonText('sdk_not_configured'))).toBe(
+    'No Claude Agent SDK installation was named for this Console.',
   );
 });
 
