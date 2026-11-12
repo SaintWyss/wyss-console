@@ -135,7 +135,17 @@
         }}></textarea>
     {/if}
     {#if mode !== 'edit'}
-      <div class="md insight-readme-preview" aria-label="Vista previa">
+      <!-- A link must never navigate the app's webview away; only in-page anchors move. -->
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div
+        class="md insight-readme-preview"
+        aria-label="Vista previa"
+        onclick={(event) => {
+          const a = (event.target as Element | null)?.closest?.('a');
+          if (a && !(a.getAttribute('href') ?? '').startsWith('#'))
+            event.preventDefault();
+        }}
+      >
         <!-- eslint-disable-next-line svelte/no-at-html-tags -- renderMarkdown escapes all source text -->
         {@html preview}
       </div>
