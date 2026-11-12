@@ -869,4 +869,46 @@ export const ES: Readonly<Record<string, string>> = {
     'La clave se abre y coincide con su checksum.',
   'The record is damaged: replace the key.':
     'El registro está dañado: reemplazá la clave.',
+
+  // Remote: the view that says what is not connected yet
+  'M7 · REMOTE GATEWAY': 'M7 · PUERTA REMOTA',
+  'Unavailable · OD01 transport choice is open. This view sends no network requests and has no paired hosts.':
+    'No disponible · la elección de transporte OD01 está abierta. Esta vista no envía pedidos de red y no tiene equipos emparejados.',
+  'Remote areas': 'Áreas remotas',
+  Hosts: 'Equipos',
+  Pairing: 'Emparejamiento',
+  Devices: 'Dispositivos',
+  'No remote host is enrolled. Authentication, pairing, connection type and grant expiry are unavailable until a transport is approved and independently reviewed.':
+    'No hay ningún equipo remoto registrado. La autenticación, el emparejamiento, el tipo de conexión y el vencimiento de las concesiones no están disponibles hasta que un transporte se apruebe y lo revise alguien independiente.',
+  'Connect to a host': 'Conectar con un equipo',
+  'Pairing requires two distinct device keys, a pinned host identity, QR transcript proof and explicit host confirmation. No key or enrollment is created from this view.':
+    'El emparejamiento requiere dos claves de dispositivo distintas, una identidad de host fijada, la prueba de la transcripción del QR y la confirmación explícita del host. Desde esta vista no se crea ninguna clave ni registro.',
+  'Begin pairing': 'Empezar el emparejamiento',
+  'Remote projects and workspaces will be listed only from an authenticated host. No local path or cached project is shown here.':
+    'Los proyectos y workspaces remotos se listarán solo desde un host autenticado. Acá no se muestra ninguna ruta local ni proyecto en caché.',
+  'Native and Managed sessions need host identity, plane, generation and observation age. No remote session metadata is cached.':
+    'Las sesiones Native y Managed necesitan identidad de host, plano, generación y antigüedad de la observación. No se guarda en caché ningún metadato de sesiones remotas.',
+  'Disconnected · no output is available. View and input grants are separate; terminal.write grants full host-account control. Locked-host full-account input remains blocked.':
+    'Desconectado · no hay salida disponible. Las concesiones de ver y de escribir son separadas; terminal.write da control total de la cuenta del host. La entrada con cuenta completa en un host bloqueado sigue bloqueada.',
+  'Input must report accepted bytes, partial writes or OUTCOME_UNKNOWN. A lost acknowledgement is never replayed; new user input is required after reconnect.':
+    'La entrada tiene que informar bytes aceptados, escrituras parciales o OUTCOME_UNKNOWN. Una confirmación perdida nunca se reenvía: después de reconectar hace falta una entrada nueva del usuario.',
+  'Attach read-only terminal': 'Adjuntar terminal de solo lectura',
+  'Claim terminal input': 'Reclamar la entrada de la terminal',
+  'Pipeline metadata is unavailable offline. M6 keeps prompts and provider output out of durable journals; a remote view will fetch through the reviewed host protocol.':
+    'Los metadatos de los pipelines no están disponibles sin conexión. M6 mantiene los prompts y la salida de los proveedores fuera de los diarios durables; una vista remota va a traer datos por el protocolo de host revisado.',
+  'Managed approval decisions must pass through the existing wyss-control authority and its per-operation presence check. This view cannot approve while disconnected.':
+    'Las decisiones de aprobación Managed tienen que pasar por la autoridad wyss-control existente y su verificación de presencia por operación. Esta vista no puede aprobar mientras esté desconectada.',
+  Approve: 'Aprobar',
+  Deny: 'Rechazar',
+  'No paired-device list exists. Revocation, expiry and host-confirmed grant changes will be shown only after authenticated host negotiation.':
+    'No existe una lista de dispositivos emparejados. Las revocaciones, los vencimientos y los cambios de concesión confirmados por el host se mostrarán solo después de una negociación autenticada con el host.',
+  'Transport candidates': 'Candidatos de transporte',
+  'H1 · owner-configured overlay: Android VPN lifecycle and third-party control plane; Tailscale reference pricing is $0 Personal (up to 6 users), $8/user/month Standard, $18/user/month Premium.':
+    'H1 · overlay configurado por el dueño: ciclo de vida de la VPN de Android y plano de control de terceros; el precio de referencia de Tailscale es $0 Personal (hasta 6 usuarios), $8/usuario/mes Standard, $18/usuario/mes Premium.',
+  'H2 · iroh/QUIC: first-party Kotlin/Android bindings and end-to-end TLS; public relays are free/rate-limited/no-SLA, hosted relays start at $19/month, self-hosting transfers infrastructure and operations to Wyss.':
+    'H2 · iroh/QUIC: bindings propios de Kotlin/Android y TLS de extremo a extremo; los relays públicos son gratuitos, con límite de tasa y sin SLA; los relays alojados arrancan en $19/mes; alojarlo uno mismo pasa la infraestructura y la operación a Wyss.',
+  'No CPU, RAM, battery, idle, latency or roaming measurements exist for either candidate. OD01 remains an owner decision. OD02 keeps locked-host full-account input blocked.':
+    'No hay mediciones de CPU, RAM, batería, reposo, latencia ni roaming para ninguno de los dos candidatos. OD01 sigue siendo una decisión del dueño. OD02 mantiene bloqueada la entrada con cuenta completa en un host bloqueado.',
+  'Disconnected · no action is queued or sent.':
+    'Desconectado · no se encola ni se envía ninguna acción.',
 };

@@ -1,116 +1,122 @@
 <script lang="ts">
+  import { t } from '../../i18n/index.svelte';
+  import { msg } from '../../i18n/msg';
   let { visible = false }: { visible?: boolean } = $props();
   const sections = [
-    'Hosts',
-    'Pairing',
-    'Projects',
-    'Sessions',
-    'Terminal',
-    'Pipelines',
-    'Approvals',
-    'Devices',
-    'Settings',
+    msg('Hosts'),
+    msg('Pairing'),
+    msg('Projects'),
+    msg('Sessions'),
+    msg('Terminal'),
+    msg('Pipelines'),
+    msg('Approvals'),
+    msg('Devices'),
+    msg('Settings'),
   ] as const;
   let section = $state<(typeof sections)[number]>('Hosts');
 </script>
 
-<section class="remote" aria-label="Remote PCs" hidden={!visible}>
+<section class="remote" aria-label={t('Remote PCs')} hidden={!visible}>
   <header>
-    <p class="eyebrow">M7 · REMOTE GATEWAY</p>
-    <h2>Remote PCs</h2>
+    <p class="eyebrow">{t('M7 · REMOTE GATEWAY')}</p>
+    <h2>{t('Remote PCs')}</h2>
     <p class="blocked" role="status">
-      Unavailable · OD01 transport choice is open. This view sends no network
-      requests and has no paired hosts.
+      {t(
+        'Unavailable · OD01 transport choice is open. This view sends no network requests and has no paired hosts.',
+      )}
     </p>
   </header>
 
-  <nav class="areas" aria-label="Remote areas">
+  <nav class="areas" aria-label={t('Remote areas')}>
     {#each sections as item (item)}
       <button
         type="button"
         aria-current={section === item ? 'page' : undefined}
-        onclick={() => (section = item)}>{item}</button
+        onclick={() => (section = item)}>{t(item)}</button
       >
     {/each}
   </nav>
 
   <article aria-live="polite">
-    <h3>{section}</h3>
+    <h3>{t(section)}</h3>
     {#if section === 'Hosts'}
       <p>
-        No remote host is enrolled. Authentication, pairing, connection type and
-        grant expiry are unavailable until a transport is approved and
-        independently reviewed.
+        {t(
+          'No remote host is enrolled. Authentication, pairing, connection type and grant expiry are unavailable until a transport is approved and independently reviewed.',
+        )}
       </p>
-      <button type="button" disabled>Connect to a host</button>
+      <button type="button" disabled>{t('Connect to a host')}</button>
     {:else if section === 'Pairing'}
       <p>
-        Pairing requires two distinct device keys, a pinned host identity, QR
-        transcript proof and explicit host confirmation. No key or enrollment is
-        created from this view.
+        {t(
+          'Pairing requires two distinct device keys, a pinned host identity, QR transcript proof and explicit host confirmation. No key or enrollment is created from this view.',
+        )}
       </p>
-      <button type="button" disabled>Begin pairing</button>
+      <button type="button" disabled>{t('Begin pairing')}</button>
     {:else if section === 'Projects'}
       <p>
-        Remote projects and workspaces will be listed only from an authenticated
-        host. No local path or cached project is shown here.
+        {t(
+          'Remote projects and workspaces will be listed only from an authenticated host. No local path or cached project is shown here.',
+        )}
       </p>
     {:else if section === 'Sessions'}
       <p>
-        Native and Managed sessions need host identity, plane, generation and
-        observation age. No remote session metadata is cached.
+        {t(
+          'Native and Managed sessions need host identity, plane, generation and observation age. No remote session metadata is cached.',
+        )}
       </p>
     {:else if section === 'Terminal'}
       <p>
-        Disconnected · no output is available. View and input grants are
-        separate; terminal.write grants full host-account control. Locked-host
-        full-account input remains blocked.
+        {t(
+          'Disconnected · no output is available. View and input grants are separate; terminal.write grants full host-account control. Locked-host full-account input remains blocked.',
+        )}
       </p>
       <p>
-        Input must report accepted bytes, partial writes or OUTCOME_UNKNOWN. A
-        lost acknowledgement is never replayed; new user input is required after
-        reconnect.
+        {t(
+          'Input must report accepted bytes, partial writes or OUTCOME_UNKNOWN. A lost acknowledgement is never replayed; new user input is required after reconnect.',
+        )}
       </p>
-      <button type="button" disabled>Attach read-only terminal</button>
-      <button type="button" disabled>Claim terminal input</button>
+      <button type="button" disabled>{t('Attach read-only terminal')}</button>
+      <button type="button" disabled>{t('Claim terminal input')}</button>
     {:else if section === 'Pipelines'}
       <p>
-        Pipeline metadata is unavailable offline. M6 keeps prompts and provider
-        output out of durable journals; a remote view will fetch through the
-        reviewed host protocol.
+        {t(
+          'Pipeline metadata is unavailable offline. M6 keeps prompts and provider output out of durable journals; a remote view will fetch through the reviewed host protocol.',
+        )}
       </p>
     {:else if section === 'Approvals'}
       <p>
-        Managed approval decisions must pass through the existing wyss-control
-        authority and its per-operation presence check. This view cannot approve
-        while disconnected.
+        {t(
+          'Managed approval decisions must pass through the existing wyss-control authority and its per-operation presence check. This view cannot approve while disconnected.',
+        )}
       </p>
-      <button type="button" disabled>Approve</button>
-      <button type="button" disabled>Deny</button>
+      <button type="button" disabled>{t('Approve')}</button>
+      <button type="button" disabled>{t('Deny')}</button>
     {:else if section === 'Devices'}
       <p>
-        No paired-device list exists. Revocation, expiry and host-confirmed
-        grant changes will be shown only after authenticated host negotiation.
+        {t(
+          'No paired-device list exists. Revocation, expiry and host-confirmed grant changes will be shown only after authenticated host negotiation.',
+        )}
       </p>
     {:else}
-      <h4>Transport candidates</h4>
+      <h4>{t('Transport candidates')}</h4>
       <p>
-        H1 · owner-configured overlay: Android VPN lifecycle and third-party
-        control plane; Tailscale reference pricing is $0 Personal (up to 6
-        users), $8/user/month Standard, $18/user/month Premium.
+        {t(
+          'H1 · owner-configured overlay: Android VPN lifecycle and third-party control plane; Tailscale reference pricing is $0 Personal (up to 6 users), $8/user/month Standard, $18/user/month Premium.',
+        )}
       </p>
       <p>
-        H2 · iroh/QUIC: first-party Kotlin/Android bindings and end-to-end TLS;
-        public relays are free/rate-limited/no-SLA, hosted relays start at
-        $19/month, self-hosting transfers infrastructure and operations to Wyss.
+        {t(
+          'H2 · iroh/QUIC: first-party Kotlin/Android bindings and end-to-end TLS; public relays are free/rate-limited/no-SLA, hosted relays start at $19/month, self-hosting transfers infrastructure and operations to Wyss.',
+        )}
       </p>
       <p>
-        No CPU, RAM, battery, idle, latency or roaming measurements exist for
-        either candidate. OD01 remains an owner decision. OD02 keeps locked-host
-        full-account input blocked.
+        {t(
+          'No CPU, RAM, battery, idle, latency or roaming measurements exist for either candidate. OD01 remains an owner decision. OD02 keeps locked-host full-account input blocked.',
+        )}
       </p>
     {/if}
-    <p class="no-queue">Disconnected · no action is queued or sent.</p>
+    <p class="no-queue">{t('Disconnected · no action is queued or sent.')}</p>
   </article>
 </section>
 

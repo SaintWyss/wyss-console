@@ -143,6 +143,14 @@ it('draws the credentials notices and their dates in Spanish', () => {
   expect(t('kept {date}', { date: '11 nov 2026' })).toBe('kept 11 nov 2026');
 });
 
+it('draws the remote view sections and its first sentence in Spanish', () => {
+  setLanguage('es');
+  expect(t('Hosts')).toBe('Equipos');
+  expect(t('Connect to a host')).toBe('Conectar con un equipo');
+  setLanguage('en');
+  expect(t('Hosts')).toBe('Hosts');
+});
+
 it('has a Spanish sentence for every sentence the window can show', () => {
   const missing = [...sentences()]
     .filter(([text]) => !Object.hasOwn(ES, text))
