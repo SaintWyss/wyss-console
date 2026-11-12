@@ -247,7 +247,11 @@ fn parse(id: &str, text: &str, home: &Path) -> Result<Launch, String> {
                     "at most {MAX_BEFORE} before commands, each one line of at most {MAX_COMMAND} characters"
                 ));
             }
-            if session.preset.as_deref().is_some_and(|p| !text_ok(p, MAX_NAME)) {
+            if session
+                .preset
+                .as_deref()
+                .is_some_and(|p| !text_ok(p, MAX_NAME))
+            {
                 return Err(format!(
                     "preset must be a preset's name, 1–{MAX_NAME} characters on one line"
                 ));
@@ -540,8 +544,8 @@ pub fn save(
     if id.is_empty() {
         return Err(invalid("name needs at least one letter or digit".into()));
     }
-    let folder = directory(Some(&request.directory), &places.home)
-        .map_err(|why| invalid(why.to_owned()))?;
+    let folder =
+        directory(Some(&request.directory), &places.home).map_err(|why| invalid(why.to_owned()))?;
     if let Some(profile) = request.profile.as_deref() {
         if !text_ok(profile, crate::native::profile::MAX_NAME) {
             return Err(invalid("profile must be a profile's name".into()));
@@ -568,7 +572,9 @@ pub fn save(
     let target = places.folder.join(format!("{id}.toml"));
     if let Ok(meta) = fs::symlink_metadata(&target) {
         if !meta.is_file() {
-            return Err(invalid("a launch with that file name is not a plain file".into()));
+            return Err(invalid(
+                "a launch with that file name is not a plain file".into(),
+            ));
         }
         if !request.replace {
             return Err(SaveRefusal::Exists);
@@ -603,7 +609,10 @@ pub fn delete(places: &Places, id: &str) -> Result<(), String> {
     let launch = get(places, id)?;
     let saved = matches!(&launch.kind, Kind::Session { before, .. } if before.is_empty());
     if !saved {
-        return Err("only a launch saved from Workspace can be deleted here; edit the others in their file".into());
+        return Err(
+            "only a launch saved from Workspace can be deleted here; edit the others in their file"
+                .into(),
+        );
     }
     fs::remove_file(places.folder.join(format!("{id}.toml")))
         .map_err(|_| "the launch could not be deleted".to_owned())
@@ -660,8 +669,9 @@ struct Desktop {
 
 impl Known for Desktop {
     fn profiles(&self, agent: &str) -> Result<Vec<String>, String> {
-        let value = call_extended_or_legacy(&self.link, "profiles_extended", "profiles", Value::Null)
-            .map_err(|e| format!("the profiles could not be read ({})", e.code))?;
+        let value =
+            call_extended_or_legacy(&self.link, "profiles_extended", "profiles", Value::Null)
+                .map_err(|e| format!("the profiles could not be read ({})", e.code))?;
         Ok(value
             .as_array()
             .into_iter()
@@ -676,7 +686,10 @@ impl Known for Desktop {
     }
 
     fn presets(&self, agent: &str) -> Result<Vec<String>, String> {
-        let library = self.library.as_ref().ok_or("the Arsenal library is not open")?;
+        let library = self
+            .library
+            .as_ref()
+            .ok_or("the Arsenal library is not open")?;
         let store = library
             .lock()
             .map_err(|_| "the Arsenal library is busy".to_owned())?;
@@ -710,11 +723,9 @@ pub async fn launch_save(
         link: link.inner().clone(),
         library: arsenal.launch_handle(),
     };
-    tauri::async_runtime::spawn_blocking(move || {
-        save(&places()?, &request, &known).map_err(saving)
-    })
-    .await
-    .map_err(|_| HostError::new("internal"))?
+    tauri::async_runtime::spawn_blocking(move || save(&places()?, &request, &known).map_err(saving))
+        .await
+        .map_err(|_| HostError::new("internal"))?
 }
 
 #[tauri::command]

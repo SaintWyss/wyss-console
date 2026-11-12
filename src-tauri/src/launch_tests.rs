@@ -334,7 +334,10 @@ fn a_saved_launch_is_private_names_its_preset_and_reads_back_the_same() {
     );
     let path = places.folder.join("estudiar-utn.toml");
     use std::os::unix::fs::PermissionsExt;
-    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     let text = fs::read_to_string(&path).unwrap();
     assert!(text.contains("directory = \"~/work\""), "{text}");
     assert!(
@@ -359,15 +362,42 @@ fn a_save_is_checked_against_the_desktop_and_writes_nothing_when_refused() {
     let work = places.home.join("work").display().to_string();
     let nowhere = places.home.join("nowhere").display().to_string();
     let cases = [
-        (json!({"name": "x", "directory": work, "agent": "bash"}), "claude_code or codex"),
-        (json!({"name": "a\nb", "directory": work, "agent": "codex"}), "one line"),
-        (json!({"name": "x".repeat(61), "directory": work, "agent": "codex"}), "1–60"),
-        (json!({"name": "!!!", "directory": work, "agent": "codex"}), "letter or digit"),
-        (json!({"name": "x", "directory": "work", "agent": "codex"}), "absolute"),
-        (json!({"name": "x", "directory": nowhere, "agent": "codex"}), "not found"),
-        (json!({"name": "x", "directory": work, "agent": "codex", "profile": "Full access (bypass)"}), "no profile named"),
-        (json!({"name": "x", "directory": work, "agent": "claude_code", "preset": "Codex base"}), "no preset named"),
-        (json!({"name": "x", "directory": work, "agent": "codex", "profile": ""}), "profile must be"),
+        (
+            json!({"name": "x", "directory": work, "agent": "bash"}),
+            "claude_code or codex",
+        ),
+        (
+            json!({"name": "a\nb", "directory": work, "agent": "codex"}),
+            "one line",
+        ),
+        (
+            json!({"name": "x".repeat(61), "directory": work, "agent": "codex"}),
+            "1–60",
+        ),
+        (
+            json!({"name": "!!!", "directory": work, "agent": "codex"}),
+            "letter or digit",
+        ),
+        (
+            json!({"name": "x", "directory": "work", "agent": "codex"}),
+            "absolute",
+        ),
+        (
+            json!({"name": "x", "directory": nowhere, "agent": "codex"}),
+            "not found",
+        ),
+        (
+            json!({"name": "x", "directory": work, "agent": "codex", "profile": "Full access (bypass)"}),
+            "no profile named",
+        ),
+        (
+            json!({"name": "x", "directory": work, "agent": "claude_code", "preset": "Codex base"}),
+            "no preset named",
+        ),
+        (
+            json!({"name": "x", "directory": work, "agent": "codex", "profile": ""}),
+            "profile must be",
+        ),
     ];
     for (value, why) in cases {
         match save(&places, &request(value.clone()), &fake()) {
@@ -442,7 +472,10 @@ fn the_window_cannot_send_a_command_or_a_before_line_to_save() {
 
 #[test]
 fn a_file_name_is_lowercase_ascii_with_dashes_and_at_most_forty() {
-    assert_eq!(slug("Estudio Ñandú — Güemes 2026!"), "estudio-nandu-guemes-2026");
+    assert_eq!(
+        slug("Estudio Ñandú — Güemes 2026!"),
+        "estudio-nandu-guemes-2026"
+    );
     assert_eq!(slug("  --Codex--  "), "codex");
     let long = slug(&"abc ".repeat(20));
     assert!(long.len() <= 40 && !long.ends_with('-'), "{long}");
@@ -466,7 +499,11 @@ fn only_a_launch_saved_from_workspace_can_be_deleted_here() {
     let refused = delete(&places, "codex").unwrap_err();
     assert!(refused.contains("edit the others"), "{refused}");
     assert!(places.folder.join("codex.toml").exists());
-    write(&places, "typed.toml", "name = \"Typed\"\ncommands = [\"ls\"]\n");
+    write(
+        &places,
+        "typed.toml",
+        "name = \"Typed\"\ncommands = [\"ls\"]\n",
+    );
     assert!(delete(&places, "typed").is_err());
     assert!(places.folder.join("typed.toml").exists());
     assert!(delete(&places, "../codex").is_err());
