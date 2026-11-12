@@ -12,6 +12,7 @@
     WorkspaceSnapshot,
   } from '../../contracts/orchestration';
   import { chooseWorkspace } from '../../desktop/sessions-client';
+  import { t } from '../../i18n/index.svelte';
   import {
     listRuns,
     OrchestrationCallError,
@@ -940,7 +941,7 @@
 
 <section
   class="pipelines-feature"
-  aria-label="Pipelines and handoff"
+  aria-label={t('Pipelines and handoff')}
   hidden={!visible}
   inert={!visible}
 >
@@ -978,7 +979,7 @@
       tabindex={tab === 'handoff' ? 0 : -1}
       onkeydown={(event) => tabKey(event, 1)}
       aria-selected={tab === 'handoff'}
-      onclick={() => (tab = 'handoff')}>Structured handoff</button
+      onclick={() => (tab = 'handoff')}>{t('Structured handoff')}</button
     >
   </div>
 
@@ -1101,7 +1102,7 @@
                     )}
                 >
                   <option value="managed_codex"
-                    >Managed Codex · F8 authority</option
+                    >{t('Managed Codex · F8 authority')}</option
                   >
                   <option value="managed_claude"
                     >Managed Claude · adapter bloqueado</option
@@ -1646,10 +1647,11 @@
               >Procedencia<select
                 bind:value={handoffProvenance}
                 onchange={() => (handoffPreview = null)}
-                ><option value="human_entered">Human entered</option><option
-                  value="provider_reported">Provider reported</option
+                ><option value="human_entered">{t('Human entered')}</option
+                ><option value="provider_reported"
+                  >{t('Provider reported')}</option
                 ><option value="provider_output_untrusted"
-                  >Provider output · untrusted</option
+                  >{t('Provider output · untrusted')}</option
                 ></select
               ></label
             >

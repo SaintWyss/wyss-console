@@ -1589,4 +1589,13 @@ export const ES: Readonly<Record<string, string>> = {
   'Newest first': 'Más recientes primero',
   '· {count} window back': '· {count} ventana atrás',
   '· {count} windows back': '· {count} ventanas atrás',
+
+  // ---- orchestration ----
+  // Pipelines view: the English fragments inside its Spanish labels
+  'Pipelines and handoff': 'Pipelines y traspaso',
+  'Structured handoff': 'Traspaso estructurado',
+  'Managed Codex · F8 authority': 'Managed Codex · autoridad F8',
+  'Human entered': 'Ingresado por humano',
+  'Provider reported': 'Reportado por el proveedor',
+  'Provider output · untrusted': 'Salida del proveedor · no confiable',
 };
