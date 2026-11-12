@@ -13,7 +13,12 @@ import {
   type Phrase,
 } from '../src/lib/i18n/index.svelte';
 import type { EventRow } from '../src/lib/contracts/events';
+import type { LeaseInfo, RuntimeInfo } from '../src/lib/contracts/f8';
 import { activityLabel } from '../src/lib/features/agent/present';
+import {
+  leaseLine,
+  runtimeLine as runtimeRow,
+} from '../src/lib/features/f8/present';
 import { eventDetail, eventTitle } from '../src/lib/features/events/present';
 import {
   composeImpact,
@@ -242,6 +247,27 @@ it('draws the events sentences in Spanish, with their nested places', () => {
   expect(tPhrase(eventDetail(exited))).toBe(
     'The Codex process ended. The authority meant it to.',
   );
+});
+
+it('draws the managed-runtime row and lease sentences in Spanish, with their places', () => {
+  const row = runtimeRow({
+    generation: 2,
+    actual: 'ready',
+    profile: 'codex_local_tools_v1',
+  } as unknown as RuntimeInfo);
+  const lease = leaseLine(
+    {
+      state: 'active',
+      expires_at: new Date(Date.parse('2026-11-11T12:05:00Z')).toISOString(),
+    } as unknown as LeaseInfo,
+    Date.parse('2026-11-11T12:00:00Z'),
+  );
+  setLanguage('es');
+  expect(tPhrase(row)).toBe('Listo · generación 2 · Local Tools');
+  expect(tPhrase(lease)).toBe('Vence en 5 min');
+  setLanguage('en');
+  expect(tPhrase(row)).toBe('Ready · generation 2 · Local Tools');
+  expect(tPhrase(lease)).toBe('Expires in 5 min');
 });
 
 it('has a Spanish sentence for every sentence the window can show', () => {

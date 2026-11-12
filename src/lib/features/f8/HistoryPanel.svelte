@@ -51,7 +51,7 @@
 
   {#if history.status === 'failed' && history.failure}
     <div class="sessions-status failed" role="alert">
-      <p>{failureText(history.failure.code)}</p>
+      <p>{t(failureText(history.failure.code))}</p>
       <button
         type="button"
         class="action"

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { SessionDetail } from '../../contracts/f8';
-  import { tPhrase } from '../../i18n/index.svelte';
+  import { t, tPhrase } from '../../i18n/index.svelte';
   import { observedModelLine } from '../sessions/present';
   import type { F8Controller, F8ViewState } from './controller';
   import { failureText } from './present';
@@ -35,7 +35,7 @@
     </div>
   {:else if models.status === 'failed' && models.failure}
     <div class="sessions-empty" role="alert">
-      <p class="empty-title">{failureText(models.failure.code)}</p>
+      <p class="empty-title">{t(failureText(models.failure.code))}</p>
       <button
         type="button"
         class="action"

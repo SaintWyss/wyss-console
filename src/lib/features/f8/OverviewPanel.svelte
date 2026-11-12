@@ -8,7 +8,7 @@
   } from '../../contracts/f8';
   import { AGENT_MODES } from '../../contracts/sessions';
   import { localClock } from '../agent/present';
-  import { tPhrase } from '../../i18n/index.svelte';
+  import { t, tPhrase } from '../../i18n/index.svelte';
   import {
     AGENT_MODE,
     folderName,
@@ -111,7 +111,7 @@
       <h4 id="rt-runtime">Runtime</h4>
       <span class="pill compact" data-tone={RUNTIME_STATE[runtime.actual].tone}>
         <span class="dot" aria-hidden="true"></span>
-        {RUNTIME_STATE[runtime.actual].label}
+        {t(RUNTIME_STATE[runtime.actual].label)}
       </span>
     </header>
     <dl class="session-facts">
@@ -136,10 +136,14 @@
       </dd>
     </dl>
     {#if runtime.diagnostic}
-      <p class="rt-alert" role="note">{diagnosticText(runtime.diagnostic)}</p>
+      <p class="rt-alert" role="note">
+        {t(diagnosticText(runtime.diagnostic))}
+      </p>
     {/if}
     {#if runtime.budget_failure}
-      <p class="rt-alert" role="note">{budgetText(runtime.budget_failure)}</p>
+      <p class="rt-alert" role="note">
+        {tPhrase(budgetText(runtime.budget_failure))}
+      </p>
     {/if}
     {#if runtime.exhausted}
       <p class="rt-alert" role="note">
@@ -182,7 +186,7 @@
               onchange={() => controller.chooseMode(m)}
             />
             <span class="mode-name">{AGENT_MODE[m].label}</span>
-            <span class="mode-detail">{AGENT_MODE[m].detail}</span>
+            <span class="mode-detail">{t(AGENT_MODE[m].detail)}</span>
           </label>
         {/each}
       </fieldset>
@@ -234,7 +238,7 @@
       {/if}
       {#if f8.composer.chooseFailure}
         <p class="composer-note failed" role="alert">
-          {failureText(f8.composer.chooseFailure.code)}
+          {t(failureText(f8.composer.chooseFailure.code))}
         </p>
       {/if}
     {:else if open}
@@ -258,7 +262,7 @@
           data-tone={lease.state === 'active' ? 'ok' : 'idle'}
         >
           <span class="dot" aria-hidden="true"></span>
-          {leaseLine(lease, now)}
+          {tPhrase(leaseLine(lease, now))}
         </span>
       {:else}
         <span class="pill compact" data-tone="idle">
@@ -270,7 +274,7 @@
     {#if lease && leaseActive}
       <ul class="rt-chips" aria-label="Granted">
         {#each lease.scopes as scope (scope)}
-          <li title={SCOPE_NOTE[scope]}>{SCOPE_LABEL[scope]}</li>
+          <li title={t(SCOPE_NOTE[scope])}>{t(SCOPE_LABEL[scope])}</li>
         {/each}
       </ul>
       <p class="composer-note">
@@ -309,7 +313,7 @@
               onchange={(e) => controller.setTtl(Number(e.currentTarget.value))}
             >
               {#each LEASE_TTLS as ttl (ttl)}
-                <option value={ttl}>{ttlLabel(ttl)}</option>
+                <option value={ttl}>{tPhrase(ttlLabel(ttl))}</option>
               {/each}
             </select>
           </label>
@@ -338,8 +342,8 @@
               disabled={!acts}
               onchange={() => controller.toggleScope(scope)}
             />
-            <span class="mode-name">{SCOPE_LABEL[scope]}</span>
-            <span class="mode-detail">{SCOPE_NOTE[scope]}</span>
+            <span class="mode-name">{t(SCOPE_LABEL[scope])}</span>
+            <span class="mode-detail">{t(SCOPE_NOTE[scope])}</span>
           </label>
         {/each}
       </fieldset>
@@ -352,7 +356,7 @@
             onchange={(e) => controller.setTtl(Number(e.currentTarget.value))}
           >
             {#each LEASE_TTLS as ttl (ttl)}
-              <option value={ttl}>{ttlLabel(ttl)}</option>
+              <option value={ttl}>{tPhrase(ttlLabel(ttl))}</option>
             {/each}
           </select>
         </label>
@@ -375,7 +379,7 @@
       <h4 id="rt-workspace">Workspace</h4>
       <span class="pill compact" data-tone={BINDING_STATE[binding.state].tone}>
         <span class="dot" aria-hidden="true"></span>
-        {BINDING_STATE[binding.state].label}
+        {t(BINDING_STATE[binding.state].label)}
       </span>
     </header>
     <dl class="session-facts">
@@ -487,9 +491,9 @@
             <span class="dot" aria-hidden="true"></span>
             {gate?.reason === 'allowed' ? 'Allowed' : 'Not now'}
           </span>
-          <span class="rt-gate-name">{SCOPE_LABEL[action]}</span>
+          <span class="rt-gate-name">{t(SCOPE_LABEL[action])}</span>
           {#if gate && gate.reason !== 'allowed'}
-            <span class="fact-note">{gateText(gate.reason)}</span>
+            <span class="fact-note">{t(gateText(gate.reason))}</span>
           {/if}
         </li>
       {/each}

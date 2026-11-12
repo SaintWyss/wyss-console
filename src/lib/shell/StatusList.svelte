@@ -46,12 +46,12 @@
     <span
       class="pill authority"
       data-tone={f8.tone}
-      title={`${t('Protocol 2 authority')} · ${t(f8.label)}${f8.note ? ` · ${f8.note}` : ''}`}
+      title={`${t('Protocol 2 authority')} · ${t(f8.label)}${f8.note ? ` · ${t(f8.note)}` : ''}`}
     >
       <span class="pill-key">{t('Authority P2')}</span>
       <span class="dot" aria-hidden="true"></span>
       <span class="pill-value">{t(f8.label)}</span>
-      {#if f8.note}<span class="pill-note">{f8.note}</span>{/if}
+      {#if f8.note}<span class="pill-note">{t(f8.note)}</span>{/if}
     </span>
   {:else}
     <span

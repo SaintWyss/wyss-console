@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import type { SessionDetail } from '../../contracts/f8';
   import { PROMPT_MAX_BYTES, turnEnded } from '../../contracts/turns';
+  import { t } from '../../i18n/index.svelte';
   import {
     activityLabel,
     localClock,
@@ -39,7 +40,7 @@
     if (!connected) return 'The authority is not connected.';
     if (detail.session.state === 'closed') return 'This session is closed.';
     if (running) return 'A turn is running. Cancel it to start another.';
-    if (gate && gate.reason !== 'allowed') return gateText(gate.reason);
+    if (gate && gate.reason !== 'allowed') return t(gateText(gate.reason));
     if (bytes > PROMPT_MAX_BYTES) return 'The objective is too long.';
     return null;
   });
@@ -252,7 +253,7 @@
     </div>
     {#if f8.operation?.kind === 'turn' && f8.operation.failure}
       <p class="composer-note failed" role="alert">
-        {failureText(f8.operation.failure.code)}
+        {t(failureText(f8.operation.failure.code))}
       </p>
     {/if}
   </form>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SessionRow } from '../../contracts/f8';
   import { localClock } from '../agent/present';
+  import { t, tPhrase } from '../../i18n/index.svelte';
   import { shortId } from '../sessions/present';
   import type { F8Controller, F8Tab, F8ViewState } from './controller';
   import ConversationPanel from './ConversationPanel.svelte';
@@ -88,7 +89,7 @@
           {f8.authority.prepared_count} prepared · {f8.authority.closed_count} closed
           · protocol 2
         {:else if link}
-          {link.label}
+          {t(link.label)}
         {:else}
           Connecting to the authority
         {/if}
@@ -97,7 +98,7 @@
     {#if link}
       <span class="pill compact" data-tone={link.tone}>
         <span class="dot" aria-hidden="true"></span>
-        {link.label}
+        {t(link.label)}
       </span>
     {/if}
     <button
@@ -129,7 +130,7 @@
     </div>
   {:else if f8.notice === 'stale'}
     <div class="sessions-status failed" role="alert">
-      <p>{failureText('stale')}</p>
+      <p>{t(failureText('stale'))}</p>
       <button
         type="button"
         class="action"
@@ -157,7 +158,7 @@
       class:unknown={outcomeUnknown(f8.operation.failure.code)}
       role="alert"
     >
-      <p>{failureText(f8.operation.failure.code)}</p>
+      <p>{t(failureText(f8.operation.failure.code))}</p>
       {#if f8.operation.failure.retry}
         <button
           type="button"
@@ -178,7 +179,7 @@
     <div class="sessions-status failed unknown" role="status">
       <p>
         {#if f8.link.state === 'waiting'}
-          {link?.note ?? 'The authority is not answering.'}
+          {link?.note ? t(link.note) : 'The authority is not answering.'}
           {f8.link.retry_in_ms !== null
             ? 'The console asks again by itself.'
             : ''}
@@ -207,7 +208,7 @@
     </div>
   {:else if !page && f8.readFailure}
     <div class="sessions-empty" role="alert">
-      <p class="empty-title">{failureText(f8.readFailure.code)}</p>
+      <p class="empty-title">{t(failureText(f8.readFailure.code))}</p>
       <button type="button" class="action" onclick={() => controller.refresh()}
         >Try again</button
       >
@@ -253,9 +254,11 @@
                   <span class="dot" aria-hidden="true"></span>
                   {row.state === 'closed'
                     ? 'Closed'
-                    : RUNTIME_STATE[row.runtime.actual].label}
+                    : t(RUNTIME_STATE[row.runtime.actual].label)}
                 </span>
-                <span class="session-meta">{runtimeLine(row.runtime)}</span>
+                <span class="session-meta"
+                  >{tPhrase(runtimeLine(row.runtime))}</span
+                >
                 <span class="session-meta">
                   Updated <time datetime={row.updated_at}
                     >{localClock(row.updated_at)}</time
@@ -300,7 +303,7 @@
         {:else if !selected}
           {#if f8.readFailure}
             <div class="sessions-empty" role="alert">
-              <p class="empty-title">{failureText(f8.readFailure.code)}</p>
+              <p class="empty-title">{t(failureText(f8.readFailure.code))}</p>
               <button
                 type="button"
                 class="action"
@@ -324,7 +327,7 @@
               <span class="dot" aria-hidden="true"></span>
               {selected.session.state === 'closed'
                 ? 'Closed'
-                : RUNTIME_STATE[selected.session.runtime.actual].label}
+                : t(RUNTIME_STATE[selected.session.runtime.actual].label)}
             </span>
             <span class="rt-id mono" title={selected.session.id}
               >{selected.session.id}</span

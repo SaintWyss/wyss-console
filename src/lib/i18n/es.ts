@@ -1454,4 +1454,121 @@ export const ES: Readonly<Record<string, string>> = {
     'No se pudieron leer los eventos anteriores: la autoridad no respondió.',
   'Older events could not be read.':
     'No se pudieron leer los eventos anteriores.',
+
+  // Managed runtimes (F8): the labels, gates, failures and link of the runtime views
+  'The runtime could not be found.': 'No se encontró el runtime.',
+  'The runtime process could not be started.':
+    'No se pudo arrancar el proceso del runtime.',
+  'The connection to the runtime broke.':
+    'Se cortó la conexión con el runtime.',
+  'The runtime did not finish starting in time.':
+    'El runtime no terminó de arrancar a tiempo.',
+  'The runtime answered in a way the authority does not accept.':
+    'El runtime respondió de una forma que la autoridad no acepta.',
+  'The runtime asked for something it may not ask for.':
+    'El runtime pidió algo que no tiene permitido pedir.',
+  'The runtime refused to start.': 'El runtime rechazó arrancar.',
+  'The runtime listed models the authority does not accept.':
+    'El runtime listó modelos que la autoridad no acepta.',
+  'The runtime process exited.': 'El proceso del runtime terminó.',
+  'The authority could not record what the runtime did.':
+    'La autoridad no pudo registrar lo que hizo el runtime.',
+  'The runtime tried to act outside what its session allows, and the authority stopped it.':
+    'El runtime intentó actuar fuera de lo que permite su sesión, y la autoridad lo detuvo.',
+  'The authority could not prove the runtime was isolated, so it did not use it.':
+    'La autoridad no pudo comprobar que el runtime estaba aislado, así que no lo usó.',
+  'A resource limit ended it: {key}.':
+    'Un límite de recursos lo terminó: {key}.',
+  'Binding…': 'Vinculando…',
+  'Outcome unknown': 'Resultado desconocido',
+  'Workspace bound': 'Workspace vinculado',
+  Attached: 'Conectada',
+  'Bind a workspace': 'Vincular un workspace',
+  'Resume a binding': 'Retomar un vínculo',
+  'Start turns': 'Iniciar turnos',
+  'Run commands': 'Correr comandos',
+  'Change files': 'Cambiar archivos',
+  'Lets the session be bound to a workspace folder.':
+    'Permite vincular la sesión a una carpeta de workspace.',
+  'Lets a bound session be attached to a running runtime again.':
+    'Permite volver a conectar una sesión vinculada a un runtime que corre.',
+  'Lets a turn start. Without it nothing runs.':
+    'Permite iniciar un turno. Sin esto no corre nada.',
+  'Lets Codex ask to run a command. Each one still waits for you.':
+    'Permite que Codex pida correr un comando. Cada uno igual espera tu aprobación.',
+  'Lets Codex ask to change files. Each change still waits for you.':
+    'Permite que Codex pida cambiar archivos. Cada cambio igual espera tu aprobación.',
+  '{minutes} min': '{minutes} min',
+  '{hours} h': '{hours} h',
+  'Allowed.': 'Permitido.',
+  'The session has no workspace.': 'La sesión no tiene workspace.',
+  'The session is not attached to a running runtime.':
+    'La sesión no está conectada a un runtime que corre.',
+  'The session is attached to a different runtime launch.':
+    'La sesión está conectada a otro arranque de runtime.',
+  'The session is not attached in a mode that allows this.':
+    'La sesión no está conectada en un modo que permita esto.',
+  'The session is not attached in Local Tools.':
+    'La sesión no está conectada en Local Tools.',
+  'The runtime has no safety profile.':
+    'El runtime no tiene perfil de seguridad.',
+  'A turn is already running.': 'Ya hay un turno corriendo.',
+  'The authority has no such session.': 'La autoridad no tiene esa sesión.',
+  'The session is closed.': 'La sesión está cerrada.',
+  'There is no execution lease.': 'No hay concesión de ejecución.',
+  'The execution lease is not active.':
+    'La concesión de ejecución no está activa.',
+  'The execution lease expired.': 'La concesión de ejecución venció.',
+  'The execution lease does not grant this.':
+    'La concesión de ejecución no permite esto.',
+  'The runtime is not the session’s.': 'El runtime no es el de la sesión.',
+  'The runtime is not running.': 'El runtime no está corriendo.',
+  'The runtime is not ready.': 'El runtime no está listo.',
+  'The runtime has not been attested yet.':
+    'Todavía no se verificó el runtime.',
+  'The runtime is not a version the authority accepts.':
+    'El runtime no es una versión que la autoridad acepta.',
+  'The authority is unavailable.': 'La autoridad no está disponible.',
+  'This console is not connected to managed runtimes.':
+    'Esta consola no está conectada a los runtimes Managed.',
+  'The authority did not answer, so the outcome is not known. Nothing was canceled and it may still have happened. The console reads the authority again; check what it holds before sending this again.':
+    'La autoridad no respondió, así que no se sabe el resultado. No se canceló nada y puede que haya pasado igual. La consola vuelve a leer la autoridad; revisá qué tiene antes de mandar esto de nuevo.',
+  'This authority does not offer that. Nothing changed; try another mode.':
+    'Esta autoridad no ofrece eso. No cambió nada; probá otro modo.',
+  'What was shown is no longer what the authority holds. It has been read again.':
+    'Lo que se mostraba ya no es lo que tiene la autoridad. Se volvió a leer.',
+  'The session has no workspace yet.': 'La sesión todavía no tiene workspace.',
+  'The session has no ready runtime for this.':
+    'La sesión no tiene un runtime listo para esto.',
+  'A turn is running. Nothing is stopped under it.':
+    'Hay un turno corriendo. No se detiene nada por debajo.',
+  'The authority did not accept the folder as a workspace.':
+    'La autoridad no aceptó la carpeta como workspace.',
+  'The session already has a workspace.': 'La sesión ya tiene un workspace.',
+  'The authority denied it: no execution lease allows this action.':
+    'La autoridad lo denegó: ninguna concesión de ejecución permite esta acción.',
+  'The session already has an active execution lease.':
+    'La sesión ya tiene una concesión de ejecución activa.',
+  'The authority is at its limit for this and did not take it. Nothing changed. Only one runtime runs at a time: stop the one that is running, then start this one.':
+    'La autoridad llegó a su límite para esto y no lo tomó. No cambió nada. Solo corre un runtime a la vez: detené el que corre y después arrancá este.',
+  'The agent runtime refused.': 'El runtime del agente rechazó.',
+  'The authority could not confirm what the runtime did. Nothing is sent again by itself.':
+    'La autoridad no pudo confirmar lo que hizo el runtime. No se vuelve a mandar nada por sí solo.',
+  'It was not allowed in the confirmation window, so nothing was sent.':
+    'No se permitió en la ventana de confirmación, así que no se mandó nada.',
+  'No managed-runtime authority is listening.':
+    'No hay ninguna autoridad de runtimes Managed escuchando.',
+  'The authority stopped answering.': 'La autoridad dejó de responder.',
+  'The authority broke the protocol, so the connection was dropped.':
+    'La autoridad rompió el protocolo, así que se cortó la conexión.',
+  'The authority’s socket is not this user’s private one.':
+    'El socket de la autoridad no es el privado de este usuario.',
+  Revoked: 'Revocada',
+  Expired: 'Vencida',
+  'Expires in {n} s': 'Vence en {n} s',
+  'Expires in {n} min': 'Vence en {n} min',
+  'Expires in {n} h': 'Vence en {n} h',
+  'No runtime yet': 'Todavía no hay runtime',
+  '{state} · generation {generation}{profile}':
+    '{state} · generación {generation}{profile}',
 };

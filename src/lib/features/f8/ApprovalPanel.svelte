@@ -9,6 +9,7 @@
     shownOf,
   } from '../approvals/present';
   import type { ApprovalView, F8Controller } from './controller';
+  import { t } from '../../i18n/index.svelte';
   import { failureText, outcomeUnknown, visible } from './present';
 
   let {
@@ -174,7 +175,7 @@
       <p>
         {approval.decision.failure.code === 'unavailable'
           ? 'The authority did not answer, so it is not known whether the decision was taken. Retrying repeats the same decision: it cannot decide twice.'
-          : `${NOT[approval.decision.kind]} ${failureText(approval.decision.failure.code)}`}
+          : `${NOT[approval.decision.kind]} ${t(failureText(approval.decision.failure.code))}`}
       </p>
       {#if approval.decision.failure.retry}
         <button
