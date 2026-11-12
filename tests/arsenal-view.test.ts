@@ -530,4 +530,48 @@ describe('Arsenal sections', () => {
       'false',
     );
   });
+
+  it('asks before switching provider with unsaved changes; Keep editing stays, Discard changes switches and empties the draft', () => {
+    const { root } = render(stateWith({ tab: 'presets' }));
+    root.querySelector<HTMLButtonElement>('.group-toggle')!.click();
+    flushSync();
+    const design = () =>
+      root.querySelector<HTMLInputElement>('input[aria-label="design"]')!;
+    design().checked = true;
+    design().dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    radio(root, 'Codex').click();
+    flushSync();
+    expect(radio(root, 'Claude Code').getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(radio(root, 'Codex').getAttribute('aria-checked')).toBe('false');
+    expect(text(root.querySelector('.notice'))).toContain('Unsaved changes');
+
+    buttonNamed(root, 'Keep editing')!.click();
+    flushSync();
+    expect(radio(root, 'Claude Code').getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(design().checked).toBe(true);
+
+    radio(root, 'Codex').click();
+    flushSync();
+    buttonNamed(root, 'Discard changes')!.click();
+    flushSync();
+    expect(radio(root, 'Codex').getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelectorAll('.cell[data-filled="true"]')).toHaveLength(0);
+    expect(text(root.querySelector('.totals'))).toBe(
+      'Nothing chosen yet. Tick a group or a capability.',
+    );
+  });
+
+  it('switches provider without asking when the draft has no changes', () => {
+    const { root } = render(stateWith({ tab: 'presets' }));
+    radio(root, 'Codex').click();
+    flushSync();
+    expect(radio(root, 'Codex').getAttribute('aria-checked')).toBe('true');
+    expect(root.querySelector('.notice')).toBeNull();
+  });
 });

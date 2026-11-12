@@ -57,8 +57,10 @@
     claude_code: 'Claude Code',
     codex: 'Codex',
   };
-  /** The provider every tab works on. Chosen above the tabs; the presets draft is kept per provider. */
+  /** The provider every tab works on. Chosen above the tabs; the presets draft belongs to one provider. */
   let provider = $state<ArsenalProvider>('claude_code');
+  /** The presets tab, when it is shown: a provider switch asks it first, since it holds the draft. */
+  let presetsTab = $state<{ requestLeave: (action: () => void) => void }>();
   const KIND_LABEL: Record<CandidateKind, string> = {
     skill: 'Skill',
     agent: 'Agent',
@@ -241,6 +243,15 @@
     if (candidate.status === 'source_changed') return 'Import as new revision';
     return 'Import';
   }
+  /** Switches the provider. With unsaved changes in the presets draft, the switch waits for Discard changes. */
+  function chooseProvider(option: ArsenalProvider) {
+    if (option === provider) return;
+    const change = () => {
+      provider = option;
+    };
+    if (presetsTab) presetsTab.requestLeave(change);
+    else change();
+  }
   function onTab(event: KeyboardEvent, index: number) {
     const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
     if (!keys.includes(event.key)) return;
@@ -289,7 +300,7 @@
         aria-checked={provider === option}
         tabindex={provider === option ? 0 : -1}
         disabled={installed(option) === false}
-        onclick={() => (provider = option)}
+        onclick={() => chooseProvider(option)}
         >{PROVIDER_LABEL[option]}{#if installed(option) === false}
           <span class="arsenal-provider-note">Not installed</span>{/if}</button
       >
@@ -1029,7 +1040,14 @@
         aria-labelledby="arsenal-tab-presets"
         class="arsenal-panel"
       >
-        <PresetsTab {provider} {arsenal} {controller} />
+        {#key provider}
+          <PresetsTab
+            bind:this={presetsTab}
+            {provider}
+            {arsenal}
+            {controller}
+          />
+        {/key}
       </div>
     {/if}
   </div>

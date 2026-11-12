@@ -209,6 +209,10 @@
     if (dirty) pending = action;
     else action();
   }
+  /** Runs an action that takes this draft away (a provider switch): asks first when it has changes. */
+  export function requestLeave(action: () => void) {
+    guarded(action);
+  }
   function confirmLeave() {
     const action = pending;
     pending = null;
