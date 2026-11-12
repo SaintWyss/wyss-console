@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ProjectsController, ProjectsState } from './controller';
   import VirtualList from './VirtualList.svelte';
+  import { msg, t } from '../../i18n/index.svelte';
 
   let {
     projects,
@@ -24,15 +25,15 @@
   );
   const AVAILABILITY: Record<string, string> = {
     available: '',
-    missing: 'Folder missing',
-    identity_changed: 'Folder replaced',
-    ineligible: 'Folder not usable',
-    shared: 'Another account can write here',
+    missing: msg('Folder missing'),
+    identity_changed: msg('Folder replaced'),
+    ineligible: msg('Folder not usable'),
+    shared: msg('Another account can write here'),
     unknown: '',
   };
 </script>
 
-<nav class="projects-rail" aria-label="Projects">
+<nav class="projects-rail" aria-label={t('Projects')}>
   <div class="projects-row">
     <button
       type="button"
@@ -40,7 +41,7 @@
       disabled={projects.busy}
       onclick={() => void controller.registerFolder()}
     >
-      Add a folder…
+      {t('Add a folder…')}
     </button>
   </div>
   <form
@@ -55,17 +56,18 @@
     <input
       type="text"
       maxlength="255"
-      placeholder="New folder name"
-      aria-label="New folder name"
+      placeholder={t('New folder name')}
+      aria-label={t('New folder name')}
       bind:value={folderName}
     />
     <button
       type="submit"
       class="action"
-      disabled={projects.busy || folderName.trim() === ''}>Create…</button
+      disabled={projects.busy || folderName.trim() === ''}
+      >{t('Create…')}</button
     >
   </form>
-  <ul class="projects-list" aria-label="Scratch">
+  <ul class="projects-list" aria-label={t('Scratch')}>
     <li>
       <button
         type="button"
@@ -73,8 +75,8 @@
         aria-current={projects.project === null ? 'true' : undefined}
         onclick={() => void controller.selectProject(null)}
       >
-        <span>Scratch</span>
-        <span class="projects-note">no folder</span>
+        <span>{t('Scratch')}</span>
+        <span class="projects-note">{t('no folder')}</span>
       </button>
     </li>
   </ul>
@@ -82,7 +84,7 @@
     items={live}
     rowHeight={56}
     key={(project) => project.id}
-    label="Projects"
+    label={t('Projects')}
   >
     {#snippet row(project)}
       <button
@@ -91,26 +93,36 @@
         aria-current={projects.project === project.id ? 'true' : undefined}
         onclick={() => void controller.selectProject(project.id)}
       >
-        <span>{project.label}{project.archived ? ' (archived)' : ''}</span>
+        <span
+          >{project.archived
+            ? t('{name} (archived)', { name: project.label })
+            : project.label}</span
+        >
         <span class="projects-note">
           {project.root
-            ? AVAILABILITY[project.root.availability] || project.root.label
-            : 'no folder'}
+            ? AVAILABILITY[project.root.availability]
+              ? t(AVAILABILITY[project.root.availability])
+              : project.root.label
+            : t('no folder')}
         </span>
       </button>
     {/snippet}
   </VirtualList>
   <label class="projects-check">
-    <input type="checkbox" bind:checked={showArchived} /> Show archived
+    <input type="checkbox" bind:checked={showArchived} />
+    {t('Show archived')}
   </label>
 
   {#if current}
-    <div class="projects-actions" aria-label={`Actions for ${current.label}`}>
+    <div
+      class="projects-actions"
+      aria-label={t('Actions for {name}', { name: current.label })}
+    >
       {#if renaming === current.id}
         <input
           type="text"
           maxlength="64"
-          aria-label="Project name"
+          aria-label={t('Project name')}
           bind:value={renamed}
         />
         <button
@@ -120,10 +132,10 @@
           onclick={async () => {
             await controller.rename(current.id, renamed.trim());
             renaming = null;
-          }}>Save name</button
+          }}>{t('Save name')}</button
         >
         <button type="button" class="action" onclick={() => (renaming = null)}
-          >Cancel</button
+          >{t('Cancel')}</button
         >
       {:else}
         <button
@@ -132,7 +144,7 @@
           onclick={() => {
             renaming = current.id;
             renamed = current.label;
-          }}>Rename</button
+          }}>{t('Rename')}</button
         >
         <button
           type="button"
@@ -140,7 +152,7 @@
           disabled={projects.busy}
           onclick={() => void controller.archive(current.id, !current.archived)}
         >
-          {current.archived ? 'Unarchive' : 'Archive'}
+          {current.archived ? t('Unarchive') : t('Archive')}
         </button>
         {#if current.root}
           <button
@@ -150,7 +162,7 @@
             onclick={() =>
               void controller.relink(current.id, current.root!.bindingId)}
           >
-            Relink folder…
+            {t('Relink folder…')}
           </button>
         {/if}
         <button
@@ -163,7 +175,7 @@
               `Workspace ${current.workspaceIds.length + 1}`,
             )}
         >
-          New workspace
+          {t('New workspace')}
         </button>
         <button
           type="button"
@@ -171,7 +183,7 @@
           disabled={projects.busy}
           onclick={() => void controller.remove(current.id, true)}
         >
-          Remove, keep history
+          {t('Remove, keep history')}
         </button>
         <button
           type="button"
@@ -179,16 +191,17 @@
           disabled={projects.busy}
           onclick={() => void controller.remove(current.id, false)}
         >
-          Remove completely
+          {t('Remove completely')}
         </button>
         <p class="projects-note">
-          Removing a project never deletes its folder, a provider's history or a
-          session; it is refused while any of its sessions may still be running.
+          {t(
+            "Removing a project never deletes its folder, a provider's history or a session; it is refused while any of its sessions may still be running.",
+          )}
         </p>
       {/if}
     </div>
     {#if current.workspaceIds.length > 1}
-      <ul class="projects-list" aria-label="Workspaces">
+      <ul class="projects-list" aria-label={t('Workspaces')}>
         {#each current.workspaceIds as id, n (id)}
           <li>
             <button
@@ -198,8 +211,8 @@
               onclick={() => void controller.selectWorkspace(id)}
             >
               {id === current.defaultWorkspaceId
-                ? 'Default'
-                : `Workspace ${n + 1}`}
+                ? t('Default')
+                : t('Workspace {count}', { count: n + 1 })}
             </button>
           </li>
         {/each}

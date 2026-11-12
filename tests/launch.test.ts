@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isFullAccess,
+  LaunchRefusal,
   openLaunch,
   type LaunchDeps,
+  type SelectionName,
 } from '../src/lib/features/terminal/launch';
 import type { Launch } from '../src/lib/desktop/launch-client';
 import type { Profile, StartReply } from '../src/lib/contracts/native';
+import { t } from '../src/lib/i18n/index.svelte';
+
+// A note is a sentence and its values; the terminal view draws it through t(), and so do these.
+const shown = (note: {
+  text: string;
+  values?: Record<string, string | number>;
+}) => t(note.text, note.values);
 
 const profile = (
   id: string,
@@ -37,19 +46,35 @@ const session = (
   agent: 'codex',
   profile: 'Full access (bypass)',
   before: ['scan'],
+  preset: null,
   ...over,
 });
+const selectionOf = (
+  id: string,
+  name: string,
+  provider: 'claude_code' | 'codex',
+): SelectionName => ({ id, name, provider });
 function deps(
   launch: Launch,
   before = [{ command: 'scan', result: 'ok' }],
-  { selection = null as string | null, canApply = true, canStart = true } = {},
+  {
+    selection = null as string | null,
+    canApply = true,
+    canStart = true,
+    presetId = 'sel-preset' as string | null,
+    selections = null as SelectionName[] | null,
+  } = {},
 ) {
   const reply = { session: { id: 's1' } } as unknown as StartReply;
+  // By default one Codex selection named Estudio exists, with the id presetId (none when null).
+  const named: SelectionName[] =
+    selections ?? (presetId ? [selectionOf(presetId, 'Estudio', 'codex')] : []);
   const d: LaunchDeps = {
     getLaunch: vi.fn(async () => launch),
     runBefore: vi.fn(async () => before),
     profiles: vi.fn(async () => PROFILES),
     remembered: vi.fn(async () => selection),
+    selections: vi.fn(async () => named),
     plan: vi.fn(
       async () =>
         ({
@@ -119,8 +144,75 @@ describe('openLaunch', () => {
     const { d } = deps(session(), [{ command: 'scan', result: 'exit 7' }]);
     const opened = await openLaunch('codex', d);
     expect(opened.notes).toHaveLength(1);
-    expect(opened.notes[0]).toContain('exit 7');
+    expect(shown(opened.notes[0])).toContain('exit 7');
     expect(d.start).toHaveBeenCalled();
+  });
+
+  it('the preset a launch names wins over the one its folder remembers', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selection: 'sel-remembered',
+    });
+    await openLaunch('codex', d);
+    expect(d.selections).toHaveBeenCalled();
+    expect(d.remembered).not.toHaveBeenCalled();
+    expect(d.plan).toHaveBeenCalledWith('sel-preset', 'codex', '/home/me');
+  });
+
+  it('a launch with no preset keeps the one its folder remembers', async () => {
+    const { d } = deps(session(), undefined, { selection: 'sel-remembered' });
+    await openLaunch('codex', d);
+    expect(d.selections).not.toHaveBeenCalled();
+    expect(d.plan).toHaveBeenCalledWith('sel-remembered', 'codex', '/home/me');
+  });
+
+  it('a preset with no name for this agent stops the launch before anything runs, and says which', async () => {
+    const { d } = deps(session({ preset: 'Missing' }), undefined, {
+      presetId: null,
+    });
+    const refusal = await openLaunch('codex', d).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(LaunchRefusal);
+    expect((refusal as Error).message).toContain('Missing');
+    // The sentence and its values reach the view, which draws them through t().
+    const { template, values } = refusal as LaunchRefusal;
+    expect(template).toContain('{name}');
+    expect(values).toEqual({ name: 'Missing' });
+    expect(d.runBefore).not.toHaveBeenCalled();
+    expect(d.plan).not.toHaveBeenCalled();
+    expect(d.start).not.toHaveBeenCalled();
+  });
+
+  it('two selections of this agent with the preset name stop the launch before anything runs, and say to delete the extra ones', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selections: [
+        selectionOf('a', 'Estudio', 'codex'),
+        selectionOf('b', 'Estudio', 'codex'),
+      ],
+    });
+    const refusal = await openLaunch('codex', d).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(LaunchRefusal);
+    // Its own sentence, not the "no preset" one: the owner has one too many, not none.
+    const { template, values } = refusal as LaunchRefusal;
+    expect(template).toContain('More than one preset');
+    expect(template).not.toContain('No preset named');
+    expect(values).toEqual({ name: 'Estudio' });
+    expect(d.runBefore).not.toHaveBeenCalled();
+    expect(d.plan).not.toHaveBeenCalled();
+    expect(d.start).not.toHaveBeenCalled();
+  });
+
+  it('a same-named preset of the other agent is not a second match', async () => {
+    const { d } = deps(session({ preset: 'Estudio' }), undefined, {
+      selections: [
+        selectionOf('a', 'Estudio', 'claude_code'),
+        selectionOf('b', 'Estudio', 'codex'),
+      ],
+    });
+    await openLaunch('codex', d);
+    expect(d.plan).toHaveBeenCalledWith('b', 'codex', '/home/me');
   });
 
   it('a profile that does not exist for the agent stops before anything runs', async () => {
@@ -168,7 +260,7 @@ describe('a session launch and the Arsenal selection its folder remembers', () =
       start,
     );
     expect(d.bind).toHaveBeenCalledWith(reply.session.id, 'sel-1', 'hash-1');
-    expect(opened.notes).toContain('Started with Work applied.');
+    expect(opened.notes.map(shown)).toContain('Started with Work applied.');
   });
   it('records it without applying when the plan cannot apply', async () => {
     const { d } = deps(session(), undefined, {
@@ -185,7 +277,7 @@ describe('a session launch and the Arsenal selection its folder remembers', () =
       null,
     );
     expect(d.bind).toHaveBeenCalled();
-    expect(opened.notes.join(' ')).toContain('recorded');
+    expect(opened.notes.map(shown).join(' ')).toContain('recorded');
   });
   it('does not start when the applied preview cannot start', async () => {
     const { d } = deps(session(), undefined, {

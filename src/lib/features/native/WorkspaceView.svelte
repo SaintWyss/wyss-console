@@ -3,8 +3,29 @@
   import HandoffPanel from './HandoffPanel.svelte';
   import ArsenalTerminalPanel from '../arsenal/ArsenalTerminalPanel.svelte';
   import DelegationsPanel from './DelegationsPanel.svelte';
-  import { sessionArsenalLine, type ArsenalChoice } from '../arsenal/terminal';
+  import {
+    onOffCounts,
+    sessionArsenalLine,
+    type ArsenalChoice,
+  } from '../arsenal/terminal';
   import { arsenalClient } from '../../desktop/arsenal-client';
+  import {
+    deleteLaunch,
+    LaunchError,
+    listLaunches,
+    saveLaunch,
+    type Launch,
+    type LaunchList,
+  } from '../../desktop/launch-client';
+  import { desktopLaunchDeps } from '../terminal/launch-deps';
+  import {
+    launchBlock,
+    LaunchRefusal,
+    openLaunch,
+    type SelectionName,
+  } from '../terminal/launch';
+  import { whenWorkspaceReady } from './bridge';
+  import { msg, t } from '../../i18n/index.svelte';
   import type { Binding } from '../../contracts/arsenal';
   import type { AgentId, NativeSession, Preview } from '../../contracts/native';
   import type { ConfigItem } from '../../contracts/configuration';
@@ -34,6 +55,7 @@
     onconsole,
     onupdate,
     configItems = null,
+    onarsenal,
   }: {
     native: NativeState;
     controller: NativeController;
@@ -44,6 +66,8 @@
     onupdate?: (title: string, cwd: string, input: string) => void;
     /** What the agents' files hold, once Configuration has been read; else null. */
     configItems?: readonly ConfigItem[] | null;
+    /** Opens Arsenal on its Presets tab: the preset card's "Edit in Arsenal". */
+    onarsenal?: () => void;
   } = $props();
 
   let agent = $state<AgentId | null>(null);
@@ -58,6 +82,8 @@
   let now = $state(Date.now());
   let arsenalChoice = $state<ArsenalChoice | null>(null);
   let arsenalNote = $state<string | null>(null);
+  // The preset the start uses: '' is none. The card's select and the Skills panel share it.
+  let presetId = $state('');
   // Skills stay folded; they open by themselves only when the choice blocks Start.
   let skillsOpen = $state(false);
   let evidenceOpen = $state(false);
@@ -273,6 +299,197 @@
   }
   const profileName = (id: string) =>
     native.profiles.find((p) => p.id === id)?.body.name ?? 'profile';
+
+  // Save as launch… (arsenal-UI-SPEC, phase D): the choices on this card, written as a session
+  // launch that Launch ▾ lists. The desktop checks the profile and the preset again.
+  let launchForm = $state<{
+    name: string;
+    busy: boolean;
+    exists: boolean;
+    failure: string | null;
+  } | null>(null);
+  let launchSaved = $state<string | null>(null);
+  // The preset is the Arsenal choice when there is one; a choice still being computed saves nothing.
+  const launchPreset = $derived(
+    arsenalChoice === null || arsenalChoice.pending
+      ? null
+      : arsenalChoice.plan.selection_name,
+  );
+  const launchProfile = $derived(
+    profile
+      ? (native.profiles.find((p) => p.id === profile)?.body.name ?? null)
+      : null,
+  );
+  function openLaunchForm() {
+    if (!launchAgent || !project) return;
+    launchSaved = null;
+    launchForm = {
+      name: `${AGENT_LABEL[launchAgent]} · ${folderName(project)}`,
+      busy: false,
+      exists: false,
+      failure: null,
+    };
+  }
+  // A launch names a Claude Code or a Codex session: the agents Arsenal applies presets to.
+  const launchAgent = $derived(
+    agent === 'claude_code' || agent === 'codex' ? agent : null,
+  );
+  async function saveAsLaunch(replace: boolean) {
+    const form = launchForm;
+    const chosen = launchAgent;
+    if (!form || !chosen || !project || form.busy || !form.name.trim()) return;
+    form.busy = true;
+    form.exists = false;
+    form.failure = null;
+    try {
+      const saved = await saveLaunch({
+        name: form.name.trim(),
+        directory: project,
+        agent: chosen,
+        profile: launchProfile,
+        preset: launchPreset,
+        replace,
+      });
+      launchForm = null;
+      launchSaved = saved.name;
+      void readSaved();
+    } catch (error) {
+      if (error instanceof LaunchError && error.code === 'exists')
+        form.exists = true;
+      else
+        form.failure =
+          error instanceof LaunchError && error.reasons[0]
+            ? error.reasons[0]
+            : t('The launch could not be saved.');
+    } finally {
+      form.busy = false;
+    }
+  }
+
+  // Saved launches (arsenal-UI-SPEC, phase D): the owner's launch files, and the Arsenal selections
+  // they name. Read while this view is shown, and again after a launch is saved or deleted.
+  type Shown = {
+    text: string;
+    translatable: boolean;
+    values?: Record<string, string>;
+  };
+  type RowShown = Shown & { id: string };
+  let savedLaunches = $state<LaunchList | null>(null);
+  let savedSelections = $state<SelectionName[]>([]);
+  let savedFailure = $state<Shown | null>(null);
+  let startingLaunch = $state<string | null>(null);
+  let startFailure = $state<RowShown | null>(null);
+  let confirmingDelete = $state<string | null>(null);
+  let deletingLaunch = $state<string | null>(null);
+  let deleteFailure = $state<RowShown | null>(null);
+  const savedRows = $derived(savedLaunches?.launches ?? []);
+  // The presets the card offers: the saved Arsenal selections of this agent's provider.
+  const presetsOfAgent = $derived(
+    launchAgent
+      ? savedSelections.filter((s) => s.provider === launchAgent)
+      : [],
+  );
+  /** What the desktop answered, as a sentence the view draws: its reason, or the window's own. */
+  function explain(error: unknown, fallback: string): Shown {
+    if (error instanceof LaunchRefusal)
+      return { text: error.template, translatable: true, values: error.values };
+    if (error instanceof LaunchError && error.reasons[0])
+      return { text: error.reasons[0], translatable: false };
+    if (
+      error instanceof Error &&
+      !(error instanceof LaunchError) &&
+      error.message
+    )
+      return { text: error.message, translatable: false };
+    return { text: fallback, translatable: true };
+  }
+  const shownText = (shown: Shown) =>
+    shown.translatable ? t(shown.text, shown.values) : shown.text;
+  async function readSaved() {
+    try {
+      savedLaunches = await listLaunches();
+      savedSelections = await arsenalClient.selections();
+      savedFailure = null;
+    } catch (error) {
+      savedFailure = explain(error, msg('The saved launches did not load.'));
+    }
+  }
+  $effect(() => {
+    if (visible) untrack(() => void readSaved());
+  });
+  /** Why a saved launch cannot start now, from the profiles and selections this window holds. */
+  const blockOf = (launch: Launch) =>
+    launchBlock(launch, native.profiles, savedSelections);
+  function summaryOf(launch: Launch): string {
+    if (launch.kind === 'commands')
+      return t('Terminal commands · {folder}', {
+        folder: folderName(launch.directory),
+      });
+    return [
+      AGENT_LABEL[launch.agent],
+      folderName(launch.directory),
+      launch.profile ?? t('No profile — as configured'),
+      launch.preset
+        ? t('Preset {name}', { name: launch.preset })
+        : t('None — all installed skills'),
+    ].join(' · ');
+  }
+  async function startSaved(launch: Launch) {
+    if (startingLaunch) return;
+    startingLaunch = launch.id;
+    startFailure = null;
+    try {
+      // The same start as Launch ▾: the tab is made once the Console is mounted, then the Console shows.
+      const opened = await openLaunch(
+        launch.id,
+        desktopLaunchDeps({
+          openTerminal: (title, cwd, input) => {
+            whenWorkspaceReady((m) => {
+              m.launch(title, cwd, input);
+            });
+          },
+          openNative: (reply) => {
+            whenWorkspaceReady((m) => {
+              const tab = m.tabOf(reply.session.id);
+              if (tab) m.activate(tab);
+              else m.createNative(reply);
+            });
+          },
+        }),
+      );
+      arsenalNote =
+        opened.notes.map((note) => t(note.text, note.values)).join(' ') || null;
+      onconsole();
+    } catch (error) {
+      startFailure = {
+        id: launch.id,
+        ...explain(error, msg('The launch could not be opened.')),
+      };
+    } finally {
+      startingLaunch = null;
+    }
+  }
+  async function removeLaunch(launch: Launch) {
+    if (deletingLaunch) return;
+    deletingLaunch = launch.id;
+    deleteFailure = null;
+    try {
+      await deleteLaunch(launch.id);
+      confirmingDelete = null;
+      await readSaved();
+    } catch (error) {
+      deleteFailure = {
+        id: launch.id,
+        ...explain(error, msg('The launch could not be deleted.')),
+      };
+    } finally {
+      deletingLaunch = null;
+    }
+  }
+  /** The confirmation's Cancel takes the focus when it appears, as the contract asks. */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
 </script>
 
 <section
@@ -491,6 +708,40 @@
           {/if}
         </div>
 
+        {#if launchAgent}
+          <div class="launch-block launch-preset">
+            <h4 id="step-preset">{t('Preset')}</h4>
+            <div class="native-row">
+              <label class="visually-hidden" for="native-preset"
+                >{t('Preset')}</label
+              >
+              <select id="native-preset" bind:value={presetId}>
+                <option value="">{t('None — all installed skills')}</option>
+                {#each presetsOfAgent as preset (preset.id)}
+                  <option value={preset.id}>{preset.name}</option>
+                {/each}
+              </select>
+              {#if onarsenal}
+                <button type="button" class="action" onclick={onarsenal}
+                  >{t('Edit in Arsenal')}</button
+                >
+              {/if}
+            </div>
+            {#if presetsOfAgent.length === 0}
+              <p class="event-meta">
+                {t('No presets for {agent}.', {
+                  agent: AGENT_LABEL[launchAgent],
+                })}
+              </p>
+            {:else if arsenalChoice?.pending === true}
+              <p class="event-meta" aria-live="polite">{t('Checking…')}</p>
+            {:else if arsenalChoice && !arsenalChoice.pending && presetId}
+              <p class="event-meta" aria-live="polite">
+                {t('{on} on · {off} off', onOffCounts(arsenalChoice.plan))}
+              </p>
+            {/if}
+          </div>
+        {/if}
         <details class="launch-skills" bind:open={skillsOpen}>
           <summary>
             <h4 id="step-skills">Skills</h4>
@@ -512,6 +763,8 @@
               agent
                 ? controller.preview(agent, profile, start)
                 : Promise.reject(new Error('agent'))}
+            bind:selected={presetId}
+            choices={false}
             onchange={(choice) => (arsenalChoice = choice)}
           />
         </details>
@@ -565,6 +818,15 @@
           </div>
           <button
             type="button"
+            class="action"
+            disabled={!launchAgent ||
+              !project ||
+              native.starting ||
+              !!launchForm}
+            onclick={openLaunchForm}>{t('Save as launch…')}</button
+          >
+          <button
+            type="button"
             class="action primary"
             disabled={!canStart}
             title={launcher.shell?.through_shell
@@ -576,6 +838,143 @@
               ? 'Starting…'
               : `Start ${agent ? AGENT_LABEL[agent] : 'agent'}`}
           </button>
+        </div>
+        {#if launchForm && launchAgent && project}
+          <div
+            class="launch-save"
+            role="group"
+            aria-label={t('Save as launch')}
+          >
+            <label class="launch-save-name" for="launch-save-name"
+              >{t('Launch name')}</label
+            >
+            <input
+              id="launch-save-name"
+              type="text"
+              maxlength="60"
+              bind:value={launchForm.name}
+              disabled={launchForm.busy}
+            />
+            <p class="event-meta">
+              {AGENT_LABEL[launchAgent]} · {folderName(project)} · {launchProfile ??
+                t('No profile — as configured')} · {launchPreset ??
+                t('None — all installed skills')}
+            </p>
+            {#if launchForm.exists}
+              <p class="native-warning" role="alert">
+                {t('A launch with that name exists.')}
+              </p>
+            {/if}
+            {#if launchForm.failure}
+              <p class="native-warning" role="alert">{launchForm.failure}</p>
+            {/if}
+            <div class="launch-footer">
+              <button
+                type="button"
+                class="action"
+                onclick={() => (launchForm = null)}>{t('Cancel')}</button
+              >
+              <button
+                type="button"
+                class="action primary"
+                disabled={!launchForm.name.trim() ||
+                  launchForm.busy ||
+                  arsenalChoice?.pending === true}
+                onclick={() => saveAsLaunch(launchForm?.exists === true)}
+                >{launchForm.exists
+                  ? t('Replace')
+                  : launchForm.busy
+                    ? t('Saving…')
+                    : t('Save launch')}</button
+              >
+            </div>
+          </div>
+        {/if}
+        {#if launchSaved}
+          <p class="event-meta" role="status">
+            {t('Launch saved as “{name}”. Find it in Launch ▾.', {
+              name: launchSaved,
+            })}
+          </p>
+        {/if}
+        <div class="launch-block launch-saved">
+          <h4 id="step-saved">{t('Saved launches')}</h4>
+          {#if savedFailure}
+            <p class="native-warning" role="alert">{shownText(savedFailure)}</p>
+          {:else if savedLaunches === null}
+            <p class="event-meta" role="status">{t('Reading launches…')}</p>
+          {:else if savedRows.length === 0}
+            <p class="event-meta">{t('No saved launches yet.')}</p>
+          {:else}
+            <ul class="events-list" aria-labelledby="step-saved">
+              {#each savedRows as launch (launch.id)}
+                {@const block = blockOf(launch)}
+                <li class="native-row">
+                  <span class="event-title">{launch.name}</span>
+                  <span class="event-meta native-facts"
+                    >{summaryOf(launch)}</span
+                  >
+                  {#if block}
+                    <span class="native-warning" role="note"
+                      >{t(block.template, block.values)}</span
+                    >
+                  {/if}
+                  {#if startFailure?.id === launch.id}
+                    <span class="native-warning" role="alert"
+                      >{shownText(startFailure)}</span
+                    >
+                  {/if}
+                  {#if deleteFailure?.id === launch.id}
+                    <span class="native-warning" role="alert"
+                      >{shownText(deleteFailure)}</span
+                    >
+                  {/if}
+                  <span class="native-actions">
+                    {#if confirmingDelete === launch.id}
+                      <span class="event-meta"
+                        >{t('Delete {name}?', { name: launch.name })}</span
+                      >
+                      <button
+                        type="button"
+                        class="action danger"
+                        disabled={deletingLaunch !== null}
+                        onclick={() => removeLaunch(launch)}
+                        >{deletingLaunch === launch.id
+                          ? t('Deleting…')
+                          : t('Delete')}</button
+                      >
+                      <button
+                        type="button"
+                        class="action"
+                        use:focusOnMount
+                        onclick={() => (confirmingDelete = null)}
+                        >{t('Cancel')}</button
+                      >
+                    {:else}
+                      <button
+                        type="button"
+                        class="action"
+                        disabled={startingLaunch !== null ||
+                          native.starting ||
+                          !!block}
+                        onclick={() => startSaved(launch)}
+                        >{startingLaunch === launch.id
+                          ? t('Starting…')
+                          : t('Start')}</button
+                      >
+                      <button
+                        type="button"
+                        class="action"
+                        disabled={deletingLaunch !== null}
+                        onclick={() => (confirmingDelete = launch.id)}
+                        >{t('Delete')}</button
+                      >
+                    {/if}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
       </section>
 

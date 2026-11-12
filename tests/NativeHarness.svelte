@@ -14,8 +14,10 @@
     started = () => undefined,
     onconsole = () => undefined,
     onupdate = () => undefined,
+    onarsenal = undefined,
   }: {
     client: NativeClient;
+    onarsenal?: () => void;
     which?: 'workspace' | 'profiles';
     visible?: boolean;
     started?: (reply: StartReply) => void;
@@ -52,6 +54,7 @@
   visible={visible && active === 'workspace'}
   {onconsole}
   {onupdate}
+  {onarsenal}
 />
 <ProfilesView
   {native}

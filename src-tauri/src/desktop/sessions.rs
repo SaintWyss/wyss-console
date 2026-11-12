@@ -508,6 +508,8 @@ mod tests {
             .collect();
         let expected = [
             "allow-get-app-info",
+            // The closed orchestration request bridge, main window only (commit 1fbcf08).
+            "allow-orchestration-call",
             "allow-authority-state",
             // The lifecycle: one read and Retry. Nothing that names a service or a file.
             "allow-authority-lifecycle",
@@ -586,6 +588,9 @@ mod tests {
             "allow-arsenal-selection-write",
             "allow-arsenal-selection-delete",
             "allow-arsenal-preview",
+            "allow-arsenal-preset-plan",
+            "allow-arsenal-groups",
+            "allow-arsenal-group-move",
             "allow-arsenal-terminal-plan",
             "allow-arsenal-terminal-bind",
             "allow-arsenal-terminal-bindings",
@@ -620,6 +625,10 @@ mod tests {
             "allow-launch-list",
             "allow-launch-get",
             "allow-launch-before",
+            // Saved launches (arsenal-UI-SPEC, phase D): a session launch written from
+            // Workspace, and the removal of one the window saved. Neither takes a command.
+            "allow-launch-save",
+            "allow-launch-delete",
             // The host that holds the terminals past the window (F9).
             "allow-host-terminals",
             "allow-host-info",

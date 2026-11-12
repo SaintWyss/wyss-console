@@ -22,6 +22,7 @@ import {
   ArsenalController,
   type ArsenalState,
 } from '../src/lib/features/arsenal/controller';
+import { planKey } from '../src/lib/features/arsenal/presets';
 
 const design: LibraryItem = {
   id: 'cap-design',
@@ -462,7 +463,7 @@ describe('Arsenal controller', () => {
   it('saves presets and selections and reloads them; a selection is never reported as applied', async () => {
     const client = fakeClient();
     const { controller, last } = controllerWith(client);
-    controller.setTab('selections');
+    await controller.loadSelections();
     await settle();
     expect(last().selections).toEqual([selection]);
     const saved = await controller.saveSelection({
@@ -472,10 +473,8 @@ describe('Arsenal controller', () => {
       items: [{ capability: 'cap-design', revision: null }],
       composites: [],
     });
-    expect(saved).toBe(true);
-    expect(last().notice?.text).toBe(
-      'Saved selection Frontend. It is not applied.',
-    );
+    expect(saved?.id).toBe('sel-1');
+    expect(last().notice?.text).toBe('Preset saved');
     expect(client.selections).toHaveBeenCalledTimes(2);
   });
 
@@ -491,9 +490,7 @@ describe('Arsenal controller', () => {
       composites: [],
     });
     expect(last().preview).toBeNull();
-    expect(last().notice?.text).toBe(
-      'Saved selection Frontend. It is not applied.',
-    );
+    expect(last().notice?.text).toBe('Preset saved');
   });
 
   it('reports a preset save the library refused and keeps the draft', async () => {
@@ -521,6 +518,148 @@ describe('Arsenal controller', () => {
     expect(last().preview?.items[0].compatibility).toBe(
       'requires_qualification',
     );
+  });
+});
+
+const planned: Preview = {
+  selection: {
+    id: '',
+    name: '',
+    provider: 'codex',
+    items: [],
+    composites: [],
+    created_at: 0,
+    updated_at: 0,
+  },
+  status: 'not_applied',
+  items: [],
+  conflicts: [],
+  dependencies: 'analysed',
+};
+
+describe('Arsenal controller: draft checks and group moves', () => {
+  const items = [{ capability: 'cap-design', revision: null }];
+
+  it('checks a draft without saving it, and asks once for the same draft', async () => {
+    const client = fakeClient({
+      planPreset: vi.fn(async () => planned),
+    });
+    const { controller, last } = controllerWith(client);
+    await controller.checkDraft('codex', items, []);
+    expect(client.planPreset).toHaveBeenCalledWith('codex', items, []);
+    expect(last().plan).toEqual({
+      key: planKey('codex', items, []),
+      preview: planned,
+      failed: false,
+    });
+    await controller.checkDraft('codex', items, []);
+    expect(client.planPreset).toHaveBeenCalledTimes(1);
+    expect(client.saveSelection).not.toHaveBeenCalled();
+  });
+
+  it('does not check a draft with nothing chosen, and clears the last check', async () => {
+    const client = fakeClient({ planPreset: vi.fn(async () => planned) });
+    const { controller, last } = controllerWith(client);
+    await controller.checkDraft('codex', items, []);
+    await controller.checkDraft('codex', [], []);
+    expect(client.planPreset).toHaveBeenCalledTimes(1);
+    expect(last().plan).toBeNull();
+  });
+
+  it('marks a failed check, and asks again only when asked to try again', async () => {
+    const planPreset = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ArsenalCallError({ code: 'internal', reason: null }),
+      )
+      .mockResolvedValueOnce(planned);
+    const { controller, last } = controllerWith(
+      fakeClient({
+        planPreset: planPreset as unknown as ArsenalClient['planPreset'],
+      }),
+    );
+    await controller.checkDraft('codex', items, []);
+    expect(last().plan).toMatchObject({ preview: null, failed: true });
+    await controller.checkDraft('codex', items, []);
+    expect(planPreset).toHaveBeenCalledTimes(1);
+    await controller.checkDraft('codex', items, [], true);
+    expect(last().plan).toMatchObject({ preview: planned, failed: false });
+  });
+
+  it('drops the answer to a draft that changed while it was being checked', async () => {
+    const answers: Array<(value: Preview) => void> = [];
+    const client = fakeClient({
+      planPreset: vi.fn(
+        () => new Promise<Preview>((resolve) => answers.push(resolve)),
+      ),
+    });
+    const { controller, last } = controllerWith(client);
+    const first = controller.checkDraft('codex', items, []);
+    const second = [{ capability: 'cap-other', revision: null }];
+    const later = controller.checkDraft('codex', second, []);
+    answers[1]!(planned);
+    await later;
+    answers[0]!({ ...planned, status: 'not_applied' });
+    await first;
+    expect(last().plan?.key).toBe(planKey('codex', second, []));
+    expect(last().plan?.preview).toBe(planned);
+  });
+
+  it('shows Saving on the row while a group moves, then reads the corrections again', async () => {
+    let finish: () => void = () => undefined;
+    const client = fakeClient({
+      moveGroup: vi.fn(
+        () =>
+          new Promise<undefined>((resolve) => {
+            finish = () => resolve(undefined);
+          }),
+      ),
+      groups: vi.fn(async () => ({ 'cap-design': 'study' })),
+    });
+    const { controller, last } = controllerWith(client);
+    const moving = controller.moveGroup('cap-design', 'study');
+    expect(last().movingGroup).toBe('cap-design');
+    finish();
+    await moving;
+    expect(client.moveGroup).toHaveBeenCalledWith('cap-design', 'study');
+    expect(last()).toMatchObject({
+      movingGroup: null,
+      groupFailure: null,
+      groups: { 'cap-design': 'study' },
+    });
+  });
+
+  it('keeps the corrections and says nothing changed on the row when a move is refused', async () => {
+    const client = fakeClient({
+      moveGroup: vi.fn(async () => {
+        throw new ArsenalCallError({
+          code: 'storage_unavailable',
+          reason: null,
+        });
+      }),
+      groups: vi.fn(async () => ({})),
+    });
+    const { controller, last } = controllerWith(client);
+    await controller.moveGroup('cap-design', 'study');
+    expect(last()).toMatchObject({
+      movingGroup: null,
+      groups: {},
+      groupFailure: {
+        identity: 'cap-design',
+        text: 'Could not be saved. Nothing changed.',
+      },
+    });
+    expect(client.groups).not.toHaveBeenCalled();
+  });
+
+  it('moves a capability back to its automatic group with no group name', async () => {
+    const client = fakeClient({
+      moveGroup: vi.fn(async () => undefined),
+      groups: vi.fn(async () => ({})),
+    });
+    const { controller } = controllerWith(client);
+    await controller.moveGroup('cap-design', null);
+    expect(client.moveGroup).toHaveBeenCalledWith('cap-design', null);
   });
 });
 

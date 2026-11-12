@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MigrationSummary } from '../../contracts/projects';
   import type { ProjectsController } from './controller';
+  import { msg, t } from '../../i18n/index.svelte';
 
   let {
     preview,
@@ -37,30 +38,42 @@
     (preview?.conflicts ?? []).some((c) => BLOCKING.includes(c.kind)),
   );
   const KIND: Record<string, string> = {
-    source_unreadable:
+    source_unreadable: msg(
       'A file of the older state cannot be read as the schema it claims',
-    source_unstable:
+    ),
+    source_unstable: msg(
       'A file of the older state kept changing while it was read',
-    source_oversized: 'A file of the older state is bigger than its bound',
-    alias: 'A registered folder is another spelling of a registered root',
-    root_unavailable:
+    ),
+    source_oversized: msg('A file of the older state is bigger than its bound'),
+    alias: msg('A registered folder is another spelling of a registered root'),
+    root_unavailable: msg(
       'A registered folder is missing or cannot be used (not imported)',
-    root_shared:
+    ),
+    root_shared: msg(
       'Another account can write in a registered folder, or that could not be checked (not imported)',
-    host_offline: 'No terminal host answered: no live session is imported',
-    over_bound: 'Something does not fit the limits; nothing is cut to fit',
-    incompatible_id:
+    ),
+    host_offline: msg('No terminal host answered: no live session is imported'),
+    over_bound: msg('Something does not fit the limits; nothing is cut to fit'),
+    incompatible_id: msg(
       'An identity from the older state cannot be kept (not imported)',
-    invalid: 'The result would not be valid',
+    ),
+    invalid: msg('The result would not be valid'),
   };
 </script>
 
-<section class="projects-migration" aria-label="Import from the older windows">
+<section
+  class="projects-migration"
+  aria-label={t('Import from the older windows')}
+>
   {#if !preview}
     <p class="projects-note">
       {mode === 'start'
-        ? 'Projects and workspaces are built from the folders, agents and tabs the older windows already know. The preview reads them and changes nothing; the older windows keep working.'
-        : 'The older windows changed since the last import. A new preview adds only what is new; nothing already here is changed.'}
+        ? t(
+            'Projects and workspaces are built from the folders, agents and tabs the older windows already know. The preview reads them and changes nothing; the older windows keep working.',
+          )
+        : t(
+            'The older windows changed since the last import. A new preview adds only what is new; nothing already here is changed.',
+          )}
     </p>
     <div class="projects-row">
       <button
@@ -69,7 +82,7 @@
         disabled={busy}
         onclick={() => void controller.previewMigration()}
       >
-        Preview the import
+        {t('Preview the import')}
       </button>
       {#if mode === 'start'}
         <button
@@ -78,41 +91,49 @@
           disabled={busy}
           onclick={() => void controller.initializeEmpty()}
         >
-          Start empty instead
+          {t('Start empty instead')}
         </button>
       {/if}
     </div>
   {:else}
-    <h3>{preview.mode === 'initial' ? 'Import preview' : 'Update preview'}</h3>
+    <h3>
+      {preview.mode === 'initial' ? t('Import preview') : t('Update preview')}
+    </h3>
     <ul class="projects-facts-list">
-      <li>{preview.counts.projects} projects</li>
-      <li>{preview.counts.workspaces} workspaces</li>
-      <li>{preview.counts.sessions} live sessions</li>
+      <li>{t('{count} projects', { count: preview.counts.projects })}</li>
+      <li>{t('{count} workspaces', { count: preview.counts.workspaces })}</li>
+      <li>{t('{count} live sessions', { count: preview.counts.sessions })}</li>
       <li>
-        {preview.counts.placedLeaves} panes with a session, {preview.counts
-          .emptyLeaves} empty
+        {t('{placed} panes with a session, {empty} empty', {
+          placed: preview.counts.placedLeaves,
+          empty: preview.counts.emptyLeaves,
+        })}
       </li>
       {#if preview.counts.tabsSkipped > 0}<li>
-          {preview.counts.tabsSkipped} tabs with nothing alive (skipped)
+          {t('{count} tabs with nothing alive (skipped)', {
+            count: preview.counts.tabsSkipped,
+          })}
         </li>{/if}
     </ul>
     {#if preview.conflicts.length > 0}
-      <ul class="projects-conflicts" aria-label="Things to know">
+      <ul class="projects-conflicts" aria-label={t('Things to know')}>
         {#each preview.conflicts as conflict (conflict.kind)}
-          <li>{KIND[conflict.kind] ?? conflict.kind} ({conflict.count})</li>
+          <li>
+            {KIND[conflict.kind] ? t(KIND[conflict.kind]) : conflict.kind} ({conflict.count})
+          </li>
         {/each}
       </ul>
     {/if}
     {#if preview.needsAliasAcceptance}
       <label class="projects-check">
-        <input type="checkbox" bind:checked={accept} /> I accept that spellings of
-        the same folder become one project
+        <input type="checkbox" bind:checked={accept} />
+        {t('I accept that spellings of the same folder become one project')}
       </label>
     {/if}
     <p class="projects-note">
-      The exact older files are kept in a private snapshot first. The older
-      state is never overwritten, and no session is started, stopped or
-      restarted.
+      {t(
+        'The exact older files are kept in a private snapshot first. The older state is never overwritten, and no session is started, stopped or restarted.',
+      )}
     </p>
     <div class="projects-row">
       <button
@@ -121,12 +142,13 @@
         disabled={busy ||
           blocked ||
           !(preview.canCommit || (preview.needsAliasAcceptance && accept))}
-        onclick={() => void controller.commitMigration(accept)}>Import</button
+        onclick={() => void controller.commitMigration(accept)}
+        >{t('Import')}</button
       >
       <button
         type="button"
         class="action"
-        onclick={() => controller.cancelPreview()}>Cancel</button
+        onclick={() => controller.cancelPreview()}>{t('Cancel')}</button
       >
     </div>
   {/if}

@@ -6,14 +6,21 @@
 //! running its `before` commands. The window never sends a command: it names a file by its
 //! stem, and every command comes from that file. The folder sits in the synchronized home, as
 //! the shell's own start-up files do, so both computers get the same launches.
+use crate::arsenal::Arsenal;
+use crate::arsenal::store::Store;
+use crate::host::client::HostLink;
 use crate::host::protocol::HostError;
+use crate::native::commands::call_extended_or_legacy;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tauri::State;
 
 pub const MAX_FILES: usize = 64;
 pub const MAX_FILE_BYTES: u64 = 64 * 1024;
@@ -44,6 +51,9 @@ struct SessionSpec {
     agent: String,
     #[serde(default)]
     profile: Option<String>,
+    /// An Arsenal preset's name, for this agent's provider (ADR 0059 / arsenal-UI-SPEC).
+    #[serde(default)]
+    preset: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,6 +66,7 @@ pub enum Kind {
         agent: String,
         profile: Option<String>,
         before: Vec<String>,
+        preset: Option<String>,
     },
 }
 
@@ -236,10 +247,16 @@ fn parse(id: &str, text: &str, home: &Path) -> Result<Launch, String> {
                     "at most {MAX_BEFORE} before commands, each one line of at most {MAX_COMMAND} characters"
                 ));
             }
+            if session.preset.as_deref().is_some_and(|p| !text_ok(p, MAX_NAME)) {
+                return Err(format!(
+                    "preset must be a preset's name, 1–{MAX_NAME} characters on one line"
+                ));
+            }
             Kind::Session {
                 agent: session.agent,
                 profile: session.profile,
                 before: spec.before,
+                preset: session.preset,
             }
         }
     };
@@ -399,6 +416,199 @@ fn run_one(command: &str, folder: &Path, timeout: Duration) -> String {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Saving and deleting a launch from Workspace (arsenal-UI-SPEC, phase D)
+
+/// What the desktop holds that a launch file names, by agent: its profiles (by name) and its
+/// presets (Arsenal selections, by name, for that agent's provider).
+pub trait Known {
+    fn profiles(&self, agent: &str) -> Result<Vec<String>, String>;
+    fn presets(&self, agent: &str) -> Result<Vec<String>, String>;
+}
+
+/// What the window sends to save a launch. There is no field for a command or a `before` line:
+/// the file the window writes is always a session launch, or one that types nothing.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveRequest {
+    name: String,
+    directory: String,
+    agent: String,
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    replace: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SaveRefusal {
+    /// A launch with that name is already saved, and the window did not ask to replace it.
+    Exists,
+    Invalid(String),
+}
+
+/// The file name a launch's name gives: lowercase ASCII letters, digits and single dashes, at
+/// most 40 characters, Latin accents folded. Empty when the name has none of those.
+pub fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        let mapped = match c {
+            'á' | 'à' | 'ä' | 'â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ñ' => 'n',
+            c if c.is_ascii_lowercase() || c.is_ascii_digit() => c,
+            _ => '-',
+        };
+        if mapped == '-' {
+            if !out.is_empty() && !out.ends_with('-') {
+                out.push('-');
+            }
+        } else {
+            out.push(mapped);
+        }
+    }
+    out.truncate(40);
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// A TOML basic string: quoted, with the characters that must be escaped written escaped.
+fn toml_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Writes `text` to `target` through a private temporary file and a rename, so a reader sees
+/// the old file or the new one, never a part of either. The temporary name does not end in
+/// `.toml`, so `list` never reads it.
+fn write_private(folder: &Path, target: &Path, text: &str) -> std::io::Result<()> {
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = folder.join(format!(".{name}.{}.tmp", std::process::id()));
+    let result = write_then_rename(&temporary, target, text);
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn write_then_rename(temporary: &Path, target: &Path, text: &str) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(temporary)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()?;
+    fs::rename(temporary, target)
+}
+
+/// Saves a session launch: the agent, the folder, the profile and the preset, written as the
+/// file the reader already takes. Everything is checked again here, against what the desktop
+/// holds, and the file is read back before the answer goes out.
+pub fn save(
+    places: &Places,
+    request: &SaveRequest,
+    known: &dyn Known,
+) -> Result<Launch, SaveRefusal> {
+    let invalid = |why: String| SaveRefusal::Invalid(why);
+    if !text_ok(&request.name, MAX_NAME) {
+        return Err(invalid(format!(
+            "name must be 1–{MAX_NAME} characters on one line"
+        )));
+    }
+    let agent = request.agent.as_str();
+    if !matches!(agent, "claude_code" | "codex") {
+        return Err(invalid("agent must be claude_code or codex".into()));
+    }
+    let id = slug(&request.name);
+    if id.is_empty() {
+        return Err(invalid("name needs at least one letter or digit".into()));
+    }
+    let folder = directory(Some(&request.directory), &places.home)
+        .map_err(|why| invalid(why.to_owned()))?;
+    if let Some(profile) = request.profile.as_deref() {
+        if !text_ok(profile, crate::native::profile::MAX_NAME) {
+            return Err(invalid("profile must be a profile's name".into()));
+        }
+        let names = known.profiles(agent).map_err(invalid)?;
+        if !names.iter().any(|n| n == profile) {
+            return Err(invalid(format!(
+                "no profile named “{profile}” for this agent"
+            )));
+        }
+    }
+    if let Some(preset) = request.preset.as_deref() {
+        if !text_ok(preset, MAX_NAME) {
+            return Err(invalid("preset must be a preset's name".into()));
+        }
+        let names = known.presets(agent).map_err(invalid)?;
+        if !names.iter().any(|n| n == preset) {
+            return Err(invalid(format!(
+                "no preset named “{preset}” for this agent"
+            )));
+        }
+    }
+    seed(&places.folder).map_err(|e| invalid(format!("launch folder: {e}")))?;
+    let target = places.folder.join(format!("{id}.toml"));
+    if let Ok(meta) = fs::symlink_metadata(&target) {
+        if !meta.is_file() {
+            return Err(invalid("a launch with that file name is not a plain file".into()));
+        }
+        if !request.replace {
+            return Err(SaveRefusal::Exists);
+        }
+    }
+    let shown = if folder == places.home {
+        "~".to_owned()
+    } else {
+        display(&folder, &places.home)
+    };
+    let mut text = format!(
+        "# Saved from Workspace (Wyss Console).\nname = {}\ndirectory = {}\n\n[session]\nagent = {}\n",
+        toml_string(request.name.trim()),
+        toml_string(&shown),
+        toml_string(agent),
+    );
+    if let Some(profile) = &request.profile {
+        text.push_str(&format!("profile = {}\n", toml_string(profile)));
+    }
+    if let Some(preset) = &request.preset {
+        text.push_str(&format!("preset = {}\n", toml_string(preset)));
+    }
+    parse(&id, &text, &places.home).map_err(invalid)?;
+    write_private(&places.folder, &target, &text)
+        .map_err(|e| invalid(format!("the launch could not be written: {e}")))?;
+    get(places, &id).map_err(invalid)
+}
+
+/// Deletes a launch the window saved: one with no `before` line and no commands. The owner's
+/// own files, and the shipped ones with a `before` line, are edited by hand and never deleted here.
+pub fn delete(places: &Places, id: &str) -> Result<(), String> {
+    let launch = get(places, id)?;
+    let saved = matches!(&launch.kind, Kind::Session { before, .. } if before.is_empty());
+    if !saved {
+        return Err("only a launch saved from Workspace can be deleted here; edit the others in their file".into());
+    }
+    fs::remove_file(places.folder.join(format!("{id}.toml")))
+        .map_err(|_| "the launch could not be deleted".to_owned())
+}
+
 // Window commands
 
 fn places() -> Result<Places, HostError> {
@@ -442,7 +652,85 @@ pub async fn launch_before(request: LaunchRequest) -> Result<Vec<Outcome>, HostE
     .map_err(|_| HostError::new("internal"))?
 }
 
-const COMMANDS: &[&str] = &["launch_list", "launch_get", "launch_before"];
+/// What the desktop holds: the profiles from the host, the presets from the Arsenal library.
+struct Desktop {
+    link: HostLink,
+    library: Option<Arc<Mutex<Store>>>,
+}
+
+impl Known for Desktop {
+    fn profiles(&self, agent: &str) -> Result<Vec<String>, String> {
+        let value = call_extended_or_legacy(&self.link, "profiles_extended", "profiles", Value::Null)
+            .map_err(|e| format!("the profiles could not be read ({})", e.code))?;
+        Ok(value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| {
+                p["body"]["applies_to"]
+                    .as_array()
+                    .is_some_and(|agents| agents.iter().any(|a| a.as_str() == Some(agent)))
+            })
+            .filter_map(|p| p["body"]["name"].as_str().map(str::to_owned))
+            .collect())
+    }
+
+    fn presets(&self, agent: &str) -> Result<Vec<String>, String> {
+        let library = self.library.as_ref().ok_or("the Arsenal library is not open")?;
+        let store = library
+            .lock()
+            .map_err(|_| "the Arsenal library is busy".to_owned())?;
+        let selections = store
+            .selections()
+            .map_err(|_| "the Arsenal presets could not be read".to_owned())?;
+        Ok(selections
+            .into_iter()
+            .filter(|s| s.provider == agent)
+            .map(|s| s.name)
+            .collect())
+    }
+}
+
+fn saving(refusal: SaveRefusal) -> HostError {
+    match refusal {
+        SaveRefusal::Exists => HostError::new("exists"),
+        SaveRefusal::Invalid(why) => refused(why),
+    }
+}
+
+/// Saves the launch the window describes. The file is written by the desktop, which checks the
+/// profile and the preset itself; a launch that already exists is replaced only when asked.
+#[tauri::command]
+pub async fn launch_save(
+    request: SaveRequest,
+    arsenal: State<'_, Arsenal>,
+    link: State<'_, HostLink>,
+) -> Result<Launch, HostError> {
+    let known = Desktop {
+        link: link.inner().clone(),
+        library: arsenal.launch_handle(),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        save(&places()?, &request, &known).map_err(saving)
+    })
+    .await
+    .map_err(|_| HostError::new("internal"))?
+}
+
+#[tauri::command]
+pub async fn launch_delete(request: LaunchRequest) -> Result<(), HostError> {
+    tauri::async_runtime::spawn_blocking(move || delete(&places()?, &request.id).map_err(refused))
+        .await
+        .map_err(|_| HostError::new("internal"))?
+}
+
+const COMMANDS: &[&str] = &[
+    "launch_list",
+    "launch_get",
+    "launch_before",
+    "launch_save",
+    "launch_delete",
+];
 
 pub fn extension() -> wyss_console::Extension {
     wyss_console::Extension {
@@ -450,7 +738,9 @@ pub fn extension() -> wyss_console::Extension {
         handler: Box::new(tauri::generate_handler![
             launch_list,
             launch_get,
-            launch_before
+            launch_before,
+            launch_save,
+            launch_delete
         ]),
         install: Box::new(|builder| builder),
         on_exit: None,

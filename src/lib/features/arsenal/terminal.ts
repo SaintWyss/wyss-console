@@ -56,6 +56,19 @@ export function planCounts(plan: TerminalPlan) {
 }
 
 /**
+ * The installed skills a plan leaves on and off, as the panel counts them: `kept` includes the ones
+ * the owner's settings already switch off (`inherited_off`), and `excluded` are the ones it switches off.
+ */
+export function onOffCounts(
+  plan: Pick<TerminalPlan, 'kept' | 'inherited_off' | 'excluded'>,
+): { on: number; off: number } {
+  return {
+    on: plan.kept.length - plan.inherited_off.length,
+    off: plan.inherited_off.length + plan.excluded.length,
+  };
+}
+
+/**
  * One line on what a session started with. A session the host launched with an exclusion says so;
  * one that only has a record says it was not applied. Nothing says a skill was used.
  */

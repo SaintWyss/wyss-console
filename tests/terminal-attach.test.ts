@@ -8,6 +8,19 @@ import { TerminalController } from '../src/lib/features/terminal/controller';
 import type { TerminalRenderer } from '../src/lib/features/terminal/renderer';
 import { parseAttach } from '../src/lib/contracts/terminal';
 import { parserNote } from '../src/lib/features/terminal/parser-status';
+import { t } from '../src/lib/i18n/index.svelte';
+
+// The window draws a note's sentence and its values through t(); the assertions read it the same way.
+const shownNote = (view: Parameters<typeof parserNote>[0]) => {
+  const note = parserNote(view);
+  return (
+    note && {
+      ...note,
+      text: t(note.text, note.values),
+      title: t(note.title, note.values),
+    }
+  );
+};
 
 vi.mock('../src/lib/features/terminal/renderer', () => ({
   createRenderer: vi.fn(),
@@ -317,9 +330,9 @@ it('decodes only exactly an attach answer', () => {
 it('says what is missing and never "restored" alone when it is not whole', () => {
   const view = (attach: unknown, parserView?: unknown) =>
     ({ state: 'running', attach, parser: parserView }) as never;
-  expect(parserNote(view(undefined))).toBeNull();
-  expect(parserNote(view(parseAttach(screenAnswer())))).toBeNull();
-  const tail = parserNote(
+  expect(shownNote(view(undefined))).toBeNull();
+  expect(shownNote(view(parseAttach(screenAnswer())))).toBeNull();
+  const tail = shownNote(
     view(
       parseAttach(
         screenAnswer({
@@ -330,7 +343,7 @@ it('says what is missing and never "restored" alone when it is not whole', () =>
   );
   expect(tail?.tone).toBe('warn');
   expect(tail?.text).toMatch(/3 KiB before it is not included/);
-  const gap = parserNote(
+  const gap = shownNote(
     view(
       parseAttach(
         screenAnswer({
@@ -342,22 +355,22 @@ it('says what is missing and never "restored" alone when it is not whole', () =>
   expect(gap?.tone).toBe('warn');
   expect(gap?.text).toMatch(/5 KiB of output was missed/);
   expect(
-    parserNote(
+    shownNote(
       view(undefined, { health: 'healthy', fidelity: 'gap', restarts: 0 }),
     )?.text,
   ).toMatch(/missed/);
-  const replay = parserNote(
+  const replay = shownNote(
     view({ mode: 'replay', reason: 'helper_missing', parser: null }),
   );
   expect(replay?.text).toMatch(/no screen state was kept/);
   expect(replay?.title).toMatch(/helper missing/);
   expect(
-    parserNote(
+    shownNote(
       view(undefined, { health: 'restarting', fidelity: 'tail', restarts: 1 }),
     )?.text,
   ).toMatch(/restarting/);
   expect(
-    parserNote(
+    shownNote(
       view(undefined, {
         health: 'unavailable',
         fidelity: 'unavailable',

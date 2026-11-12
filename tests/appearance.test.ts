@@ -105,6 +105,19 @@ it('keeps every text token legible on every surface of its theme, not only the c
   }
 });
 
+it('keeps a filled Arsenal meter cell distinct from every surface it can sit on, in every theme', () => {
+  // The composition meter fills its cells with --accent. A filled cell must stand out from its
+  // surface by 3:1 (non-text), and its empty cell by the same border rule as every control.
+  for (const theme of APPEARANCE_THEMES) {
+    const tokens = cssThemes()[theme]!;
+    for (const surface of SURFACES)
+      expect(
+        contrast(tokens.accent!, tokens[surface]!),
+        `${theme} filled meter cell on ${surface}`,
+      ).toBeGreaterThanOrEqual(3);
+  }
+});
+
 it('never lets what is behind the window show through: no blur, no glass mode', () => {
   const svelte = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>

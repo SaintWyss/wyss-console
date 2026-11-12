@@ -17,7 +17,19 @@ export type Launch =
       agent: 'claude_code' | 'codex';
       profile: string | null;
       before: string[];
+      /** The Arsenal preset's name, for this agent (arsenal-UI-SPEC, phase D). */
+      preset: string | null;
     };
+/** What Workspace sends to save a session launch. There is no field for a command. */
+export interface SaveLaunchInput {
+  name: string;
+  directory: string;
+  agent: 'claude_code' | 'codex';
+  profile: string | null;
+  preset: string | null;
+  /** Only with the owner's say-so: an existing launch with that name is replaced. */
+  replace: boolean;
+}
 export interface LaunchList {
   folder: string;
   launches: Launch[];
@@ -57,3 +69,9 @@ export const getLaunch = (id: string) =>
   call<Launch>('launch_get', { request: { id } });
 export const runBefore = (id: string) =>
   call<BeforeOutcome[]>('launch_before', { request: { id } });
+/** Saves a session launch. `exists` when a launch with that name is saved and `replace` is off. */
+export const saveLaunch = (input: SaveLaunchInput) =>
+  call<Launch>('launch_save', { request: input });
+/** Deletes a launch Workspace saved. The owner's own files are refused. */
+export const deleteLaunch = (id: string) =>
+  call<void>('launch_delete', { request: { id } });

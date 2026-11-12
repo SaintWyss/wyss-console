@@ -63,8 +63,6 @@ impl Arsenal {
     }
 
     /// The owner's group corrections, by identity.
-    // Called by the group commands.
-    #[allow(dead_code)]
     pub(super) fn groups(&self) -> Result<BTreeMap<String, String>, Error> {
         let directory = self.directory.as_ref().ok_or(Error::Storage)?;
         Ok(groups::load(directory).groups)
@@ -72,8 +70,6 @@ impl Arsenal {
 
     /// Puts a capability of the library in a group. Runs under the store's lock, so two changes
     /// cannot overwrite each other's file.
-    // Called by the group commands.
-    #[allow(dead_code)]
     pub(super) fn set_group(&self, identity: &str, group_id: &str) -> Result<(), Error> {
         if !groups::identity_ok(identity) || !groups::group_ok(group_id) {
             return Err(Error::Invalid);
@@ -95,8 +91,6 @@ impl Arsenal {
     }
 
     /// Takes a capability out of its group. Removing a capability with no group changes nothing.
-    // Called by the group commands.
-    #[allow(dead_code)]
     pub(super) fn clear_group(&self, identity: &str) -> Result<(), Error> {
         let directory = self.directory.clone().ok_or(Error::Storage)?;
         self.with_store(|_| {
@@ -218,4 +212,153 @@ fn open() -> Result<(Store, PathBuf), Error> {
         .open(&path)
         .map_err(|_| Error::Storage)?;
     Ok((Store::open(Connection::open(path)?)?, directory))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "arsenal-groups-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        dir
+    }
+
+    /// An Arsenal whose library is `store`, with its group corrections kept in `directory`.
+    fn open_with(store: Store, directory: PathBuf) -> Arsenal {
+        Arsenal {
+            store: Ok(Arc::new(Mutex::new(store))),
+            directory: Some(directory),
+            details: Arc::new(Mutex::new(BTreeMap::new())),
+            sync: None,
+        }
+    }
+
+    /// Imports one skill named `name` under `identity` into `store`.
+    fn skill(store: &mut Store, identity: &str, name: &str) {
+        store
+            .import(&store::NewCapability {
+                identity: identity.to_owned(),
+                provider: "claude_code".to_owned(),
+                source: "claude_user_skills".to_owned(),
+                kind: "skill".to_owned(),
+                name: name.to_owned(),
+                description: String::new(),
+                origin: format!("~/.claude/skills/{name}"),
+                files: vec![("SKILL.md".to_owned(), b"# skill".to_vec())],
+            })
+            .unwrap();
+    }
+
+    fn id(n: u32) -> String {
+        format!("{n:064x}")
+    }
+
+    fn memory() -> Store {
+        Store::open(Connection::open_in_memory().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_group_is_set_changed_and_cleared_in_the_file_beside_the_library() {
+        let directory = scratch("set");
+        let mut store = memory();
+        skill(&mut store, &id(1), "frontend");
+        let arsenal = open_with(store, directory.clone());
+        assert!(arsenal.groups().unwrap().is_empty());
+
+        arsenal.set_group(&id(1), "design").unwrap();
+        assert_eq!(
+            arsenal.groups().unwrap(),
+            BTreeMap::from([(id(1), "design".to_owned())])
+        );
+        // The correction lives in groups.json beside the library, not in its database.
+        assert_eq!(
+            groups::load(&directory).groups,
+            BTreeMap::from([(id(1), "design".to_owned())])
+        );
+
+        arsenal.set_group(&id(1), "review").unwrap();
+        assert_eq!(
+            arsenal.groups().unwrap(),
+            BTreeMap::from([(id(1), "review".to_owned())])
+        );
+
+        arsenal.clear_group(&id(1)).unwrap();
+        assert!(arsenal.groups().unwrap().is_empty());
+        // Clearing a capability that has no correction changes nothing and is not an error.
+        arsenal.clear_group(&id(1)).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_group_names_a_capability_the_library_holds_and_a_valid_group() {
+        let directory = scratch("refuse");
+        let mut store = memory();
+        skill(&mut store, &id(1), "frontend");
+        let arsenal = open_with(store, directory.clone());
+        assert_eq!(
+            arsenal.set_group(&id(2), "design"),
+            Err(Error::NotFound),
+            "a capability the library does not hold"
+        );
+        assert_eq!(
+            arsenal.set_group("not-an-identity", "design"),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            arsenal.set_group(&id(1), "Design Group"),
+            Err(Error::Invalid)
+        );
+        assert_eq!(arsenal.set_group(&id(1), ""), Err(Error::Invalid));
+        assert!(arsenal.groups().unwrap().is_empty());
+        assert!(!directory.join("groups.json").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_new_group_is_refused_once_the_file_holds_the_most_corrections() {
+        let directory = scratch("cap");
+        let full = groups::State {
+            schema_version: 1,
+            presets_migrated: true,
+            groups: (0..u32::try_from(groups::MAX_GROUPS).unwrap())
+                .map(|n| (id(n), "design".to_owned()))
+                .collect(),
+        };
+        groups::save(&directory, &full).unwrap();
+        let mut store = memory();
+        skill(&mut store, &id(0), "already-corrected");
+        skill(&mut store, &id(u32::MAX), "newcomer");
+        let arsenal = open_with(store, directory.clone());
+        assert_eq!(
+            arsenal.set_group(&id(u32::MAX), "design"),
+            Err(Error::Invalid)
+        );
+        // A capability that already has a correction can still change it.
+        arsenal.set_group(&id(0), "review").unwrap();
+        assert_eq!(
+            groups::load(&directory)
+                .groups
+                .get(&id(0))
+                .map(String::as_str),
+            Some("review")
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_library_that_did_not_open_keeps_no_group_corrections() {
+        let arsenal = Arsenal {
+            store: Err(Error::Storage),
+            directory: None,
+            details: Arc::new(Mutex::new(BTreeMap::new())),
+            sync: None,
+        };
+        assert_eq!(arsenal.set_group(&id(1), "design"), Err(Error::Storage));
+        assert_eq!(arsenal.clear_group(&id(1)), Err(Error::Storage));
+        assert_eq!(arsenal.groups(), Err(Error::Storage));
+    }
 }

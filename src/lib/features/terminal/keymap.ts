@@ -59,13 +59,14 @@ export function leaderAction(event: {
 
 /** What each chord does, for the legend. */
 export const KEY_LEGEND: readonly [string, string][] = [
-  ['Ctrl+Shift+T', 'New terminal in a new tab'],
-  ['Ctrl+Shift+D', 'Split the pane side by side'],
-  ['Ctrl+Shift+E', 'Split the pane, one above the other'],
-  ['Ctrl+Shift+W', 'Close the pane'],
-  ['Ctrl+Shift+F', 'Search the pane’s scrollback'],
-  ['Ctrl+Shift+Arrows', 'Move to the pane in that direction'],
-  ['Ctrl+Shift+. and ,', 'Next and previous pane'],
-  ['Ctrl+Shift+PageDown, PageUp', 'Next and previous tab'],
-  ['Ctrl+Shift+1 to 9', 'Go to that tab'],
+  ['Ctrl+Shift+T', msg('New terminal in a new tab')],
+  ['Ctrl+Shift+D', msg('Split the pane side by side')],
+  ['Ctrl+Shift+E', msg('Split the pane, one above the other')],
+  ['Ctrl+Shift+W', msg('Close the pane')],
+  ['Ctrl+Shift+F', msg('Search the pane’s scrollback')],
+  ['Ctrl+Shift+Arrows', msg('Move to the pane in that direction')],
+  ['Ctrl+Shift+. and ,', msg('Next and previous pane')],
+  ['Ctrl+Shift+PageDown, PageUp', msg('Next and previous tab')],
+  ['Ctrl+Shift+1 to 9', msg('Go to that tab')],
 ];
+import { msg } from '../../i18n/msg';

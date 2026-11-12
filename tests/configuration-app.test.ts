@@ -59,6 +59,17 @@ function desktop(inventory: () => unknown = () => fixture) {
         return approvals.empty;
       case 'arsenal_capabilities':
         return [];
+      case 'arsenal_presets':
+      case 'arsenal_selections':
+        return [];
+      case 'arsenal_discover':
+        return {
+          project: null,
+          sources: [],
+          candidates: [],
+          composites: [],
+          truncated: false,
+        };
       case 'terminal_read_output':
         return never();
       case 'get_app_info':
@@ -149,6 +160,9 @@ it('opens Arsenal on its own library, not on the provider inventory', async () =
   expect(arsenal.hidden).toBe(false);
   expect(ipc.count('arsenal_capabilities')).toBe(1);
   expect(ipc.count('configuration_inventory')).toBe(0);
+  // Arsenal opens on Presets; the library is one tab away.
+  arsenal.querySelector<HTMLButtonElement>('#arsenal-tab-library')!.click();
+  await flush();
   expect(text(arsenal)).toContain('Installed does not mean imported');
   expect(text(arsenal)).toContain('Nothing is imported yet');
 });

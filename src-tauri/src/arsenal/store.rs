@@ -1291,7 +1291,7 @@ fn valid_path(path: &str) -> bool {
         })
 }
 
-fn is_provider(provider: &str) -> bool {
+pub(super) fn is_provider(provider: &str) -> bool {
     matches!(provider, "claude_code" | "codex")
 }
 
@@ -1307,7 +1307,7 @@ fn check_text(value: &str, max_chars: usize, required: bool) -> Result<(), Error
 }
 
 /// Items are unique by capability and bounded. A pinned revision must be a positive number.
-fn check_items(items: &[Item]) -> Result<(), Error> {
+pub(super) fn check_items(items: &[Item]) -> Result<(), Error> {
     if items.len() > MAX_ITEMS {
         return Err(Error::Invalid);
     }
@@ -1347,7 +1347,7 @@ fn check_references(tx: &Transaction<'_>, items: &[Item]) -> Result<(), Error> {
 }
 
 /// Composite keys: a few, unique, short and plain.
-fn check_composites(keys: &[String]) -> Result<(), Error> {
+pub(super) fn check_composites(keys: &[String]) -> Result<(), Error> {
     let mut seen = HashSet::new();
     if keys.len() > MAX_COMPOSITES
         || keys.iter().any(|key| {

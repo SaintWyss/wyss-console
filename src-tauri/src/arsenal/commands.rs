@@ -121,6 +121,21 @@ pub struct IdRequest {
     id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupRequest {
+    identity: String,
+    group_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DraftRequest {
+    provider: String,
+    items: Vec<store::Item>,
+    composites: Vec<String>,
+}
+
 /// The entry an import names, as the last scan showed it. The id is what must match, read again now.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -252,6 +267,9 @@ const COMMANDS: &[&str] = &[
     "arsenal_selection_write",
     "arsenal_selection_delete",
     "arsenal_preview",
+    "arsenal_preset_plan",
+    "arsenal_groups",
+    "arsenal_group_move",
     "arsenal_terminal_plan",
     "arsenal_terminal_bind",
     "arsenal_terminal_bindings",
@@ -279,6 +297,9 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_selection_write,
             arsenal_selection_delete,
             arsenal_preview,
+            arsenal_preset_plan,
+            arsenal_groups,
+            arsenal_group_move,
             arsenal_terminal_plan,
             arsenal_terminal_bind,
             arsenal_terminal_bindings,
@@ -746,6 +767,54 @@ fn arsenal_preview(
         .map_err(ArsenalError::from)
 }
 
+/// Corrections are local to this computer and are not part of Arsenal sync.
+#[tauri::command]
+fn arsenal_groups(arsenal: State<'_, Arsenal>) -> Result<BTreeMap<String, String>, ArsenalError> {
+    arsenal.groups().map_err(ArsenalError::from)
+}
+
+#[tauri::command]
+fn arsenal_group_move(
+    arsenal: State<'_, Arsenal>,
+    request: GroupRequest,
+) -> Result<(), ArsenalError> {
+    match request.group_id {
+        Some(group) => arsenal.set_group(&request.identity, &group),
+        None => arsenal.clear_group(&request.identity),
+    }
+    .map_err(ArsenalError::from)
+}
+
+#[tauri::command]
+fn arsenal_preset_plan(
+    arsenal: State<'_, Arsenal>,
+    request: DraftRequest,
+) -> Result<Preview, ArsenalError> {
+    arsenal
+        .with_store(|store| draft_preview(store, request))
+        .map_err(ArsenalError::from)
+}
+
+fn draft_preview(store: &Store, request: DraftRequest) -> Result<Preview, Error> {
+    if !store::is_provider(&request.provider) {
+        return Err(Error::Invalid);
+    }
+    store::check_items(&request.items)?;
+    store::check_composites(&request.composites)?;
+    preview_selection(
+        store,
+        Selection {
+            id: String::new(),
+            name: String::new(),
+            provider: request.provider,
+            items: request.items,
+            composites: request.composites,
+            created_at: 0,
+            updated_at: 0,
+        },
+    )
+}
+
 /// A capability of a selection that resolves, for the conflict checks.
 struct Resolved {
     capability: String,
@@ -833,6 +902,10 @@ pub fn preview(store: &Store, selection_id: &str) -> Result<Preview, Error> {
         .into_iter()
         .find(|selection| selection.id == selection_id)
         .ok_or(Error::NotFound)?;
+    preview_selection(store, selection)
+}
+
+fn preview_selection(store: &Store, selection: Selection) -> Result<Preview, Error> {
     let (resolved_items, complete) = resolve_items(store, &selection)?;
     let mut items = Vec::with_capacity(resolved_items.len());
     let mut resolved: Vec<Resolved> = Vec::new();
@@ -1580,6 +1653,53 @@ mod tests {
         // Different content in the same slot would overwrite each other: a real conflict.
         assert_eq!(claude.name_collisions, vec![changed.id.clone()]);
         assert_eq!(changed.name_collisions.len(), 2);
+    }
+
+    #[test]
+    fn draft_preview_matches_saved_preview_without_writing() {
+        let mut store = Store::open(Connection::open_in_memory().unwrap()).unwrap();
+        let capability = import(&mut store, &mut candidate("skill", "design", b"same")).capability;
+        let items = vec![store::Item {
+            capability,
+            revision: None,
+        }];
+        let selection = store
+            .save_selection(&store::SelectionInput {
+                id: None,
+                name: "Frontend".into(),
+                provider: "claude_code".into(),
+                items: items.clone(),
+                composites: vec![],
+            })
+            .unwrap();
+        let before = store.selections().unwrap();
+        let draft = draft_preview(
+            &store,
+            DraftRequest {
+                provider: "claude_code".into(),
+                items,
+                composites: vec![],
+            },
+        )
+        .unwrap();
+        let saved = preview(&store, &selection.id).unwrap();
+        let mut a = serde_json::to_value(draft).unwrap();
+        let mut b = serde_json::to_value(saved).unwrap();
+        a.as_object_mut().unwrap().remove("selection");
+        b.as_object_mut().unwrap().remove("selection");
+        assert_eq!(a, b);
+        assert_eq!(store.selections().unwrap(), before);
+        assert!(matches!(
+            draft_preview(
+                &store,
+                DraftRequest {
+                    provider: "unknown".into(),
+                    items: vec![],
+                    composites: vec![],
+                }
+            ),
+            Err(Error::Invalid)
+        ));
     }
 
     #[test]
