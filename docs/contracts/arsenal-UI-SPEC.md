@@ -185,6 +185,52 @@ Texto al 200 %: las filas crecen en alto; el para qué sirve pasa a dos líneas;
 
 Solo CSS (la app es Svelte, no aplica la capa de motion para React): plegar grupo 150 ms, llenado de celda 120 ms, `transform`/`opacity` únicamente. Nada más se anima.
 
+## Ampliación del 2026-11-12 (BORRADOR, para charlar con el dueño)
+
+Decisiones del dueño del 2026-11-12. Reabren lo que el contrato del 2026-11-11 decía sobre hooks, MCP y grupos:
+
+1. **Ocho tipos en Elegir**, en este orden: Todos · Reglas · Skills · Agentes · Hooks · MCP · Plugins · Comandos. Al pasar el mouse sobre cada tipo aparece qué es.
+2. **Todo se puede elegir**, incluidos los hooks de seguridad (`r3-gate`, control de ruteo). No hay piso fijo. Un preset puede abrir una terminal sin ningún hook: **decisión del dueño**, que este contrato registra y no discute.
+3. **Antes de abrir Claude Code, la Console escribe la configuración global** (`~/.claude/settings.json` para hooks, `~/.claude.json` para MCP) según el preset, y recién después lanza la terminal.
+4. **GSD no se rompe.** Sigue siendo un paquete que va entero. En Claude, sus 35 agentes (links a `~/.local/share/wyss/gsd-core/<versión>/`) se muestran en Agentes con la etiqueta _parte de GSD Core_, y se prenden o apagan con "Mantener GSD Core".
+5. **Categorías en 5 secciones**, todas visibles en cada tipo aunque estén vacías (con `0`).
+6. **Categorías del dueño:** se pueden crear, renombrar y borrar. Las básicas no se borran.
+
+### Secciones y categorías básicas
+
+| Sección            | `group_id`                                          | es                                                                                     | en     | Cambio                                                                 |
+| ------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| Cómo trabaja       | `rules`                                             | Reglas                                                                                 | Rules  | nueva: sale de `models` (`kind = rule`)                                |
+|                    | `models`                                            | Modelos                                                                                | Models | queda solo con `astra_*`, `luna_*`, `sol_*`                            |
+| Antes de construir | `research` · `decide` · `planning`                  | Investigación · Decisiones · Planificación                                             |        | igual                                                                  |
+| Construir          | `build` · `design` · `motion` · `content` · `docs`  | Programar · Diseño e interfaz · Animación y video · Contenido y SEO · Docs y escritura |        | igual                                                                  |
+| Después            | `review` · `debug` · `security`                     | Revisar y testear · Depurar · Seguridad                                                |        | igual                                                                  |
+| Entorno            | `system` · `study` · `integrations` · `automations` | Sistema · Estudio · Integraciones · Automatizaciones                                   |        | nuevas: `integrations` = todo MCP; `automations` = hook sin otra regla |
+| —                  | `other`                                             | Otros                                                                                  | Other  | igual, siempre al final                                                |
+
+Una corrección guardada con `group_id = models` sobre una regla se lee como `rules`.
+
+### Categorías del dueño
+
+- Se guardan en `groups.json`: `"custom":[{"id":"u-<uuid>","name":"…","section":"before|build|after|env|how"}]`, con un tope de 64. `schema_version` pasa a 2, y si el archivo trae la versión 1 se lee igual.
+- El nombre lleva de 1 a 40 caracteres, sin caracteres de control, y no puede repetirse dentro de la misma sección.
+- "+ Nueva categoría" va al final de cada sección y abre una línea de texto en el mismo lugar. Renombrar y borrar están en el menú de la categoría y solo aparecen en las del dueño.
+- Al borrar una categoría, sus correcciones se eliminan y las capacidades vuelven a la categoría que les da su regla. Antes se confirma: "Delete {name}? Its {n} capabilities go back to their default category."
+
+### Hooks y MCP elegibles
+
+- **Qué se elige:** cada hook es una entrada `evento + matcher + comando` de `~/.claude/settings.json`, y cada MCP es un servidor de `~/.claude.json`. El preset guarda la referencia (provider, tipo, clave estable = hash de evento+matcher+comando, o nombre del servidor), nunca una copia del comando ni de las variables del MCP, porque pueden tener credenciales.
+- **El catálogo maestro:** la primera vez que se aplica un preset, la Console copia todos los hooks y MCP actuales a `~/.local/share/wyss-console/arsenal/catalog-claude.json` (`0600`). Es la lista completa de dónde se sacan los que van a cada lanzamiento. Lo que agregues después a mano a `settings.json` se suma al catálogo en el siguiente lanzamiento, y nada se pierde.
+- **Al lanzar:** respaldo con fecha de `settings.json` y `~/.claude.json` → se escribe en ambos solo lo que el preset eligió (temporal + rename, sin tocar ninguna otra clave) → se lanza Claude Code. Cuando el preset no menciona hooks ni MCP, no se toca nada.
+- **Terminales ya abiertas:** Claude Code toma una foto de los hooks al arrancar. Hay que verificar en la etapa 5 que cambiar el global después no afecte a las sesiones abiertas. Si las afecta, se vuelve a charlar.
+- **Panel de composición:** lista los hooks activos. Si el preset deja afuera `r3-gate`, el panel muestra "Sin freno ante comandos destructivos" como dato, no como bloqueo.
+- **Codex:** fuera de esta ampliación. Sus hooks están apagados a propósito.
+
+### Comandos
+
+- En Claude Code, los `/comando` propios hoy son skills (`~/.claude/commands` no existe en esta PC). Codex usa `~/.codex/prompts/*.md`, que tampoco existe todavía.
+- El tipo Comandos escanea `~/.claude/commands/*.md` y `~/.codex/prompts/*.md`. Se importan y se eligen igual que una regla (un archivo). Si no hay ninguno, el estado vacío dice: "No custom commands. Your /commands are skills here."
+
 ## Fases de construcción
 
 | Fase | Entrega                                                                                                                               | Verificación                                                                                                          |
@@ -193,6 +239,11 @@ Solo CSS (la app es Svelte, no aplica la capa de motion para React): plegar grup
 | B    | Reglas de grupo y familia (`groups.ts`) con el fixture de 207 nombres.                                                                | test del criterio de aceptación de Grupos.                                                                            |
 | C    | Pantalla de Arsenal (este contrato), con `t()` desde el inicio.                                                                       | tests de vista por estado; capturas a 1280 / 1024 / 768 / 375 en los tres temas contra la referencia.                 |
 | D    | Workspace: selector de preset, **Save as launch…**, lanzamientos guardados; `launch_save`, `launch_delete`, `preset` en el TOML.      | tests de Rust de validación y de no escribir `commands`; test de vista; un lanzamiento real de punta a punta.         |
+
+| E | Ampliación: los 8 tipos en Elegir (hooks, MCP, plugins y comandos solo para ver) + agentes GSD en Claude. | test de vista por tipo; test del escaneo de comandos. |
+| F | Las 5 secciones y las categorías nuevas, siempre visibles. | test de reglas con el fixture (Other ≤ 10 %); test de vista con categorías vacías. |
+| G | Categorías del dueño en `groups.json` v2. | tests de Rust: v1→v2, tope, nombre repetido, borrado que devuelve a la regla. |
+| H | Hooks y MCP elegibles: catálogo maestro, respaldo, escritura del global antes de lanzar. | tests de Rust: respaldo, solo claves elegidas, otras claves intactas; prueba real con 2 terminales abiertas. |
 
 Cierre: una revisión externa del conjunto, con foco en `launch_save` (escritura de archivos nombrados por la ventana) y en la migración.
 
