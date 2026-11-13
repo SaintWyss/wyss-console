@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { t } from '../i18n/index.svelte';
   import {
     NAV_ITEMS,
@@ -32,6 +33,13 @@
   function choose(item: RailItem) {
     if (item.view === null) {
       moreOpen = !moreOpen;
+      // Opened: the keyboard lands on its first view.
+      if (moreOpen)
+        void tick().then(() =>
+          document
+            .querySelector<HTMLElement>('#rail-more-list button')
+            ?.focus(),
+        );
       return;
     }
     moreOpen = false;
@@ -68,7 +76,7 @@
           class:rail-more={item.id === 'more'}
           aria-current={lit === item.id ? 'page' : undefined}
           title={t(item.label)}
-          aria-haspopup={item.id === 'more' ? 'menu' : undefined}
+          aria-controls={item.id === 'more' ? 'rail-more-list' : undefined}
           aria-expanded={item.id === 'more' ? moreOpen : undefined}
           onclick={() => choose(item)}
         >
@@ -87,12 +95,17 @@
       </li>
     {/each}
   </ul>
-  <!-- Kept in the page while closed (hidden), so its views stay addressable by name. -->
-  <div class="rail-menu" role="menu" aria-label={t('More')} hidden={!moreOpen}>
+  <!-- A disclosure, not a menu: a list of buttons in the tab order, kept in the page while
+       closed (hidden) so its views stay addressable by name. -->
+  <div
+    id="rail-more-list"
+    class="rail-menu"
+    aria-label={t('More')}
+    hidden={!moreOpen}
+  >
     {#each more as item (item.id)}
       <button
         type="button"
-        role="menuitem"
         class="nav-item rail-menu-item"
         aria-current={active === item.id ? 'page' : undefined}
         onclick={() => pick(item.id)}

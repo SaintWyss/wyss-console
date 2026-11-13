@@ -643,3 +643,84 @@ it('keeps the active tab and its close control visible on selection and strip re
   for (const observer of Observer.instances)
     expect(observer.disconnect).toHaveBeenCalledTimes(1);
 });
+
+const tools = () => [
+  ...document.querySelectorAll<HTMLButtonElement>('.top-actions button'),
+];
+it('puts the two splits, the shortcuts and + Launch in the toolbar, in that order', async () => {
+  component = mount(TerminalView, { target: document.body });
+  await flush();
+  expect(
+    tools().map((b) => b.getAttribute('aria-label') ?? b.textContent),
+  ).toEqual([
+    'Split side by side',
+    'Split one above the other',
+    'Keyboard shortcuts',
+    '+ Launch',
+  ]);
+  // A terminal is open: it can be split, and a split makes a second pane in the same tab.
+  expect(tools().map((b) => b.disabled)).toEqual([false, false, false, false]);
+  tools()[0].click();
+  await flush();
+  expect(document.querySelectorAll('[role=tab]')).toHaveLength(1);
+  expect(commands.filter((c) => c === 'create_terminal')).toHaveLength(2);
+  // The shortcuts are the keymap's own list.
+  tools()[2].click();
+  await flush();
+  const { KEY_LEGEND } = await import('../src/lib/features/terminal/keymap');
+  expect(
+    [...document.querySelectorAll('.terminal-legend dt')].map(
+      (d) => d.textContent,
+    ),
+  ).toEqual(KEY_LEGEND.map(([chord]) => chord));
+});
+it('disables the splits while no terminal is open', async () => {
+  component = mount(TerminalView, { target: document.body });
+  await flush();
+  document
+    .querySelector<HTMLButtonElement>('[aria-label="Close Terminal 1"]')!
+    .click();
+  await flush();
+  expect(tools().map((b) => b.disabled)).toEqual([true, true, false, false]);
+});
+it('lists only the saved launches under + Launch', async () => {
+  mockIPC((command) => {
+    commands.push(command);
+    if (command === 'launch_list')
+      return {
+        folder: '/home/me/.config/wyss-console/launch',
+        launches: [
+          {
+            id: 'estudio',
+            name: 'Estudio',
+            directory: '/home/me/UTN',
+            kind: 'commands',
+            commands: ['ls'],
+          },
+        ],
+        refused: [],
+      };
+    if (command === 'native_profiles') return [];
+    return command === 'terminal_read_output'
+      ? new Promise(() => undefined)
+      : info;
+  });
+  component = mount(TerminalView, { target: document.body });
+  await flush();
+  tools()[3].click();
+  await flush();
+  const items = [...document.querySelectorAll('.launch-panel .launch-item')];
+  expect(
+    items.map((b) => b.querySelector('.launch-name')?.textContent),
+  ).toEqual(['Estudio']);
+  const panel = document.querySelector('.launch-panel')!.textContent ?? '';
+  expect(panel).not.toContain('New terminal');
+  expect(panel).not.toContain('Start agent');
+});
+it('opens a terminal with Ctrl+Shift+T while tabs are open', async () => {
+  component = mount(TerminalView, { target: document.body });
+  await flush();
+  newTerminal().click();
+  await flush();
+  expect(document.querySelectorAll('[role=tab]')).toHaveLength(2);
+});

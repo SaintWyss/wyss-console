@@ -237,6 +237,10 @@ pub async fn terminal_git_status(
         };
         let mut reply = match wyss_console::git_status::status(&dir) {
             Ok(status) => serde_json::to_value(status).unwrap_or(json!({"kind": "unknown"})),
+            // A git that ran past its limit is said, so the window waits longer to ask again.
+            Err(wyss_console::git_status::GitError::Timeout) => {
+                json!({"kind": "unknown", "slow": true})
+            }
             Err(_) => json!({"kind": "unknown"}),
         };
         reply["dir"] = json!(dir.to_string_lossy());

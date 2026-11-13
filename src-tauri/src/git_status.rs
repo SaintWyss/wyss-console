@@ -4,8 +4,11 @@
 //!
 //! `git status` is run so that it cannot write or wait: `GIT_OPTIONAL_LOCKS=0` and
 //! `--no-optional-locks` (no `index.lock`, no index refresh written back), no fsmonitor daemon or
-//! hook (`core.fsmonitor=false`, `core.hooksPath=/dev/null`), no pager, no prompt, stdin closed,
-//! and a time limit after which the process is killed.
+//! hook (`core.fsmonitor=false`, `core.hooksPath=/dev/null`), no pager, no prompt, no lazy
+//! fetch, submodules not entered, stdin closed, and a time limit after which its whole process
+//! group is killed. A repository whose own configuration names a content filter is not read.
+//! These close the known ways for a folder to make `git status` run its commands; a hostile
+//! `.git/config` is still git's to interpret, as it is for a shell prompt that shows git.
 use serde::Serialize;
 use std::{
     io::Read,
@@ -44,6 +47,8 @@ pub enum GitError {
     Timeout,
     /// It failed for another reason (corrupt repository, permissions).
     Failed,
+    /// The repository's own configuration names a content filter: status is not run.
+    Refused,
 }
 
 pub fn status(dir: &Path) -> Result<GitStatus, GitError> {
@@ -56,9 +61,17 @@ pub fn status_with(
     limit: Duration,
     env: &[(&str, &str)],
 ) -> Result<GitStatus, GitError> {
-    if !dir.is_absolute() || !dir.is_dir() {
-        return Err(GitError::Failed);
-    }
+    status_inner(dir, limit, env, true)
+}
+
+/// Every run of git here: the same guards, its own process group, killed whole at the limit.
+fn run(
+    dir: &Path,
+    args: &[&str],
+    limit: Duration,
+    env: &[(&str, &str)],
+) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), GitError> {
+    use std::os::unix::process::CommandExt;
     let mut command = Command::new("git");
     command
         .arg("--no-pager")
@@ -66,25 +79,25 @@ pub fn status_with(
         .args(["-c", "core.fsmonitor=false"])
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(["-c", "color.status=false"])
-        .args([
-            "status",
-            "--porcelain=v2",
-            "--branch",
-            "--untracked-files=normal",
-        ])
+        .args(args)
         .current_dir(dir)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
+        // A partial clone would otherwise fetch (and write) missing objects.
+        .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_PAGER", "cat")
         .env("PAGER", "cat")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // Its own group, so that what git starts is killed with it.
+        .process_group(0);
     for (key, value) in env {
         command.env(key, value);
     }
     let mut child = command.spawn().map_err(|_| GitError::Unavailable)?;
+    let group = nix::unistd::Pid::from_raw(child.id() as i32);
     let mut stdout = child.stdout.take().ok_or(GitError::Failed)?;
     let mut stderr = child.stderr.take().ok_or(GitError::Failed)?;
     let out = std::thread::spawn(move || {
@@ -102,25 +115,94 @@ pub fn status_with(
         let _ = std::io::copy(&mut stderr, &mut std::io::sink());
         bytes
     });
+    let kill = |child: &mut std::process::Child| {
+        let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
+        let _ = child.wait();
+    };
     let started = Instant::now();
     let exit = loop {
         match child.try_wait() {
             Ok(Some(exit)) => break exit,
             Ok(None) if started.elapsed() >= limit => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill(&mut child);
+                // The whole group is gone, so the pipes close and the readers end.
+                let _ = out.join();
+                let _ = err.join();
                 return Err(GitError::Timeout);
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill(&mut child);
+                let _ = out.join();
+                let _ = err.join();
                 return Err(GitError::Failed);
             }
         }
     };
+    // Anything git left running in its group goes too, before the pipes are read to the end.
+    let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
     let out = out.join().map_err(|_| GitError::Failed)?;
     let err = err.join().map_err(|_| GitError::Failed)?;
+    Ok((exit, out, err))
+}
+
+/// Whether the repository (not the owner's own configuration) names a content filter: `git
+/// status` runs a `clean` filter on a file whose stat changed, so a folder that brings its own
+/// `.git/config` would run its command. The owner's global filters (Git LFS) are kept.
+pub fn repository_filters(listing: &[u8]) -> bool {
+    String::from_utf8_lossy(listing).lines().any(|line| {
+        let scope = line.split('\t').next().unwrap_or("");
+        !matches!(scope, "global" | "system")
+    })
+}
+
+fn status_inner(
+    dir: &Path,
+    limit: Duration,
+    env: &[(&str, &str)],
+    check_filters: bool,
+) -> Result<GitStatus, GitError> {
+    if !dir.is_absolute() || !dir.is_dir() {
+        return Err(GitError::Failed);
+    }
+    let started = Instant::now();
+    if check_filters {
+        let (exit, out, err) = run(
+            dir,
+            &[
+                "config",
+                "--show-scope",
+                "--name-only",
+                "--get-regexp",
+                r"^filter\..*\.(clean|smudge|process)$",
+            ],
+            limit,
+            env,
+        )?;
+        if String::from_utf8_lossy(&err).contains("not a git repository") {
+            return Ok(GitStatus::NoRepo);
+        }
+        // Exit 1: no such key, nothing to refuse. Anything else is read as it is.
+        if exit.success() && repository_filters(&out) {
+            return Err(GitError::Refused);
+        }
+        if !exit.success() && exit.code() != Some(1) {
+            return Err(GitError::Failed);
+        }
+    }
+    let (exit, out, err) = run(
+        dir,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=normal",
+            // A submodule is a repository of its own, with its own configuration.
+            "--ignore-submodules=dirty",
+        ],
+        limit.saturating_sub(started.elapsed()),
+        env,
+    )?;
     if !exit.success() {
         return if String::from_utf8_lossy(&err).contains("not a git repository") {
             Ok(GitStatus::NoRepo)
@@ -292,6 +374,64 @@ mod tests {
     }
 
     #[test]
+    fn a_clean_filter_set_in_the_repository_is_never_run() {
+        let (root, _) = stale_index("filter");
+        let marker = root.0.join("ran");
+        git(
+            &root.0,
+            &[
+                "config",
+                "filter.x.clean",
+                &format!("touch {} && cat", marker.display()),
+            ],
+        );
+        std::fs::write(root.0.join(".gitattributes"), "*.txt filter=x\n").unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::write(root.0.join("same.txt"), "same\n").unwrap();
+        let _ = std::fs::remove_file(&marker);
+        assert!(matches!(
+            status_with(&root.0, LIMIT, ENV),
+            Err(GitError::Refused)
+        ));
+        assert!(!marker.exists(), "the repository's filter ran");
+    }
+
+    #[test]
+    fn a_git_that_runs_past_the_limit_is_killed_with_its_children() {
+        let root = temp("slow");
+        let bin = root.0.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let pidfile = root.0.join("child.pid");
+        let fake = bin.join("git");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nsleep 30 &\necho $! > '{}'\nsleep 30\n",
+                pidfile.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let started = Instant::now();
+        let got = status_inner(
+            &root.0,
+            Duration::from_millis(300),
+            &[("PATH", path.as_str())],
+            false,
+        );
+        assert_eq!(got, Err(GitError::Timeout));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let child = std::fs::read_to_string(&pidfile).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !Path::new(&format!("/proc/{}", child.trim())).exists(),
+            "the grandchild outlived the limit"
+        );
+    }
+
+    #[test]
     fn a_branch_without_upstream_has_no_ahead_count() {
         let root = temp("local");
         git(&root.0, &["init", "-q", "-b", "solo"]);
@@ -324,6 +464,19 @@ mod tests {
             status(Path::new("/nonexistent/wyss/git/status")),
             Err(GitError::Failed)
         );
+    }
+
+    #[test]
+    fn filters_of_the_repository_are_refused_and_the_owners_own_are_kept() {
+        assert!(repository_filters(b"local\tfilter.x.clean\n"));
+        assert!(repository_filters(
+            b"global\tfilter.lfs.clean\nworktree\tfilter.y.process\n"
+        ));
+        assert!(repository_filters(b"command\tfilter.z.smudge\n"));
+        assert!(!repository_filters(
+            b"global\tfilter.lfs.clean\nsystem\tfilter.lfs.process\n"
+        ));
+        assert!(!repository_filters(b""));
     }
 
     #[test]

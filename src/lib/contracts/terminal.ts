@@ -339,7 +339,12 @@ export function parseHostLifecycle(value: unknown): HostLifecycle {
 
 /** The git state of a session's folder (session bar). `unknown`: the folder or git could not be read. */
 export type SessionGit = (
-  | { kind: 'unknown'; dir: string | null }
+  | {
+      kind: 'unknown';
+      dir: string | null;
+      /** git ran past its limit in this folder. */
+      slow?: boolean;
+    }
   | { kind: 'no_repo'; dir: string }
   | {
       kind: 'repo';
@@ -402,5 +407,7 @@ function read(v: Record<string, unknown>, dir: string | null): SessionGit {
       truncated: v.truncated,
     };
   }
-  return { kind: 'unknown', dir };
+  return v.slow === true
+    ? { kind: 'unknown', dir, slow: true }
+    : { kind: 'unknown', dir };
 }

@@ -720,3 +720,29 @@ it('names the session of an approval that has ended', async () => {
   expect(row.querySelector('[title]')?.getAttribute('title')).toBe(S2);
   expect(ipc.count('managed_sessions_page')).toBe(0);
 });
+
+it('Activity shows Approvals over Events, and reads neither before it is opened', async () => {
+  const ipc = desktop();
+  component = mount(App, { target: document.body });
+  await flush();
+  expect(ipc.count('managed_approvals')).toBe(0);
+  expect(ipc.count('managed_events')).toBe(0);
+  await click(nav('Activity'));
+  expect(approvalsView().hidden).toBe(false);
+  expect(document.querySelector<HTMLElement>('.events-feature')!.hidden).toBe(
+    false,
+  );
+  expect(document.querySelector('.context-title')?.textContent).toBe(
+    'Activity',
+  );
+  expect(ipc.count('managed_approvals')).toBe(1);
+  expect(ipc.count('managed_events')).toBeGreaterThan(0);
+  // Activity is lit on the rail, not More.
+  expect(nav('Activity').getAttribute('aria-current')).toBe('page');
+  // Leaving it hides both again.
+  await click(nav('Console'));
+  expect(approvalsView().hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>('.events-feature')!.hidden).toBe(
+    true,
+  );
+});

@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import Sidebar from '../src/lib/shell/Sidebar.svelte';
 import {
   NAV_ITEMS,
@@ -74,7 +74,7 @@ it('offers seven entries on the rail, and every other view under More', () => {
   expect(railOf('activity')).toBe('activity');
 });
 
-it('names every rail icon for screen readers and marks only the open view', () => {
+it('names every rail icon for screen readers and marks only the open view', async () => {
   component = mount(Sidebar, {
     target: document.body,
     props: {
@@ -102,9 +102,17 @@ it('names every rail icon for screen readers and marks only the open view', () =
   // More opens its menu and closes it.
   const menu = document.querySelector<HTMLElement>('.rail-menu')!;
   expect(menu.hidden).toBe(true);
-  document.querySelector<HTMLButtonElement>('.rail-more')!.click();
+  const more = document.querySelector<HTMLButtonElement>('.rail-more')!;
+  expect(more.getAttribute('aria-controls')).toBe(menu.id);
+  // A disclosure, not an ARIA menu: plain buttons in the tab order.
+  expect(menu.getAttribute('role')).toBeNull();
+  expect(menu.querySelector('[role="menuitem"]')).toBeNull();
+  more.click();
   flushSync();
+  await tick();
   expect(menu.hidden).toBe(false);
+  expect(more.getAttribute('aria-expanded')).toBe('true');
+  expect(document.activeElement).toBe(menu.querySelector('button'));
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   flushSync();
   expect(menu.hidden).toBe(true);

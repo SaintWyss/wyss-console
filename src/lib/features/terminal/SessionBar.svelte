@@ -13,6 +13,7 @@
     read,
     profiles: loadProfiles,
     every = 5000,
+    slowEvery = 60000,
   }: {
     /** The focused terminal, or none. */
     session: TerminalSession | undefined;
@@ -22,6 +23,8 @@
     profiles: () => Promise<Profile[]>;
     /** How often the git state is read again while the Console is shown. */
     every?: number;
+    /** After git ran past its limit, how long until it is asked again. */
+    slowEvery?: number;
   } = $props();
 
   let git = $state<SessionGit | null>(null);
@@ -29,16 +32,22 @@
   const terminal = $derived(session?.view.info?.terminal_id);
   let asked: TerminalId | undefined;
   let busy = false;
+  /** Until when this folder is not asked again: git took too long there. */
+  let quietUntil = 0;
 
   async function refresh() {
     const id = terminal;
-    if (!id || busy || !visible) return;
+    if (!id || busy || !visible || Date.now() < quietUntil) return;
     busy = true;
     asked = id;
     try {
       const answer = await read(id);
       // The focus moved while git ran: this answer is about another terminal.
-      if (asked === id && terminal === id) git = answer;
+      if (asked === id && terminal === id) {
+        git = answer;
+        quietUntil =
+          answer.kind === 'unknown' && answer.slow ? Date.now() + slowEvery : 0;
+      }
     } catch {
       if (terminal === id) git = { kind: 'unknown', dir: null };
     } finally {
@@ -50,6 +59,7 @@
     // A new terminal in focus starts from nothing, so no other folder's state shows on it.
     void terminal;
     git = null;
+    quietUntil = 0;
     void refresh();
   });
   $effect(() => {

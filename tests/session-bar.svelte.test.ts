@@ -208,3 +208,27 @@ it('asks for the focused terminal only, and drops an answer that arrives after t
     '/home/me/b',
   );
 });
+
+it('waits longer before asking again where git ran past its limit', async () => {
+  vi.useFakeTimers();
+  const read = vi.fn(() =>
+    Promise.resolve<SessionGit>({ kind: 'unknown', dir: '/big', slow: true }),
+  );
+  component = mount(SessionBar, {
+    target: document.body,
+    props: {
+      session: session('t-1'),
+      read,
+      profiles: () => Promise.resolve([]),
+      every: 100,
+      slowEvery: 1000,
+    },
+  });
+  flushSync();
+  await vi.advanceTimersByTimeAsync(10);
+  expect(read).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(read).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(700);
+  expect(read).toHaveBeenCalledTimes(2);
+});
