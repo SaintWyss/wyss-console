@@ -306,6 +306,8 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_environment,
             arsenal_environment_options,
             arsenal_environment_write,
+            arsenal_roles,
+            arsenal_role_write,
             arsenal_category_write,
             arsenal_terminal_plan,
             arsenal_terminal_bind,
@@ -833,6 +835,23 @@ fn arsenal_environment_write(
     let directory = super::environment::directory().ok_or(ArsenalError::from(Error::Storage))?;
     super::environment::set(&directory, &selection, &environment)
         .map_err(|_| ArsenalError::from(Error::Invalid))
+}
+
+/// The roles of Workspace and the role of each launch. Local to this computer.
+#[tauri::command]
+fn arsenal_roles() -> Result<super::roles::Roles, ArsenalError> {
+    let directory = super::environment::directory().ok_or(ArsenalError::from(Error::Storage))?;
+    Ok(super::roles::read(&directory))
+}
+
+/// Makes or deletes a role of the owner's, or sets, moves or forgets a launch's role.
+#[tauri::command]
+fn arsenal_role_write(change: super::roles::Change) -> Result<super::roles::Roles, ArsenalError> {
+    let directory = super::environment::directory().ok_or(ArsenalError::from(Error::Storage))?;
+    super::roles::write(&directory, change).map_err(|refusal| match refusal {
+        super::roles::Refusal::Invalid(_) => ArsenalError::from(Error::Invalid),
+        super::roles::Refusal::Io => ArsenalError::from(Error::Storage),
+    })
 }
 
 /// The categories the owner made. Local to this computer, like the corrections.

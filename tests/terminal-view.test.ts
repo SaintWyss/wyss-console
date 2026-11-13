@@ -259,6 +259,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-arsenal-environment',
     'allow-arsenal-environment-options',
     'allow-arsenal-environment-write',
+    'allow-arsenal-roles',
+    'allow-arsenal-role-write',
     'allow-arsenal-terminal-plan',
     'allow-arsenal-terminal-bind',
     'allow-arsenal-terminal-bindings',

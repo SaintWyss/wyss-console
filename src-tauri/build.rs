@@ -155,6 +155,8 @@ fn main() {
             "arsenal_environment",
             "arsenal_environment_options",
             "arsenal_environment_write",
+            "arsenal_roles",
+            "arsenal_role_write",
             "arsenal_terminal_plan",
             "arsenal_terminal_bind",
             "arsenal_terminal_bindings",

@@ -596,6 +596,9 @@ mod tests {
             "allow-arsenal-environment",
             "allow-arsenal-environment-options",
             "allow-arsenal-environment-write",
+            // Workspace roles (redesign stage 2): roles.json beside environment.json.
+            "allow-arsenal-roles",
+            "allow-arsenal-role-write",
             "allow-arsenal-terminal-plan",
             "allow-arsenal-terminal-bind",
             "allow-arsenal-terminal-bindings",
