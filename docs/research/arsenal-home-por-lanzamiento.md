@@ -13,25 +13,25 @@ Cada lanzamiento tiene una carpeta propia (`CLAUDE_CONFIG_DIR` para Claude; `COD
 
 ## Claude Code 2.1.323
 
-| Fuente | ¿Se aísla? | Cómo |
-|---|---|---|
-| Login | ✅ | symlink a `~/.claude/.credentials.json` |
-| CLAUDE.md / `rules/` globales | ✅ | no se ponen en el home. Sobre el home global, `claudeMdExcludes` (vía `--settings`) saca ~18,6k tokens |
-| Skills del usuario | ✅ | link de directorio solo a la elegida |
-| Skills incluidas (17) y `anthropic-skills:*` de la cuenta (13) | ✅ | `skillOverrides: {"<nombre>": "off"}` |
-| Plugins sincronizados de la cuenta (design, engineering) y sus MCP | ✅ | **se descargan solos al home desde la 2ª corrida**; `enabledPlugins: {"design@synced": false, "engineering@synced": false}` |
-| MCP | ✅ | `--strict-mcp-config --mcp-config <solo los elegidos>` |
-| Hooks | ✅ | el `settings.json` del home trae solo los elegidos |
-| Memoria automática | ✅ | `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (si no, se crea dentro del home) |
-| Plugins builtin `cc-plugin-*` | ❌ siempre cargan | peso bajo |
-| CLAUDE.md, skills y hooks **del repo** | ❌ siempre cargan (correcto) | mostrarlos como "del repo" |
-| Retomar sesión | ✅ desde el mismo home | otro home: `No conversation found` |
-| Dos terminales a la vez | ✅ | homes distintos no se pisan |
+| Fuente                                                             | ¿Se aísla?                   | Cómo                                                                                                                        |
+| ------------------------------------------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Login                                                              | ✅                           | symlink a `~/.claude/.credentials.json`                                                                                     |
+| CLAUDE.md / `rules/` globales                                      | ✅                           | no se ponen en el home. Sobre el home global, `claudeMdExcludes` (vía `--settings`) saca ~18,6k tokens                      |
+| Skills del usuario                                                 | ✅                           | link de directorio solo a la elegida                                                                                        |
+| Skills incluidas (17) y `anthropic-skills:*` de la cuenta (13)     | ✅                           | `skillOverrides: {"<nombre>": "off"}`                                                                                       |
+| Plugins sincronizados de la cuenta (design, engineering) y sus MCP | ✅                           | **se descargan solos al home desde la 2ª corrida**; `enabledPlugins: {"design@synced": false, "engineering@synced": false}` |
+| MCP                                                                | ✅                           | `--strict-mcp-config --mcp-config <solo los elegidos>`                                                                      |
+| Hooks                                                              | ✅                           | el `settings.json` del home trae solo los elegidos                                                                          |
+| Memoria automática                                                 | ✅                           | `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (si no, se crea dentro del home)                                                        |
+| Plugins builtin `cc-plugin-*`                                      | ❌ siempre cargan            | peso bajo                                                                                                                   |
+| CLAUDE.md, skills y hooks **del repo**                             | ❌ siempre cargan (correcto) | mostrarlos como "del repo"                                                                                                  |
+| Retomar sesión                                                     | ✅ desde el mismo home       | otro home: `No conversation found`                                                                                          |
+| Dos terminales a la vez                                            | ✅                           | homes distintos no se pisan                                                                                                 |
 
-| Medición | Home global | Home mínimo |
-|---|---|---|
-| Contexto inicial ("OK") | 63.042 tok · $0,435 · 12,1 s | **12.596 tok · $0,017** · 6,4 s |
-| Tarea de 3 comandos Bash | 127.686 tok · $0,450 · 16,9 s | **26.365 tok · $0,036 · 6,9 s** |
+| Medición                          | Home global                   | Home mínimo                     |
+| --------------------------------- | ----------------------------- | ------------------------------- |
+| Contexto inicial ("OK")           | 63.042 tok · $0,435 · 12,1 s  | **12.596 tok · $0,017** · 6,4 s |
+| Tarea de 3 comandos Bash          | 127.686 tok · $0,450 · 16,9 s | **26.365 tok · $0,036 · 6,9 s** |
 | Tarea `git clean -f` (2 comandos) | 191.473 tok · $0,468 · 38,0 s | **38.704 tok · $0,035 · 9,3 s** |
 
 Cada número sale de una sola corrida. El ahorro sigue la misma dirección en las tres tareas, pero no es una medición estadística.
@@ -44,28 +44,28 @@ En la tarea de 3 comandos, los hooks globales sumaron 5 eventos SessionStart, 5 
 
 ## Codex 0.167.0
 
-| Fuente | ¿Se aísla? | Cómo |
-|---|---|---|
-| Login | ✅ | symlink a `~/.codex/auth.json` |
-| AGENTS.md global | ✅ | no se pone en el home |
-| `~/.agents/skills` (178) | ✅ | con solo `CODEX_HOME` carga las 182. **Con `HOME` real**, un `[[skills.config]] enabled = false` por cada `SKILL.md` (ruta del link y ruta resuelta) deja solo la elegida: 2/2 corridas, 13.562 tokens. Aislar `HOME` también funciona, pero rompe git (sin identidad), `gh` (sin sesión) y cargo/rustup (sin toolchain) si no se enlazan los dotfiles y se exportan `RUSTUP_HOME`/`CARGO_HOME`: **se descarta** |
-| Skills incluidas `.system` (5) | ✅ | `[[skills.config]] path = "<home>/skills/.system/<x>/SKILL.md"` · `enabled = false` |
-| Skill elegida | ✅ copiada | **un `SKILL.md` que es symlink no se carga**; copiado sí |
-| Plugins de la cuenta (figma, notion, drive…) y el MCP `codex_apps` | ✅ **solo con features** | `[features] apps = false · plugins = false · remote_plugin = false · plugin_discovery_prefetch = false`: 4/4 corridas limpias. Con solo `[plugins."x@openai-curated-remote"] enabled = false` cargaban en 2 de 4 corridas (14k vs 18–42k tokens) |
-| MCP | ✅ | solo los `[mcp_servers.*]` del config del home (4/4: solo `context7`) |
-| Hooks del home | ✅ con confianza | sin confianza no corren (confirmado). Con `--dangerously-bypass-hook-trust` corre el hook del home y **no** el de un repo sin confianza. El `trusted_hash` no coincide con sha256 del comando ni del handler: hay que obtenerlo de Codex. Decisión del dueño (2026-11-13): registrar confianza entra en H |
-| AGENTS.md y skills **del repo** | ❌ siempre cargan (correcto) | |
-| Config administrada `/etc/codex` | ❌ siempre carga | hoy solo `hooks = true` |
-| Retomar sesión | ✅ desde el mismo home | home global: `no rollout found` |
-| Dos terminales a la vez | ✅ | 14.578 y 13.900 tokens, sin cruce |
-| Helpers PATH | ⚠️ | Codex no los crea si el home está bajo `/tmp`: el home real va en `~/.local/state/…` |
+| Fuente                                                             | ¿Se aísla?                   | Cómo                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login                                                              | ✅                           | symlink a `~/.codex/auth.json`                                                                                                                                                                                                                                                                                                                                                                                   |
+| AGENTS.md global                                                   | ✅                           | no se pone en el home                                                                                                                                                                                                                                                                                                                                                                                            |
+| `~/.agents/skills` (178)                                           | ✅                           | con solo `CODEX_HOME` carga las 182. **Con `HOME` real**, un `[[skills.config]] enabled = false` por cada `SKILL.md` (ruta del link y ruta resuelta) deja solo la elegida: 2/2 corridas, 13.562 tokens. Aislar `HOME` también funciona, pero rompe git (sin identidad), `gh` (sin sesión) y cargo/rustup (sin toolchain) si no se enlazan los dotfiles y se exportan `RUSTUP_HOME`/`CARGO_HOME`: **se descarta** |
+| Skills incluidas `.system` (5)                                     | ✅                           | `[[skills.config]] path = "<home>/skills/.system/<x>/SKILL.md"` · `enabled = false`                                                                                                                                                                                                                                                                                                                              |
+| Skill elegida                                                      | ✅ copiada                   | **un `SKILL.md` que es symlink no se carga**; copiado sí                                                                                                                                                                                                                                                                                                                                                         |
+| Plugins de la cuenta (figma, notion, drive…) y el MCP `codex_apps` | ✅ **solo con features**     | `[features] apps = false · plugins = false · remote_plugin = false · plugin_discovery_prefetch = false`: 4/4 corridas limpias. Con solo `[plugins."x@openai-curated-remote"] enabled = false` cargaban en 2 de 4 corridas (14k vs 18–42k tokens)                                                                                                                                                                 |
+| MCP                                                                | ✅                           | solo los `[mcp_servers.*]` del config del home (4/4: solo `context7`)                                                                                                                                                                                                                                                                                                                                            |
+| Hooks del home                                                     | ✅ con confianza             | sin confianza no corren (confirmado). Con `--dangerously-bypass-hook-trust` corre el hook del home y **no** el de un repo sin confianza. El `trusted_hash` no coincide con sha256 del comando ni del handler: hay que obtenerlo de Codex. Decisión del dueño (2026-11-13): registrar confianza entra en H                                                                                                        |
+| AGENTS.md y skills **del repo**                                    | ❌ siempre cargan (correcto) |                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Config administrada `/etc/codex`                                   | ❌ siempre carga             | hoy solo `hooks = true`                                                                                                                                                                                                                                                                                                                                                                                          |
+| Retomar sesión                                                     | ✅ desde el mismo home       | home global: `no rollout found`                                                                                                                                                                                                                                                                                                                                                                                  |
+| Dos terminales a la vez                                            | ✅                           | 14.578 y 13.900 tokens, sin cruce                                                                                                                                                                                                                                                                                                                                                                                |
+| Helpers PATH                                                       | ⚠️                           | Codex no los crea si el home está bajo `/tmp`: el home real va en `~/.local/state/…`                                                                                                                                                                                                                                                                                                                             |
 
-| Medición | Input tokens |
-|---|---|
-| Home global | 42.648 |
-| Solo `CODEX_HOME` | 23.874 |
-| `CODEX_HOME` + `HOME` | 18.697 |
-| + `.system` y features de apps/plugins apagados | **13.720** |
+| Medición                                        | Input tokens |
+| ----------------------------------------------- | ------------ |
+| Home global                                     | 42.648       |
+| Solo `CODEX_HOME`                               | 23.874       |
+| `CODEX_HOME` + `HOME`                           | 18.697       |
+| + `.system` y features de apps/plugins apagados | **13.720**   |
 
 ## Credenciales: renovación sin probar
 
@@ -77,15 +77,15 @@ Los dos DENY "Malformed model-preflight bootstrap" fueron **correctos**: el agen
 
 ## Condiciones de aceptación
 
-| # | Condición | Claude | Codex |
-|---|---|---|---|
-| 1 | Login sin duplicar ni volver a iniciar sesión | PASS | PASS |
-| 2 | El mínimo excluye todo lo no elegido | PASS (salvo `cc-plugin-*`) | PASS con features apagados |
-| 3 | Las fuentes del repo se identifican aparte | PASS | PASS |
-| 4 | Costo real de tarea, reintentos y tiempo | PASS en tokens y tiempo; reintentos: 0 rechazos medibles con los hooks actuales | solo contexto inicial |
-| 5 | Concurrencia y retomar sin tocar el global | PASS | PASS |
-| — | Renovación de credencial | PENDIENTE | PENDIENTE |
-| — | Hooks por home | PASS | PASS con confianza (mecanismo del hash pendiente) |
+| #   | Condición                                     | Claude                                                                          | Codex                                             |
+| --- | --------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 1   | Login sin duplicar ni volver a iniciar sesión | PASS                                                                            | PASS                                              |
+| 2   | El mínimo excluye todo lo no elegido          | PASS (salvo `cc-plugin-*`)                                                      | PASS con features apagados                        |
+| 3   | Las fuentes del repo se identifican aparte    | PASS                                                                            | PASS                                              |
+| 4   | Costo real de tarea, reintentos y tiempo      | PASS en tokens y tiempo; reintentos: 0 rechazos medibles con los hooks actuales | solo contexto inicial                             |
+| 5   | Concurrencia y retomar sin tocar el global    | PASS                                                                            | PASS                                              |
+| —   | Renovación de credencial                      | PENDIENTE                                                                       | PENDIENTE                                         |
+| —   | Hooks por home                                | PASS                                                                            | PASS con confianza (mecanismo del hash pendiente) |
 
 ## Reglas para implementar H
 

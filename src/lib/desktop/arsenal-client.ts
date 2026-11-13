@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { CustomCategory } from '../features/arsenal/presets';
+import {
+  parseOptions as parseEnvironmentOptions,
+  parseSpec as parseEnvironment,
+  type HomeSpec,
+} from '../features/arsenal/environment';
 import type { Section } from '../features/arsenal/groups';
 import {
   parseBinding,
@@ -150,6 +155,16 @@ export const arsenalClient = {
         throw new Error('group');
       return Object.fromEntries(entries) as Record<string, string>;
     }),
+  /** The launch environment a Claude Code preset chose (H1/H2). */
+  environment: (selection: string) =>
+    answer<HomeSpec>('arsenal_environment', parseEnvironment, { selection }),
+  /** What a launch environment can choose from, read from the owner's ~/.claude now. */
+  environmentOptions: () =>
+    answer('arsenal_environment_options', parseEnvironmentOptions),
+  writeEnvironment: (selection: string, environment: HomeSpec) =>
+    call('arsenal_environment_write', { selection, environment }).then(
+      () => undefined,
+    ),
   /** The categories the owner made, kept on this computer. */
   categories: () =>
     answer<CustomCategory[]>('arsenal_categories', parseCategories),

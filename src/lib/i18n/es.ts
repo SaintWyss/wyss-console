@@ -205,6 +205,7 @@ export const ES: Readonly<Record<string, string>> = {
   'Reading preferences': 'Leyendo preferencias',
   'Preferences unavailable': 'Preferencias no disponibles',
   'Saving…': 'Guardando…',
+  'Loading…': 'Cargando…',
   'Saved on this computer': 'Guardado en esta computadora',
   'Preferences could not be read, so the defaults are shown. Nothing is saved until they can be.':
     'No se pudieron leer las preferencias, así que se muestran los valores por defecto. No se guarda nada hasta que se puedan leer.',
@@ -2312,42 +2313,53 @@ export const ES: Readonly<Record<string, string>> = {
   Unsupported: 'No compatible',
   'Models and rules': 'Modelos y reglas',
   'Fixing bugs': 'Depuración',
-  "Integrations":
-    "Integraciones",
-  "Automations":
-    "Automatizaciones",
-  "Rules the agent always follows: standing instructions read when every session starts.":
-    "Reglas que el agente cumple siempre: instrucciones fijas que lee al arrancar cada sesión.",
-  "Model profiles (astra, luna, sol) that choose which model and effort a task runs with.":
-    "Perfiles de modelo (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.",
-  "MCP servers: connections to outside tools such as Notion, a browser or library docs.":
-    "Servidores MCP: conexiones a herramientas de afuera como Notion, un navegador o la documentación de una librería.",
-  "Hooks that run by themselves at moments of the session and are not about security.":
-    "Hooks que corren solos en momentos de la sesión y no son de seguridad.",
-  "How it works":
-    "Cómo trabaja",
-  "Before building":
-    "Antes de construir",
-  "After":
-    "Después",
-  "Environment":
-    "Entorno",
-  "Category name":
-    "Nombre de la categoría",
-  "Save":
-    "Guardar",
-  "Delete {name}? Its {n} capabilities go back to their default category.":
-    "¿Borrar {name}? Sus {n} capacidades vuelven a su categoría automática.",
-  "Not selectable yet":
-    "Todavía no se elige",
-  "Nothing here yet.":
-    "Todavía no hay nada acá.",
-  "New category":
-    "Nueva categoría",
-  "The category could not be deleted. Try again.":
-    "No se pudo borrar la categoría. Probá de nuevo.",
-  "That name cannot be used: it is empty, longer than 40 characters, or already in this section.":
-    "Ese nombre no sirve: está vacío, tiene más de 40 caracteres o ya existe en esta sección.",
+  Integrations: 'Integraciones',
+  Automations: 'Automatizaciones',
+  'Rules the agent always follows: standing instructions read when every session starts.':
+    'Reglas que el agente cumple siempre: instrucciones fijas que lee al arrancar cada sesión.',
+  'Model profiles (astra, luna, sol) that choose which model and effort a task runs with.':
+    'Perfiles de modelo (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.',
+  'MCP servers: connections to outside tools such as Notion, a browser or library docs.':
+    'Servidores MCP: conexiones a herramientas de afuera como Notion, un navegador o la documentación de una librería.',
+  'Hooks that run by themselves at moments of the session and are not about security.':
+    'Hooks que corren solos en momentos de la sesión y no son de seguridad.',
+  'How it works': 'Cómo trabaja',
+  'Before building': 'Antes de construir',
+  After: 'Después',
+  Environment: 'Entorno',
+  'Category name': 'Nombre de la categoría',
+  Save: 'Guardar',
+  'Delete {name}? Its {n} capabilities go back to their default category.':
+    '¿Borrar {name}? Sus {n} capacidades vuelven a su categoría automática.',
+  'Terminal environment': 'Entorno de la terminal',
+  'The launch environment could not be read.':
+    'No se pudo leer el entorno de la terminal.',
+  'The launch environment could not be saved.':
+    'No se pudo guardar el entorno de la terminal.',
+  'What this preset loads besides its skills. Anything unticked is not loaded in that terminal, and costs no context.':
+    'Lo que este preset carga además de sus skills. Lo que destildes no se carga en esa terminal y no gasta contexto.',
+  Instructions: 'Instrucciones',
+  'Auto memory': 'Memoria automática',
+  'No hooks in your settings.': 'No hay hooks en tu configuración.',
+  'All servers, plugins and claude.ai connectors included':
+    'Todos los servidores, incluidos los de plugins y conectores de claude.ai',
+  'No plugins enabled.': 'No hay plugins activados.',
+  'This terminal gets its own launch folder and signs in with your stored long-lived token. Your own ~/.claude is not changed.':
+    'Esta terminal arranca con su propia carpeta y entra con tu token de larga duración guardado. Tu ~/.claude no se toca.',
+  'This terminal uses your own configuration as it is.':
+    'Esta terminal usa tu configuración tal como está.',
+  "Always loaded: the project's own CLAUDE.md, skills and hooks, and Claude Code's built-in plugins.":
+    'Siempre carga: el CLAUDE.md, las skills y los hooks del proyecto, y los plugins incluidos en Claude Code.',
+  'No long-lived token is stored, so this terminal will not start. Run claude setup-token in your own terminal and store it with: secret-tool store --label "Claude Code token (Wyss Console)" service wyss-console kind claude-oauth-token':
+    'No hay un token de larga duración guardado, así que esta terminal no va a arrancar. Corré claude setup-token en tu propia terminal y guardalo con: secret-tool store --label "Claude Code token (Wyss Console)" service wyss-console kind claude-oauth-token',
+  'Save environment': 'Guardar entorno',
+  'Not selectable yet': 'Todavía no se elige',
+  'Nothing here yet.': 'Todavía no hay nada acá.',
+  'New category': 'Nueva categoría',
+  'The category could not be deleted. Try again.':
+    'No se pudo borrar la categoría. Probá de nuevo.',
+  'That name cannot be used: it is empty, longer than 40 characters, or already in this section.':
+    'Ese nombre no sirve: está vacío, tiene más de 40 caracteres o ya existe en esta sección.',
   'Rules the agent always follows, and the Codex model profiles (astra, luna, sol) that choose which model and effort a task runs with.':
     'Reglas que el agente cumple siempre, y los perfiles de modelo de Codex (astra, luna, sol) que eligen con qué modelo y esfuerzo corre una tarea.',
   'Checks for security problems: audits, threat reviews and guards against dangerous commands.':

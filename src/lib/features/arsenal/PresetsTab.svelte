@@ -9,6 +9,7 @@
   import { t } from '../../i18n/index.svelte';
   import { msg } from '../../i18n/msg';
   import { compatibilityMark } from './catalogue';
+  import EnvironmentPanel from './EnvironmentPanel.svelte';
   import type { ArsenalController, ArsenalState } from './controller';
   import {
     familyFor,
@@ -986,6 +987,10 @@
           },
         )}
       </p>
+    {/if}
+
+    {#if provider === 'claude_code' && draft.id !== null}
+      <EnvironmentPanel selection={draft.id} />
     {/if}
 
     <div class="composition-actions">
