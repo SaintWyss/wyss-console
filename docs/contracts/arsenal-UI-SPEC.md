@@ -244,7 +244,8 @@ Decisión del dueño, a partir de la investigación [`docs/research/arsenal-home
 - **Claude Code:** validado como primer provider. **Codex:** condicionado a cerrar los pendientes de la investigación (hooks por home y efecto de cambiar `HOME`).
 - **Criterio de aceptación:** una capacidad desmarcada no puede aparecer como aislada si el provider todavía la carga. Lo que no se puede aislar se muestra como "siempre carga": fuentes del repo, `cc-plugin-*`, `/etc/codex`.
 - **Controles obligatorios del modo:** ningún preset los desactiva. Los hooks se clasifican como opcionales u obligatorios antes de implementar H.
-- **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales, hooks por home en Codex, efecto de `HOME` en git/ssh/npm, y la decisión sobre `r3-gate`, que hoy no está registrado en el global.
+- **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales, hooks por home en Codex, efecto de `HOME` en git/ssh/npm.
+- **`r3-gate` queda apagado por decisión del dueño (2026-11-13).** No es un control obligatorio de ningún modo y Arsenal no lo ofrece por defecto.
 
 ## Fases de construcción
 

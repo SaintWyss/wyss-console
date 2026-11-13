@@ -40,7 +40,7 @@ Cada número sale de una sola corrida. El ahorro sigue la misma dirección en la
 
 En la tarea de 3 comandos, los hooks globales sumaron 5 eventos SessionStart, 5 reescrituras de comando de RTK (`rtk hook claude`), 2 inyecciones del gate de routing ("Routing gate ALLOW…", unos 600 caracteres cada una), 3 PostToolUse y 1 Stop: **11.528 caracteres de hooks en el transcript**. No hubo rechazos: el gate de routing deja pasar los comandos de riesgo bajo e inyecta texto.
 
-**`r3-gate` no está activo.** `~/.claude/hooks/r3-gate.py` existe, pero no figura en `~/.claude/settings.json`; existe además un respaldo `settings.json.bak-r3-off-20261010`. Por eso, en la prueba con hooks globales, `git clean -f` corrió sin pedir consentimiento. `invariantes.md` lo describe como activo. **Es un hallazgo para el dueño; esta investigación no lo cambia.** Consecuencia para Arsenal: hoy un preset mínimo no saca ninguna protección destructiva, porque el global tampoco la tiene.
+**`r3-gate` no está activo.** `~/.claude/hooks/r3-gate.py` existe, pero no figura en `~/.claude/settings.json`; existe además un respaldo `settings.json.bak-r3-off-20261010`. Por eso, en la prueba con hooks globales, `git clean -f` corrió sin pedir consentimiento. `invariantes.md` lo describe como activo. **El dueño confirmó el 2026-11-13 que queda apagado a propósito.** Consecuencia para Arsenal: hoy un preset mínimo no saca ninguna protección destructiva, porque el global tampoco la tiene.
 
 ## Codex 0.167.0
 
@@ -93,7 +93,7 @@ Los dos DENY "Malformed model-preflight bootstrap" fueron **correctos**: el agen
 2. En Codex, `HOME` también se aísla. No se probó cómo afecta a git, ssh y npm dentro de esa terminal: hay que probarlo antes de implementar.
 3. En Codex, las skills van copiadas, no enlazadas.
 4. El panel muestra "siempre carga" para: fuentes del repo, `cc-plugin-*`, `/etc/codex`.
-5. Los controles obligatorios del modo no se pueden desmarcar desde un preset. Hoy no hay ninguno activo en el global (ver `r3-gate`).
+5. Los controles obligatorios del modo no se pueden desmarcar desde un preset. `r3-gate` no es uno: está apagado por decisión del dueño.
 
 ## Cómo reproducir
 
