@@ -7,6 +7,8 @@ export interface HomeSpec {
   mcp: string[] | null;
   plugins_off: string[];
   memory: boolean;
+  agents: boolean;
+  account_skills_off: string[];
 }
 
 export interface HookOption {
@@ -21,6 +23,7 @@ export interface EnvironmentOptions {
   mcp: string[];
   plugins: string[];
   rules: string[];
+  account_skills: string[];
   instructions: boolean;
   token_stored: boolean;
 }
@@ -32,6 +35,8 @@ export const DEFAULT_SPEC: HomeSpec = {
   mcp: null,
   plugins_off: [],
   memory: true,
+  agents: true,
+  account_skills_off: [],
 };
 
 function record(value: unknown, what: string): Record<string, unknown> {
@@ -60,6 +65,8 @@ export function parseSpec(value: unknown): HomeSpec {
     mcp: v.mcp === null ? null : strings(v.mcp, 'mcp'),
     plugins_off: strings(v.plugins_off, 'plugins_off'),
     memory: flag(v.memory, 'memory'),
+    agents: flag(v.agents, 'agents'),
+    account_skills_off: strings(v.account_skills_off, 'account_skills_off'),
   };
 }
 
@@ -76,6 +83,7 @@ export function parseOptions(value: unknown): EnvironmentOptions {
     mcp: strings(v.mcp, 'mcp'),
     plugins: strings(v.plugins, 'plugins'),
     rules: strings(v.rules, 'rules'),
+    account_skills: strings(v.account_skills, 'account_skills'),
     instructions: flag(v.instructions, 'instructions'),
     token_stored: flag(v.token_stored, 'token_stored'),
   };
@@ -86,6 +94,8 @@ export function isDefault(spec: HomeSpec): boolean {
   return (
     spec.instructions &&
     spec.memory &&
+    spec.agents &&
+    spec.account_skills_off.length === 0 &&
     spec.mcp === null &&
     spec.rules_off.length === 0 &&
     spec.hooks_off.length === 0 &&

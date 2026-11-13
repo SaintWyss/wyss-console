@@ -13,6 +13,13 @@ describe('arsenal launch environment', () => {
     expect(isDefault(DEFAULT_SPEC)).toBe(true);
     expect(isDefault({ ...DEFAULT_SPEC, memory: false })).toBe(false);
     expect(isDefault({ ...DEFAULT_SPEC, mcp: [] })).toBe(false);
+    expect(isDefault({ ...DEFAULT_SPEC, agents: false })).toBe(false);
+    expect(
+      isDefault({
+        ...DEFAULT_SPEC,
+        account_skills_off: ['anthropic-skills:pdf'],
+      }),
+    ).toBe(false);
     expect(
       isDefault({ ...DEFAULT_SPEC, hooks_off: ['0123456789abcdef'] }),
     ).toBe(false);
@@ -53,6 +60,7 @@ describe('arsenal launch environment', () => {
       mcp: ['context7'],
       plugins: [],
       rules: ['ux.md'],
+      account_skills: ['anthropic-skills:pdf'],
       instructions: true,
       token_stored: false,
     });

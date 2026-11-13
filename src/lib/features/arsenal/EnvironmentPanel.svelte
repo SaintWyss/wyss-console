@@ -114,6 +114,36 @@
       >
     </fieldset>
     <fieldset>
+      <legend>{t('Agents and account skills')}</legend>
+      <label
+        ><input
+          type="checkbox"
+          checked={spec.agents}
+          onchange={(e) =>
+            (spec = { ...spec, agents: e.currentTarget.checked })}
+        />
+        {t('Your agents (~/.claude/agents, GSD included)')}</label
+      >
+      {#each options.account_skills as skill (skill)}
+        <label
+          ><input
+            type="checkbox"
+            checked={!spec.account_skills_off.includes(skill)}
+            onchange={(e) =>
+              (spec = {
+                ...spec,
+                account_skills_off: toggle(
+                  spec.account_skills_off,
+                  skill,
+                  !e.currentTarget.checked,
+                ),
+              })}
+          />
+          {skill}</label
+        >
+      {/each}
+    </fieldset>
+    <fieldset>
       <legend>{t('Hooks')}</legend>
       {#each options.hooks as hook (hook.key)}
         <label title={hook.command}

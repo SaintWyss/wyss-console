@@ -22,8 +22,7 @@ use super::store;
 
 /// Entries of `~/.claude` a launch home links as they are. Everything else stays out: the owner's
 /// sessions, history and caches belong to the owner's own folder, and the sign-in never moves.
-pub const LINKED: [&str; 10] = [
-    "agents",
+pub const LINKED: [&str; 9] = [
     "skills",
     "plugins",
     "output-styles",
@@ -37,6 +36,8 @@ pub const LINKED: [&str; 10] = [
 /// The instruction files a preset can keep or leave out as a whole.
 pub const INSTRUCTIONS: [&str; 2] = ["CLAUDE.md", "AGENTS.md"];
 const CREDENTIALS: &str = ".credentials.json";
+/// How Claude Code names a skill the account syncs from claude.ai.
+pub const ACCOUNT_PREFIX: &str = "anthropic-skills:";
 const MAX_SETTINGS: u64 = 4 * 1024 * 1024;
 pub const MAX_NAMES: usize = 512;
 /// Where the token is kept in the system key ring (`secret-tool`).
@@ -45,7 +46,7 @@ pub const TOKEN_ATTRIBUTES: [(&str, &str); 2] =
 
 /// What a preset changes in the launch environment. `None` keeps that part as the owner's own
 /// configuration has it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomeSpec {
     /// `CLAUDE.md` / `AGENTS.md` and `rules/`.
@@ -66,10 +67,33 @@ pub struct HomeSpec {
     pub plugins_off: Vec<String>,
     #[serde(default = "yes")]
     pub memory: bool,
+    /// The owner's `~/.claude/agents` (and the agents of packages linked there).
+    #[serde(default = "yes")]
+    pub agents: bool,
+    /// Skills the account syncs from claude.ai left out, by their loaded name
+    /// (`anthropic-skills:<name>`).
+    #[serde(default)]
+    pub account_skills_off: Vec<String>,
 }
 
 fn yes() -> bool {
     true
+}
+
+/// The owner's own configuration, unchanged: what a preset that chose nothing gets.
+impl Default for HomeSpec {
+    fn default() -> Self {
+        Self {
+            instructions: true,
+            rules_off: Vec::new(),
+            hooks_off: Vec::new(),
+            mcp: None,
+            plugins_off: Vec::new(),
+            memory: true,
+            agents: true,
+            account_skills_off: Vec::new(),
+        }
+    }
 }
 
 /// A plain file or plugin name: no path, no control characters.
@@ -91,8 +115,17 @@ impl HomeSpec {
     pub fn validate(&self) -> Result<(), &'static str> {
         let mcp = self.mcp.as_deref().unwrap_or(&[]);
         let unique = |list: &[String]| list.iter().collect::<BTreeSet<_>>().len() == list.len();
-        if self.rules_off.len() + self.hooks_off.len() + mcp.len() + self.plugins_off.len()
+        if self.rules_off.len()
+            + self.hooks_off.len()
+            + mcp.len()
+            + self.plugins_off.len()
+            + self.account_skills_off.len()
             > MAX_NAMES
+            || !self
+                .account_skills_off
+                .iter()
+                .all(|n| n.strip_prefix(ACCOUNT_PREFIX).is_some_and(name_ok))
+            || !unique(&self.account_skills_off)
             || !self.rules_off.iter().all(|n| name_ok(n))
             || !mcp.iter().all(|n| name_ok(n))
             || !self.plugins_off.iter().all(|n| name_ok(n))
@@ -109,11 +142,7 @@ impl HomeSpec {
 
     /// The preset changes nothing: the launch can use the owner's own folder.
     pub fn is_default(&self) -> bool {
-        self == &Self {
-            instructions: true,
-            memory: true,
-            ..Self::default()
-        }
+        self == &Self::default()
     }
 }
 
@@ -152,6 +181,19 @@ pub fn settings(owner: &Value, spec: &HomeSpec) -> Value {
             });
         }
         events.retain(|_, groups| groups.as_array().is_none_or(|l| !l.is_empty()));
+    }
+    if !spec.account_skills_off.is_empty() {
+        let skills = settings
+            .entry("skillOverrides")
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !skills.is_object() {
+            *skills = Value::Object(Map::new());
+        }
+        if let Some(skills) = skills.as_object_mut() {
+            for name in &spec.account_skills_off {
+                skills.insert(name.clone(), Value::String("off".to_owned()));
+            }
+        }
     }
     if !spec.plugins_off.is_empty() {
         let plugins = settings
@@ -250,6 +292,9 @@ pub fn build(owner: &Owner, dir: &Path, spec: &HomeSpec) -> io::Result<Built> {
         let target = fs::symlink_metadata(&source).is_ok().then_some(source);
         place(&dir.join(name), target.as_deref())?;
     }
+    let agents = owner.dir.join("agents");
+    let target = (spec.agents && fs::symlink_metadata(&agents).is_ok()).then_some(agents);
+    place(&dir.join("agents"), target.as_deref())?;
     for name in INSTRUCTIONS {
         let source = owner.dir.join(name);
         let target = (spec.instructions && fs::symlink_metadata(&source).is_ok()).then_some(source);
@@ -331,6 +376,8 @@ pub struct Options {
     pub mcp: Vec<String>,
     pub plugins: Vec<String>,
     pub rules: Vec<String>,
+    /// Skills the account syncs from claude.ai, by their loaded name.
+    pub account_skills: Vec<String>,
     pub instructions: bool,
     /// Whether the long-lived token is stored, so a launch home can sign in.
     pub token_stored: bool,
@@ -360,7 +407,7 @@ pub fn options(owner: &Owner) -> Options {
             }
         }
     }
-    let plugins = settings
+    let plugins: Vec<String> = settings
         .get("enabledPlugins")
         .and_then(Value::as_object)
         .map(|map| {
@@ -370,6 +417,28 @@ pub fn options(owner: &Owner) -> Options {
                 .collect()
         })
         .unwrap_or_default();
+    let mut plugins: Vec<String> = plugins;
+    // Plugins the account syncs from claude.ai load as `<name>@synced` and can be switched off
+    // the same way; they are not listed in `enabledPlugins`.
+    for org in fs::read_dir(owner.dir.join("plugins/synced"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        for plugin in fs::read_dir(org.path()).into_iter().flatten().flatten() {
+            let manifest = plugin.path().join(".claude-plugin/plugin.json");
+            if let Some(name) = read_json(&manifest)
+                .ok()
+                .and_then(|m| m.get("name").and_then(Value::as_str).map(str::to_owned))
+            {
+                let id = format!("{name}@synced");
+                if name_ok(&id) && !plugins.contains(&id) {
+                    plugins.push(id);
+                }
+            }
+        }
+    }
+    plugins.sort();
     let mcp = read_json(&owner.json)
         .ok()
         .and_then(|json| json.get("mcpServers").and_then(Value::as_object).cloned())
@@ -383,11 +452,23 @@ pub fn options(owner: &Owner) -> Options {
         .filter(|name| name.ends_with(".md") && name_ok(name))
         .collect();
     rules.sort();
+    let mut account_skills: Vec<String> = fs::read_dir(owner.dir.join("skills/synced"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|org| fs::read_dir(org.path()).into_iter().flatten().flatten())
+        .filter(|skill| skill.path().join("SKILL.md").is_file())
+        .map(|skill| format!("{ACCOUNT_PREFIX}{}", skill.file_name().to_string_lossy()))
+        .filter(|name| name.strip_prefix(ACCOUNT_PREFIX).is_some_and(name_ok))
+        .collect();
+    account_skills.sort();
+    account_skills.dedup();
     Options {
         hooks,
         mcp,
         plugins,
         rules,
+        account_skills,
         instructions: INSTRUCTIONS
             .iter()
             .any(|name| fs::symlink_metadata(owner.dir.join(name)).is_ok()),
@@ -432,6 +513,11 @@ mod tests {
         fs::write(dir.join("AGENTS.md"), "kernel").unwrap();
         symlink("AGENTS.md", dir.join("CLAUDE.md")).unwrap();
         fs::write(dir.join(".credentials.json"), "{\"secret\":1}").unwrap();
+        fs::create_dir_all(dir.join("skills/synced/org/pdf")).unwrap();
+        fs::write(dir.join("skills/synced/org/pdf/SKILL.md"), "x").unwrap();
+        let synced = dir.join("plugins/synced/org/abc/.claude-plugin");
+        fs::create_dir_all(&synced).unwrap();
+        fs::write(synced.join("plugin.json"), "{\"name\":\"engineering\"}").unwrap();
         fs::write(
             dir.join("settings.json"),
             serde_json::json!({
@@ -474,6 +560,7 @@ mod tests {
         HomeSpec {
             instructions: true,
             memory: true,
+            agents: true,
             ..HomeSpec::default()
         }
     }
@@ -538,9 +625,12 @@ mod tests {
             mcp: Some(vec!["context7".into()]),
             plugins_off: vec!["caveman@caveman".into()],
             memory: false,
+            agents: false,
+            account_skills_off: vec!["anthropic-skills:pdf".into()],
             ..HomeSpec::default()
         };
         let built = build(&owner, &home, &minimal).unwrap();
+        assert!(fs::symlink_metadata(home.join("agents")).is_err());
         assert!(fs::symlink_metadata(home.join("CLAUDE.md")).is_err());
         assert!(fs::symlink_metadata(home.join("AGENTS.md")).is_err());
         assert_eq!(fs::read_dir(home.join("rules")).unwrap().count(), 0);
@@ -551,6 +641,7 @@ mod tests {
             serde_json::json!({"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk"}]}]})
         );
         assert_eq!(settings["enabledPlugins"]["caveman@caveman"], false);
+        assert_eq!(settings["skillOverrides"]["anthropic-skills:pdf"], "off");
         assert_eq!(settings["model"], "opus");
         assert_eq!(settings["env"]["A"], "1");
         let mcp: Value =
@@ -602,6 +693,10 @@ mod tests {
                 plugins_off: vec!["a".into(), "a".into()],
                 ..spec()
             },
+            HomeSpec {
+                account_skills_off: vec!["pdf".into()],
+                ..spec()
+            },
         ] {
             assert!(bad.validate().is_err(), "{bad:?}");
         }
@@ -628,12 +723,22 @@ mod tests {
             options.mcp,
             vec!["context7".to_owned(), "notebooklm".to_owned()]
         );
-        assert_eq!(options.plugins, vec!["caveman@caveman".to_owned()]);
+        assert_eq!(
+            options.plugins,
+            vec![
+                "caveman@caveman".to_owned(),
+                "engineering@synced".to_owned()
+            ]
+        );
         assert_eq!(
             options.rules,
             vec!["invariantes.md".to_owned(), "ux.md".to_owned()]
         );
         assert!(options.instructions);
+        assert_eq!(
+            options.account_skills,
+            vec!["anthropic-skills:pdf".to_owned()]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

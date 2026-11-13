@@ -234,6 +234,15 @@ fn home_summary(home: &super::launch_home::HomeSpec) -> String {
     if !home.memory {
         parts.push("auto memory off".to_owned());
     }
+    if !home.agents {
+        parts.push("without your agents".to_owned());
+    }
+    if !home.account_skills_off.is_empty() {
+        parts.push(format!(
+            "{} account skill(s) off",
+            home.account_skills_off.len()
+        ));
+    }
     format!(
         "Own launch folder, signed in with the stored long-lived token: {}.",
         parts.join(", ")

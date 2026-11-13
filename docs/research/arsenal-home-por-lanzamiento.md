@@ -106,3 +106,15 @@ CLAUDE_CONFIG_DIR=$H CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude -p 'Respond only w
 ```
 
 Codex: `CODEX_HOME=<home> codex exec --skip-git-repo-check --json '<prompt>'`. Se lee `turn.completed.usage.input_tokens` y se le pide al modelo que liste sus skills y MCP.
+
+## Medición con el código de la Console (2026-11-13)
+
+Homes armados por `launch_home::build` sobre el `~/.claude` real y abiertos con Claude Code 2.1.323:
+
+| Home                  | Skills | Agentes       | Plugins           | MCP | Hooks de inicio | Contexto   |
+| --------------------- | ------ | ------------- | ----------------- | --- | --------------- | ---------- |
+| Global                | 165    | 45            | 10                | 18  | 6               | 68.063     |
+| Con todo              | 165    | 45            | 10                | 18  | 6               | 68.110     |
+| Mínimo (preset vacío) | 0      | 6 (incluidos) | 3 (`cc-plugin-*`) | 0   | 0               | **14.002** |
+
+El home "con todo" responde con la misma primera línea que exige el kernel global (`Ruta:`). El login por `CLAUDE_CODE_OAUTH_TOKEN` no se probó: el token todavía no está guardado.

@@ -2340,6 +2340,9 @@ export const ES: Readonly<Record<string, string>> = {
     'Lo que este preset carga además de sus skills. Lo que destildes no se carga en esa terminal y no gasta contexto.',
   Instructions: 'Instrucciones',
   'Auto memory': 'Memoria automática',
+  'Agents and account skills': 'Agentes y skills de la cuenta',
+  'Your agents (~/.claude/agents, GSD included)':
+    'Tus agentes (~/.claude/agents, incluido GSD)',
   'No hooks in your settings.': 'No hay hooks en tu configuración.',
   'All servers, plugins and claude.ai connectors included':
     'Todos los servidores, incluidos los de plugins y conectores de claude.ai',
