@@ -54,7 +54,6 @@ const SURFACES = [
 const TEXT = [
   'text',
   'muted',
-  'faint',
   'accent',
   'accent-strong',
   'ok',
@@ -84,6 +83,12 @@ it('keeps every text token legible on every surface of its theme, not only the c
           contrast(tokens[foreground]!, tokens[surface]!),
           `${theme} ${foreground} on ${surface}`,
         ).toBeGreaterThanOrEqual(4.5);
+      // --faint is metadata only (never the only carrier of information): 3:1 floor, the
+      // owner's grafito value #737373 is 3.0–4.1:1 on the dark surfaces (interface.md).
+      expect(
+        contrast(tokens.faint!, tokens[surface]!),
+        `${theme} faint on ${surface}`,
+      ).toBeGreaterThanOrEqual(3);
       for (const boundary of ['line-strong', 'focus'])
         expect(
           contrast(tokens[boundary]!, tokens[surface]!),
