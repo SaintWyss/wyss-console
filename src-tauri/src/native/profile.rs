@@ -224,6 +224,8 @@ pub struct LaunchPlan {
     pub applied: Vec<String>,
     pub with_cost: Vec<String>,
     pub not_applicable: Vec<String>,
+    /// The launch home an Arsenal preset asked for (Claude Code), built by the host at start.
+    pub home: Option<super::launch_home::HomeSpec>,
 }
 
 pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {

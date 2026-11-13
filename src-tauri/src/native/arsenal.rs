@@ -1,7 +1,8 @@
 //! What an Arsenal selection adds to a Native launch: installed skills this session must not
-//! expose. It only ever switches skills off, through the same per-session `--settings` overlay a
-//! profile writes; it never adds a skill, a hook, an MCP server or a flag, and it never switches
-//! hooks off. The window's desktop compiles it from the Arsenal library and the installed skills;
+//! expose, through the same per-session `--settings` overlay a profile writes, and, for Claude Code,
+//! the launch environment the preset chose (its own configuration folder: instructions, hooks, MCP
+//! servers and plugins left out). It never adds a skill, a hook or an MCP server the owner does not
+//! already have, and never switches every hook off. The window's desktop compiles it from the Arsenal library and the installed skills;
 //! the host checks its shape again here and binds it to the preview's `plan_token`.
 use super::catalogue::AgentId;
 use super::profile::LaunchPlan;
@@ -26,6 +27,10 @@ pub struct ArsenalLaunch {
     /// For Codex, which switches skills off by file: the `SKILL.md` of each skill switched off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_files_off: Vec<String>,
+    /// The launch environment the preset chose (instructions, hooks, MCP, plugins, memory). Absent
+    /// when the preset keeps the owner's own, so an older host still accepts every such launch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<super::launch_home::HomeSpec>,
 }
 
 /// Longest `SKILL.md` path one launch may name.
@@ -123,6 +128,9 @@ impl ArsenalLaunch {
         {
             return Err("arsenal_invalid");
         }
+        if let Some(home) = &self.home {
+            home.validate().map_err(|_| "arsenal_invalid")?;
+        }
         Ok(())
     }
 }
@@ -136,8 +144,16 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             .push("The Arsenal selection is not well formed.".to_owned());
         return;
     }
+    let home = launch.home.as_ref().filter(|home| !home.is_default());
     match agent {
         AgentId::ClaudeCode if launch.skill_files_off.is_empty() => {}
+        AgentId::Codex if home.is_some() => {
+            plan.not_applicable.push(
+                "Choosing instructions, hooks, MCP or plugins per terminal is not available for Codex yet."
+                    .to_owned(),
+            );
+            return;
+        }
         AgentId::Codex => return apply_codex(plan, launch),
         AgentId::ClaudeCode => {
             plan.not_applicable
@@ -186,12 +202,42 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
         launch.selection_name,
         launch.skills_off.len()
     ));
+    if let Some(home) = home {
+        plan.applied.push(home_summary(home));
+        plan.home = Some(home.clone());
+    }
     if plan.overlay.is_none() {
         plan.words
             .push(super::profile::Word::Literal("--settings".to_owned()));
         plan.words.push(super::profile::Word::Overlay);
     }
     plan.overlay = serde_json::to_string_pretty(&Value::Object(overlay)).ok();
+}
+
+/// What the launch home changes, in one line the owner reads before starting.
+fn home_summary(home: &super::launch_home::HomeSpec) -> String {
+    let mut parts = Vec::new();
+    if !home.instructions {
+        parts.push("without CLAUDE.md and rules".to_owned());
+    } else if !home.rules_off.is_empty() {
+        parts.push(format!("{} rule file(s) left out", home.rules_off.len()));
+    }
+    if !home.hooks_off.is_empty() {
+        parts.push(format!("{} hook(s) left out", home.hooks_off.len()));
+    }
+    if let Some(mcp) = &home.mcp {
+        parts.push(format!("only {} MCP server(s)", mcp.len()));
+    }
+    if !home.plugins_off.is_empty() {
+        parts.push(format!("{} plugin(s) off", home.plugins_off.len()));
+    }
+    if !home.memory {
+        parts.push("auto memory off".to_owned());
+    }
+    format!(
+        "Own launch folder, signed in with the stored long-lived token: {}.",
+        parts.join(", ")
+    )
 }
 
 /// Codex: the session runs without the shared background server, so the switch reaches only this
@@ -245,6 +291,7 @@ mod tests {
             config_hash: "a".repeat(64),
             skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
             skill_files_off: Vec::new(),
+            home: None,
         }
     }
 
@@ -364,6 +411,60 @@ mod tests {
             &with(vec!["/h/.agents/skills/a/SKILL.md".into()]),
         );
         assert_eq!(claude.not_applicable.len(), 1);
+    }
+
+    #[test]
+    fn a_chosen_environment_reaches_the_claude_plan_and_is_refused_for_codex() {
+        use crate::native::launch_home::{HomeSpec, hook_key};
+        let home = HomeSpec {
+            instructions: false,
+            memory: true,
+            hooks_off: vec![hook_key("PreToolUse", "Bash", "gate.py")],
+            mcp: Some(vec!["context7".into()]),
+            ..HomeSpec::default()
+        };
+        let with = ArsenalLaunch {
+            home: Some(home.clone()),
+            ..launch(&["design"])
+        };
+        let mut plan = LaunchPlan::default();
+        apply(&mut plan, AgentId::ClaudeCode, &with);
+        assert!(plan.not_applicable.is_empty());
+        assert_eq!(plan.home, Some(home.clone()));
+        assert!(
+            plan.applied
+                .iter()
+                .any(|line| line.contains("without CLAUDE.md and rules")
+                    && line.contains("1 hook(s) left out")
+                    && line.contains("only 1 MCP server(s)"))
+        );
+        // A default environment changes nothing: the owner's own folder is used.
+        let default = ArsenalLaunch {
+            home: Some(HomeSpec {
+                instructions: true,
+                memory: true,
+                ..HomeSpec::default()
+            }),
+            ..launch(&["design"])
+        };
+        let mut plain = LaunchPlan::default();
+        apply(&mut plain, AgentId::ClaudeCode, &default);
+        assert_eq!(plain.home, None);
+        let mut codex = LaunchPlan::default();
+        apply(&mut codex, AgentId::Codex, &with);
+        assert_eq!(codex.not_applicable.len(), 1);
+        assert!(codex.words.is_empty());
+        let bad = ArsenalLaunch {
+            home: Some(HomeSpec {
+                rules_off: vec!["../x".into()],
+                ..home
+            }),
+            ..launch(&[])
+        };
+        assert!(bad.validate().is_err());
+        // An older host's launch (no environment) still parses, and the field is not sent when absent.
+        let text = serde_json::to_string(&launch(&["a"])).unwrap();
+        assert!(!text.contains("home"));
     }
 
     #[test]

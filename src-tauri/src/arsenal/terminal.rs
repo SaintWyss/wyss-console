@@ -116,6 +116,8 @@ pub struct TerminalPlan {
     /// The exact session settings file it would write, when the provider has one.
     pub overlay: Option<String>,
     pub config_hash: String,
+    /// The launch environment the preset chose (Claude Code), when it changes the owner's own.
+    pub environment: Option<crate::native::launch_home::HomeSpec>,
 }
 
 fn version_text(version: Option<&str>) -> &str {
@@ -353,6 +355,7 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         warnings,
         overlay,
         config_hash,
+        environment: None,
     }
 }
 

@@ -303,6 +303,9 @@ pub fn extension() -> wyss_console::Extension {
             arsenal_groups,
             arsenal_group_move,
             arsenal_categories,
+            arsenal_environment,
+            arsenal_environment_options,
+            arsenal_environment_write,
             arsenal_category_write,
             arsenal_terminal_plan,
             arsenal_terminal_bind,
@@ -794,6 +797,44 @@ fn arsenal_group_move(
     .map_err(ArsenalError::from)
 }
 
+/// The launch environment a preset chose; the owner's own configuration when it chose nothing.
+#[tauri::command]
+fn arsenal_environment(
+    selection: String,
+) -> Result<crate::native::launch_home::HomeSpec, ArsenalError> {
+    let directory = super::environment::directory().ok_or(ArsenalError::from(Error::Storage))?;
+    Ok(super::environment::get(&directory, &selection).unwrap_or(
+        crate::native::launch_home::HomeSpec {
+            instructions: true,
+            memory: true,
+            ..Default::default()
+        },
+    ))
+}
+
+/// What a preset's launch environment can choose from, read from the owner's `~/.claude` now.
+#[tauri::command]
+fn arsenal_environment_options() -> Result<crate::native::launch_home::Options, ArsenalError> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .ok_or(ArsenalError::from(Error::Storage))?;
+    let mut options =
+        crate::native::launch_home::options(&crate::native::launch_home::Owner::from_home(&home));
+    options.token_stored = crate::native::launch_home::token().is_some();
+    Ok(options)
+}
+
+/// Records the launch environment of a preset. Local to this computer.
+#[tauri::command]
+fn arsenal_environment_write(
+    selection: String,
+    environment: crate::native::launch_home::HomeSpec,
+) -> Result<(), ArsenalError> {
+    let directory = super::environment::directory().ok_or(ArsenalError::from(Error::Storage))?;
+    super::environment::set(&directory, &selection, &environment)
+        .map_err(|_| ArsenalError::from(Error::Invalid))
+}
+
 /// The categories the owner made. Local to this computer, like the corrections.
 #[tauri::command]
 fn arsenal_categories(
@@ -1141,6 +1182,16 @@ fn plan_now(
             )
         }),
     });
+    let mut plan = plan;
+    if provider == "claude_code"
+        && let Some(spec) = super::environment::directory()
+            .and_then(|dir| super::environment::get(&dir, &plan.selection))
+    {
+        let material = serde_json::to_vec(&(&plan.config_hash, &spec))
+            .map_err(|_| ArsenalError::from(Error::Storage))?;
+        plan.config_hash = format!("{:x}", sha2::Sha256::digest(material));
+        plan.environment = Some(spec);
+    }
     Ok((plan, installed))
 }
 
@@ -1181,6 +1232,7 @@ pub(crate) fn launch_for(
         config_hash: plan.config_hash,
         skills_off: plan.excluded,
         skill_files_off: plan.excluded_files,
+        home: plan.environment,
     })
 }
 

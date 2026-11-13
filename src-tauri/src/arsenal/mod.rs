@@ -5,6 +5,7 @@
 
 pub mod analysis;
 pub mod commands;
+pub mod environment;
 pub mod groups;
 pub mod store;
 pub mod sync;

@@ -1995,6 +1995,7 @@ fn arsenal_launch(off: &[&str]) -> super::arsenal::ArsenalLaunch {
         config_hash: "c".repeat(64),
         skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
         skill_files_off: Vec::new(),
+        home: None,
     }
 }
 

@@ -1283,6 +1283,7 @@ mod capability_tests {
             config_hash: "b".repeat(64),
             skills_off: vec!["design".into()],
             skill_files_off: Vec::new(),
+            home: None,
         }
     }
 

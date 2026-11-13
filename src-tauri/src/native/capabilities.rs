@@ -282,6 +282,19 @@ pub fn permits_arsenal_exclusion(agent: AgentId, version: Option<&str>) -> bool 
     arsenal_exclusion(agent, version).is_some()
 }
 
+/// Claude Code builds whose launch home (`CLAUDE_CONFIG_DIR` + `CLAUDE_CODE_OAUTH_TOKEN`) was
+/// checked: a home linking everything reproduces the owner's inventory, a minimal one loads only
+/// what it keeps, and the interactive start asks for nothing the owner's own does not.
+const ARSENAL_HOME_CLAUDE: &[&str] = &["2.1.323 (Claude Code)"];
+
+pub fn permits_arsenal_home(agent: AgentId, version: Option<&str>) -> bool {
+    #[cfg(test)]
+    if agent == AgentId::ClaudeCode && version == Some(ARSENAL_TEST_VERSION) {
+        return true;
+    }
+    agent == AgentId::ClaudeCode && version.is_some_and(|v| ARSENAL_HOME_CLAUDE.contains(&v))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

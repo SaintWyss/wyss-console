@@ -7,6 +7,7 @@ use super::{
     capabilities,
     catalogue::{self, AGENTS, AgentId},
     extended_registry::{ExtendedRegistry, RecoveryRead},
+    launch_home,
     profile::{self, LaunchPlan, Word},
     profiles::ProfileStore,
     recipe::{self, family},
@@ -921,6 +922,11 @@ impl NativeService {
             {
                 return Err(NativeError::new("arsenal_unqualified"));
             }
+            if plan.home.is_some()
+                && !capabilities::permits_arsenal_home(request.agent_id, Some(version))
+            {
+                return Err(NativeError::new("arsenal_home_unqualified"));
+            }
             if recipe::family(&shell).is_none() {
                 let installed_version = agent.path.as_deref().and_then(|path| {
                     catalogue::probe_provider_version(request.agent_id, Path::new(path))
@@ -944,6 +950,33 @@ impl NativeService {
                 Word::Overlay => {
                     words.push(dir.join("settings.json").to_string_lossy().into_owned())
                 }
+            }
+        }
+        // The launch home: its own configuration folder, and the stored token instead of the
+        // owner's sign-in, so this session never refreshes it.
+        let mut home_env: Vec<(String, String)> = Vec::new();
+        if let (Some(spec), Some(launch)) = (&plan.home, request.arsenal.as_ref()) {
+            let token =
+                launch_home::token().ok_or_else(|| NativeError::new("arsenal_token_missing"))?;
+            let owner_home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .ok_or_else(|| NativeError::new("store_unavailable"))?;
+            let home_dir = self.inner.base.join("launch-homes").join(&launch.selection);
+            let built =
+                launch_home::build(&launch_home::Owner::from_home(&owner_home), &home_dir, spec)
+                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+            if let Some(mcp) = &built.mcp_config {
+                words.push("--strict-mcp-config".to_owned());
+                words.push("--mcp-config".to_owned());
+                words.push(mcp.to_string_lossy().into_owned());
+            }
+            home_env.push((
+                "CLAUDE_CONFIG_DIR".to_owned(),
+                built.dir.to_string_lossy().into_owned(),
+            ));
+            home_env.push(("CLAUDE_CODE_OAUTH_TOKEN".to_owned(), token.to_string()));
+            if !spec.memory {
+                home_env.push(("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_owned(), "1".to_owned()));
             }
         }
         if let Some(brief) = &request.brief {
@@ -1016,6 +1049,7 @@ impl NativeService {
             ));
         }
         env.extend(self.inner.extra_env.iter().cloned());
+        env.extend(home_env);
         // Remove an M9 default durably before a legacy provider can become the selected
         // project agent. If persistence is unavailable, do not launch a provider and leave a
         // stale OpenCode/Hermes default shadowing the newly chosen Claude/Codex session.
