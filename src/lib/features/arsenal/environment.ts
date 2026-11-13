@@ -26,6 +26,8 @@ export interface EnvironmentOptions {
   account_skills: string[];
   instructions: boolean;
   token_stored: boolean;
+  /** Bytes for the context estimate: `instructions`, `rule:<n>`, `account:<n>`, `plugin:<id>`. */
+  sizes: Record<string, number>;
 }
 
 export const DEFAULT_SPEC: HomeSpec = {
@@ -86,7 +88,19 @@ export function parseOptions(value: unknown): EnvironmentOptions {
     account_skills: strings(v.account_skills, 'account_skills'),
     instructions: flag(v.instructions, 'instructions'),
     token_stored: flag(v.token_stored, 'token_stored'),
+    sizes: sizesOf(v.sizes),
   };
+}
+
+/** A desktop older than the estimate sends no sizes: every size reads as 0. */
+function sizesOf(value: unknown): Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([, n]) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0,
+    ),
+  ) as Record<string, number>;
 }
 
 /** Whether the spec changes anything, i.e. whether the terminal gets its own launch folder. */

@@ -381,6 +381,146 @@ pub struct Options {
     pub instructions: bool,
     /// Whether the long-lived token is stored, so a launch home can sign in.
     pub token_stored: bool,
+    /// Bytes of what each choice puts in the context when a session starts, for an estimate:
+    /// `instructions` (the instruction files and what they import with `@`), `rule:<name>`, and
+    /// `account:<name>` (the name and description an account skill is listed with) and
+    /// `plugin:<id>` (what an enabled plugin lists: each skill, agent and command, with the
+    /// words around each entry counted as 96 bytes).
+    pub sizes: std::collections::BTreeMap<String, u64>,
+}
+
+/// Most bytes read of a file only to size it.
+const SIZE_READ: u64 = 512 * 1024;
+
+fn file_bytes(path: &Path) -> u64 {
+    fs::symlink_metadata(path)
+        .ok()
+        .filter(|m| m.is_file() || m.file_type().is_symlink())
+        .and_then(|_| fs::metadata(path).ok())
+        .filter(|m| m.is_file())
+        .map_or(0, |m| m.len().min(SIZE_READ))
+}
+
+/// The instruction files and the files they import with a line `@path` (one level), as Claude
+/// Code loads them. A file reached twice (CLAUDE.md as a link to AGENTS.md) counts once.
+fn instruction_bytes(dir: &Path, home: Option<&Path>) -> u64 {
+    let mut seen = BTreeSet::new();
+    let mut total = 0;
+    let mut count = |path: &Path, total: &mut u64| {
+        if let Ok(real) = fs::canonicalize(path) {
+            if seen.insert(real) {
+                *total += file_bytes(path);
+            }
+        }
+    };
+    for name in INSTRUCTIONS {
+        let path = dir.join(name);
+        count(&path, &mut total);
+        let Some(text) = crate::native::store::read_bounded(&path, SIZE_READ) else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&text).lines() {
+            let Some(target) = line.trim().strip_prefix('@') else {
+                continue;
+            };
+            let target = target.trim();
+            let resolved = match (target.strip_prefix("~/"), home) {
+                (Some(rest), Some(home)) => home.join(rest),
+                _ if target.starts_with('/') => std::path::PathBuf::from(target),
+                _ => dir.join(target),
+            };
+            count(&resolved, &mut total);
+        }
+    }
+    total
+}
+
+/// The name and description an account skill is listed with: its `SKILL.md` front matter.
+fn listed_bytes(skill: &Path) -> u64 {
+    front_matter_bytes(&skill.join("SKILL.md"))
+}
+
+/// What a plugin folder lists when it loads: the front matter of each skill, agent and command.
+fn plugin_bytes(root: &Path) -> u64 {
+    const ENTRY: u64 = 96;
+    let mut total = 0;
+    for skill in fs::read_dir(root.join("skills"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let file = skill.path().join("SKILL.md");
+        if file.is_file() {
+            total += front_matter_bytes(&file) + ENTRY;
+        }
+    }
+    for folder in ["agents", "commands"] {
+        for entry in fs::read_dir(root.join(folder))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                total += front_matter_bytes(&path) + ENTRY;
+            }
+        }
+    }
+    total
+}
+
+/// Where each plugin Claude Code installed lives, from its own registry.
+fn plugin_roots(owner: &Owner) -> std::collections::BTreeMap<String, std::path::PathBuf> {
+    let mut roots = std::collections::BTreeMap::new();
+    let registry =
+        read_json(&owner.dir.join("plugins/installed_plugins.json")).unwrap_or(Value::Null);
+    if let Some(plugins) = registry.get("plugins").and_then(Value::as_object) {
+        for (id, installs) in plugins {
+            let path = installs
+                .as_array()
+                .and_then(|list| list.first())
+                .and_then(|install| install.get("installPath"))
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from)
+                .filter(|p| p.starts_with(owner.dir.join("plugins")));
+            if let Some(path) = path {
+                roots.insert(id.clone(), path);
+            }
+        }
+    }
+    for org in fs::read_dir(owner.dir.join("plugins/synced"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        for plugin in fs::read_dir(org.path()).into_iter().flatten().flatten() {
+            if let Some(name) = read_json(&plugin.path().join(".claude-plugin/plugin.json"))
+                .ok()
+                .and_then(|m| m.get("name").and_then(Value::as_str).map(str::to_owned))
+            {
+                roots
+                    .entry(format!("{name}@synced"))
+                    .or_insert(plugin.path());
+            }
+        }
+    }
+    roots
+}
+
+fn front_matter_bytes(file: &Path) -> u64 {
+    let Some(text) = crate::native::store::read_bounded(file, SIZE_READ) else {
+        return 0;
+    };
+    let text = String::from_utf8_lossy(&text);
+    let mut lines = text.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return 0;
+    }
+    lines
+        .take_while(|l| l.trim() != "---")
+        .filter(|l| l.starts_with("name:") || l.starts_with("description:"))
+        .map(|l| l.len() as u64)
+        .sum()
 }
 
 pub fn options(owner: &Owner) -> Options {
@@ -463,6 +603,36 @@ pub fn options(owner: &Owner) -> Options {
         .collect();
     account_skills.sort();
     account_skills.dedup();
+    let mut sizes = std::collections::BTreeMap::new();
+    let home = owner.dir.parent();
+    sizes.insert(
+        "instructions".to_owned(),
+        instruction_bytes(&owner.dir, home),
+    );
+    for rule in &rules {
+        sizes.insert(
+            format!("rule:{rule}"),
+            file_bytes(&owner.dir.join("rules").join(rule)),
+        );
+    }
+    let roots = plugin_roots(owner);
+    for plugin in &plugins {
+        if let Some(root) = roots.get(plugin) {
+            sizes.insert(format!("plugin:{plugin}"), plugin_bytes(root));
+        }
+    }
+    for org in fs::read_dir(owner.dir.join("skills/synced"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        for skill in fs::read_dir(org.path()).into_iter().flatten().flatten() {
+            let name = format!("{ACCOUNT_PREFIX}{}", skill.file_name().to_string_lossy());
+            if account_skills.contains(&name) {
+                sizes.insert(format!("account:{name}"), listed_bytes(&skill.path()));
+            }
+        }
+    }
     Options {
         hooks,
         mcp,
@@ -473,6 +643,7 @@ pub fn options(owner: &Owner) -> Options {
             .iter()
             .any(|name| fs::symlink_metadata(owner.dir.join(name)).is_ok()),
         token_stored: false,
+        sizes,
     }
 }
 
@@ -708,6 +879,23 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_is_sized_by_what_it_lists() {
+        let root = temp("plugin");
+        fs::create_dir_all(root.join("skills/a")).unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
+        fs::write(
+            root.join("skills/a/SKILL.md"),
+            "---\nname: a\ndescription: does a\n---\nbody that is not listed\n",
+        )
+        .unwrap();
+        fs::write(root.join("agents/b.md"), "---\nname: b\n---\n").unwrap();
+        fs::write(root.join("agents/notes.txt"), "ignored").unwrap();
+        // "name: a" (7) + "description: does a" (19) + 96, and "name: b" (7) + 96.
+        assert_eq!(plugin_bytes(&root), 7 + 19 + 96 + 7 + 96);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn the_options_list_each_hook_with_the_key_that_leaves_it_out() {
         let root = temp("options");
         let owner = owner(&root);
@@ -735,6 +923,14 @@ mod tests {
             vec!["invariantes.md".to_owned(), "ux.md".to_owned()]
         );
         assert!(options.instructions);
+        // Every rule and account skill is sized; instructions count their files.
+        for rule in &options.rules {
+            assert!(
+                options.sizes.contains_key(&format!("rule:{rule}")),
+                "{rule}"
+            );
+        }
+        assert!(options.sizes["instructions"] > 0);
         assert_eq!(
             options.account_skills,
             vec!["anthropic-skills:pdf".to_owned()]
