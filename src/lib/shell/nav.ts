@@ -231,7 +231,7 @@ export const RAIL_ITEMS: readonly RailItem[] = [
   {
     id: 'more',
     label: msg('More'),
-    icon: 'M5 12h.01M12 12h.01M19 12h.01',
+    icon: 'M4.5 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M10.5 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M16.5 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
     view: null,
   },
 ];

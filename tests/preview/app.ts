@@ -452,6 +452,17 @@ mockIPC((command, payload) => {
       return null;
     case 'terminal_read_output':
       return never();
+    // A preview answer, for looking at the session bar: not what any folder holds.
+    case 'terminal_git_status':
+      return {
+        kind: 'repo',
+        dir: '/home/owner/Github_repos/example',
+        home: '/home/owner',
+        branch: 'main',
+        changes: 3,
+        ahead: 2,
+        truncated: false,
+      };
     case 'm3_state':
       return { schema_version: 1, state: 'inactive' };
     default:
@@ -470,12 +481,10 @@ if (!target) throw new Error('Application root is missing');
 mount(App, { target });
 
 // Opens the view as a person does: by its item in the sidebar.
-const label = [
-  ...NAV_ITEMS,
-  RUNTIMES_NAV_ITEM,
-  PROVIDERS_NAV_ITEM,
-  PROJECTS_NAV_ITEM,
-].find((item) => item.id === view)?.label;
+const label =
+  [...NAV_ITEMS, RUNTIMES_NAV_ITEM, PROVIDERS_NAV_ITEM, PROJECTS_NAV_ITEM].find(
+    (item) => item.id === view,
+  )?.label ?? (view === 'activity' ? 'Activity' : undefined);
 setTimeout(() => {
   [...document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item')]
     .find((b) => b.textContent?.trim() === label)
