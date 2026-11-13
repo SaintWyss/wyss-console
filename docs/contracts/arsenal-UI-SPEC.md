@@ -239,12 +239,12 @@ Una corrección guardada con `group_id = models` sobre una regla se lee como `ru
 
 Decisión del dueño, a partir de la investigación [`docs/research/arsenal-home-por-lanzamiento.md`](../research/arsenal-home-por-lanzamiento.md) (Claude Code 2.1.323, codex-cli 0.167.0).
 
-- **Aprobado como arquitectura de H:** cada lanzamiento tiene su propio home de configuración (`CLAUDE_CONFIG_DIR`; en Codex, `CODEX_HOME` + `HOME`). La composición por sección se regenera en cada lanzamiento desde el preset más los cambios volátiles. El global (`~/.claude`, `~/.codex`) no se modifica: quedan descartadas las alternativas A (filtro por hook) y B (mover hooks al catálogo).
+- **Aprobado como arquitectura de H:** cada lanzamiento tiene su propio home de configuración (`CLAUDE_CONFIG_DIR`; en Codex, `CODEX_HOME` con el `HOME` real). La composición por sección se regenera en cada lanzamiento desde el preset más los cambios volátiles. El global (`~/.claude`, `~/.codex`) no se modifica: quedan descartadas las alternativas A (filtro por hook) y B (mover hooks al catálogo).
 - **El estado de sesión persiste:** el home vive en `~/.local/state/…`, no en `/tmp`, y no se borra al cerrar, porque ahí están las sesiones para retomar.
-- **Claude Code:** validado como primer provider. **Codex:** condicionado a cerrar los pendientes de la investigación (hooks por home y efecto de cambiar `HOME`).
+- **Claude Code:** validado como primer provider. **Codex:** validado salvo el cálculo de confianza de hooks; registrar esa confianza entra en H (dueño, 2026-11-13).
 - **Criterio de aceptación:** una capacidad desmarcada no puede aparecer como aislada si el provider todavía la carga. Lo que no se puede aislar se muestra como "siempre carga": fuentes del repo, `cc-plugin-*`, `/etc/codex`.
 - **Controles obligatorios del modo:** ningún preset los desactiva. Los hooks se clasifican como opcionales u obligatorios antes de implementar H.
-- **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales, hooks por home en Codex, efecto de `HOME` en git/ssh/npm.
+- **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales y cómo obtener el `trusted_hash` de un hook de Codex.
 - **`r3-gate` queda apagado por decisión del dueño (2026-11-13).** No es un control obligatorio de ningún modo y Arsenal no lo ofrece por defecto.
 
 ## Fases de construcción

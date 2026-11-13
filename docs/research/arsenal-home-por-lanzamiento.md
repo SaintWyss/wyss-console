@@ -9,7 +9,7 @@ Que cada terminal cargue solo lo que el preset eligió: skills, reglas, CLAUDE.m
 
 ## Mecanismo
 
-Cada lanzamiento tiene una carpeta propia (`CLAUDE_CONFIG_DIR` para Claude; `CODEX_HOME` **y** `HOME` para Codex). La Console regenera la composición en cada lanzamiento (settings, links, config). El estado de sesión vive en la misma carpeta y **persiste**: no se borra al cerrar, porque sin él no se puede retomar.
+Cada lanzamiento tiene una carpeta propia (`CLAUDE_CONFIG_DIR` para Claude; `CODEX_HOME` para Codex, con el `HOME` real). La Console regenera la composición en cada lanzamiento (settings, links, config). El estado de sesión vive en la misma carpeta y **persiste**: no se borra al cerrar, porque sin él no se puede retomar.
 
 ## Claude Code 2.1.323
 
@@ -48,12 +48,12 @@ En la tarea de 3 comandos, los hooks globales sumaron 5 eventos SessionStart, 5 
 |---|---|---|
 | Login | ✅ | symlink a `~/.codex/auth.json` |
 | AGENTS.md global | ✅ | no se pone en el home |
-| `~/.agents/skills` (178) | ✅ **solo cambiando también `HOME`** | con solo `CODEX_HOME` carga las 182, **más que el global** (que apaga varias por config) |
+| `~/.agents/skills` (178) | ✅ | con solo `CODEX_HOME` carga las 182. **Con `HOME` real**, un `[[skills.config]] enabled = false` por cada `SKILL.md` (ruta del link y ruta resuelta) deja solo la elegida: 2/2 corridas, 13.562 tokens. Aislar `HOME` también funciona, pero rompe git (sin identidad), `gh` (sin sesión) y cargo/rustup (sin toolchain) si no se enlazan los dotfiles y se exportan `RUSTUP_HOME`/`CARGO_HOME`: **se descarta** |
 | Skills incluidas `.system` (5) | ✅ | `[[skills.config]] path = "<home>/skills/.system/<x>/SKILL.md"` · `enabled = false` |
 | Skill elegida | ✅ copiada | **un `SKILL.md` que es symlink no se carga**; copiado sí |
 | Plugins de la cuenta (figma, notion, drive…) y el MCP `codex_apps` | ✅ **solo con features** | `[features] apps = false · plugins = false · remote_plugin = false · plugin_discovery_prefetch = false`: 4/4 corridas limpias. Con solo `[plugins."x@openai-curated-remote"] enabled = false` cargaban en 2 de 4 corridas (14k vs 18–42k tokens) |
 | MCP | ✅ | solo los `[mcp_servers.*]` del config del home (4/4: solo `context7`) |
-| Hooks del home | ⚠️ no corrieron | `hooks.json` en el home no ejecutó el SessionStart. Causa probable: Codex exige `[hooks.state."<ruta>"] trusted_hash`. **Sin confirmar**; registrar confianza es una decisión de seguridad |
+| Hooks del home | ✅ con confianza | sin confianza no corren (confirmado). Con `--dangerously-bypass-hook-trust` corre el hook del home y **no** el de un repo sin confianza. El `trusted_hash` no coincide con sha256 del comando ni del handler: hay que obtenerlo de Codex. Decisión del dueño (2026-11-13): registrar confianza entra en H |
 | AGENTS.md y skills **del repo** | ❌ siempre cargan (correcto) | |
 | Config administrada `/etc/codex` | ❌ siempre carga | hoy solo `hooks = true` |
 | Retomar sesión | ✅ desde el mismo home | home global: `no rollout found` |
@@ -85,12 +85,12 @@ Los dos DENY "Malformed model-preflight bootstrap" fueron **correctos**: el agen
 | 4 | Costo real de tarea, reintentos y tiempo | PASS en tokens y tiempo; reintentos: 0 rechazos medibles con los hooks actuales | solo contexto inicial |
 | 5 | Concurrencia y retomar sin tocar el global | PASS | PASS |
 | — | Renovación de credencial | PENDIENTE | PENDIENTE |
-| — | Hooks por home | PASS | PENDIENTE (confianza) |
+| — | Hooks por home | PASS | PASS con confianza (mecanismo del hash pendiente) |
 
 ## Reglas para implementar H
 
 1. El home es persistente por lanzamiento (`~/.local/state/wyss-console/launch-homes/<id>`); lo volátil es la composición.
-2. En Codex, `HOME` también se aísla. No se probó cómo afecta a git, ssh y npm dentro de esa terminal: hay que probarlo antes de implementar.
+2. En Codex, `HOME` **no** se aísla: las skills de `~/.agents/skills` que no se eligen se apagan una por una en el `config.toml` del home, regenerado en cada lanzamiento (una skill nueva agregada después del lanzamiento carga hasta el próximo).
 3. En Codex, las skills van copiadas, no enlazadas.
 4. El panel muestra "siempre carga" para: fuentes del repo, `cc-plugin-*`, `/etc/codex`.
 5. Los controles obligatorios del modo no se pueden desmarcar desde un preset. `r3-gate` no es uno: está apagado por decisión del dueño.
@@ -105,4 +105,4 @@ CLAUDE_CONFIG_DIR=$H CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude -p 'Respond only w
 # init: tools/skills/mcp_servers/plugins; result.usage: input + cache_creation + cache_read
 ```
 
-Codex: `CODEX_HOME=<home> HOME=<home-falso> codex exec --skip-git-repo-check --json '<prompt>'`. Se lee `turn.completed.usage.input_tokens` y se le pide al modelo que liste sus skills y MCP.
+Codex: `CODEX_HOME=<home> codex exec --skip-git-repo-check --json '<prompt>'`. Se lee `turn.completed.usage.input_tokens` y se le pide al modelo que liste sus skills y MCP.
