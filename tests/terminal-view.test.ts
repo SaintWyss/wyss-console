@@ -294,6 +294,8 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-host-terminals',
     'allow-host-info',
     'allow-terminal-redraw',
+    // The git state of a session's own folder (session bar), read only.
+    'allow-terminal-git-status',
     // M4: the screen a terminal kept while the window was away, to draw before reading on.
     'allow-terminal-attach',
     'allow-terminal-attach-commit',

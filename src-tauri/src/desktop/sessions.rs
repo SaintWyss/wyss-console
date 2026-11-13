@@ -638,6 +638,8 @@ mod tests {
             "allow-host-terminals",
             "allow-host-info",
             "allow-terminal-redraw",
+            // The git state of a session's own folder, for the session bar. Read only.
+            "allow-terminal-git-status",
             "allow-terminal-attach",
             "allow-terminal-attach-commit",
             "allow-host-persistence",

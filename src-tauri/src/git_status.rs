@@ -1,0 +1,316 @@
+//! The git state of a terminal session's folder, for the session bar: branch, how many changes
+//! are not committed, how many commits are not pushed. It only reads. The folder is never one the
+//! window names: the desktop asks the host for the session's own folder (`terminal_git_status`).
+//!
+//! `git status` is run so that it cannot write or wait: `GIT_OPTIONAL_LOCKS=0` and
+//! `--no-optional-locks` (no `index.lock`, no index refresh written back), no fsmonitor daemon or
+//! hook (`core.fsmonitor=false`, `core.hooksPath=/dev/null`), no pager, no prompt, stdin closed,
+//! and a time limit after which the process is killed.
+use serde::Serialize;
+use std::{
+    io::Read,
+    path::Path,
+    process::{Command, Stdio},
+    time::{Duration, Instant},
+};
+
+/// How long `git status` may run before it is killed and the bar shows nothing.
+pub const LIMIT: Duration = Duration::from_secs(2);
+/// Most bytes of `git status` read; past it the count of changes is a lower bound.
+const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GitStatus {
+    /// The folder is not inside a git repository.
+    NoRepo,
+    Repo {
+        /// The branch, or `None` when HEAD is detached.
+        branch: Option<String>,
+        /// Changed, staged, conflicted and untracked paths.
+        changes: u32,
+        /// Commits not on the upstream; `None` when the branch has no upstream.
+        ahead: Option<u32>,
+        /// The output was longer than this reads: `changes` is at least this many.
+        truncated: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitError {
+    /// `git` is not installed or could not start.
+    Unavailable,
+    /// It ran past `LIMIT` and was killed.
+    Timeout,
+    /// It failed for another reason (corrupt repository, permissions).
+    Failed,
+}
+
+pub fn status(dir: &Path) -> Result<GitStatus, GitError> {
+    status_with(dir, LIMIT, &[])
+}
+
+/// `status` with a limit and extra environment, for tests.
+pub fn status_with(
+    dir: &Path,
+    limit: Duration,
+    env: &[(&str, &str)],
+) -> Result<GitStatus, GitError> {
+    if !dir.is_absolute() || !dir.is_dir() {
+        return Err(GitError::Failed);
+    }
+    let mut command = Command::new("git");
+    command
+        .arg("--no-pager")
+        .arg("--no-optional-locks")
+        .args(["-c", "core.fsmonitor=false"])
+        .args(["-c", "core.hooksPath=/dev/null"])
+        .args(["-c", "color.status=false"])
+        .args([
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=normal",
+        ])
+        .current_dir(dir)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().map_err(|_| GitError::Unavailable)?;
+    let mut stdout = child.stdout.take().ok_or(GitError::Failed)?;
+    let mut stderr = child.stderr.take().ok_or(GitError::Failed)?;
+    let out = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = (&mut stdout)
+            .take(MAX_OUTPUT as u64)
+            .read_to_end(&mut bytes);
+        // Drain the rest so git is never blocked on a full pipe.
+        let _ = std::io::copy(&mut stdout, &mut std::io::sink());
+        bytes
+    });
+    let err = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = (&mut stderr).take(64 * 1024).read_to_end(&mut bytes);
+        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        bytes
+    });
+    let started = Instant::now();
+    let exit = loop {
+        match child.try_wait() {
+            Ok(Some(exit)) => break exit,
+            Ok(None) if started.elapsed() >= limit => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(GitError::Timeout);
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(GitError::Failed);
+            }
+        }
+    };
+    let out = out.join().map_err(|_| GitError::Failed)?;
+    let err = err.join().map_err(|_| GitError::Failed)?;
+    if !exit.success() {
+        return if String::from_utf8_lossy(&err).contains("not a git repository") {
+            Ok(GitStatus::NoRepo)
+        } else {
+            Err(GitError::Failed)
+        };
+    }
+    Ok(parse(&out, out.len() >= MAX_OUTPUT))
+}
+
+/// Reads `git status --porcelain=v2 --branch`.
+pub fn parse(bytes: &[u8], truncated: bool) -> GitStatus {
+    let text = String::from_utf8_lossy(bytes);
+    let mut branch = None;
+    let mut ahead = None;
+    let mut changes: u32 = 0;
+    for line in text.lines() {
+        if let Some(head) = line.strip_prefix("# branch.head ") {
+            branch = (head != "(detached)").then(|| head.chars().take(256).collect());
+        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            ahead = ab
+                .split_whitespace()
+                .next()
+                .and_then(|a| a.strip_prefix('+'))
+                .and_then(|a| a.parse().ok());
+        } else if ["1 ", "2 ", "u ", "? "].iter().any(|p| line.starts_with(p)) {
+            changes = changes.saturating_add(1);
+        }
+    }
+    GitStatus::Repo {
+        branch,
+        changes,
+        ahead,
+        truncated,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    struct Temp(PathBuf);
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn temp(name: &str) -> Temp {
+        let dir = std::env::temp_dir().join(format!(
+            "wyss-git-status-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Temp(dir)
+    }
+    /// Isolated from the owner's git configuration: no global or system file, a fixed identity.
+    const ENV: &[(&str, &str)] = &[
+        ("GIT_CONFIG_GLOBAL", "/dev/null"),
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_AUTHOR_NAME", "t"),
+        ("GIT_AUTHOR_EMAIL", "t@example.invalid"),
+        ("GIT_COMMITTER_NAME", "t"),
+        ("GIT_COMMITTER_EMAIL", "t@example.invalid"),
+    ];
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .envs(ENV.iter().copied())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn a_change_not_committed_and_a_commit_not_pushed_are_counted_without_writing_a_lock() {
+        let root = temp("repo");
+        let remote = root.0.join("remote.git");
+        let work = root.0.join("work");
+        std::fs::create_dir_all(&remote).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+        git(&work, &["init", "-q", "-b", "main"]);
+        std::fs::write(work.join("a.txt"), "one\n").unwrap();
+        git(&work, &["add", "a.txt"]);
+        git(&work, &["commit", "-qm", "one"]);
+        git(
+            &work,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        git(&work, &["push", "-q", "-u", "origin", "main"]);
+
+        // Pushed and clean.
+        assert_eq!(
+            status_with(&work, LIMIT, ENV),
+            Ok(GitStatus::Repo {
+                branch: Some("main".into()),
+                changes: 0,
+                ahead: Some(0),
+                truncated: false
+            })
+        );
+
+        // One commit not pushed, one file changed and not committed.
+        std::fs::write(work.join("b.txt"), "two\n").unwrap();
+        git(&work, &["add", "b.txt"]);
+        git(&work, &["commit", "-qm", "two"]);
+        std::fs::write(work.join("a.txt"), "changed\n").unwrap();
+        // A stale-stat index is what makes `git status` want to refresh and lock it.
+        let index = work.join(".git/index");
+        let before = std::fs::read(&index).unwrap();
+        assert_eq!(
+            status_with(&work, LIMIT, ENV),
+            Ok(GitStatus::Repo {
+                branch: Some("main".into()),
+                changes: 1,
+                ahead: Some(1),
+                truncated: false
+            })
+        );
+        assert!(!work.join(".git/index.lock").exists());
+        assert_eq!(
+            std::fs::read(&index).unwrap(),
+            before,
+            "the index is not rewritten"
+        );
+    }
+
+    #[test]
+    fn a_branch_without_upstream_has_no_ahead_count() {
+        let root = temp("local");
+        git(&root.0, &["init", "-q", "-b", "solo"]);
+        std::fs::write(root.0.join("x"), "x").unwrap();
+        assert_eq!(
+            status_with(&root.0, LIMIT, ENV),
+            Ok(GitStatus::Repo {
+                branch: Some("solo".into()),
+                changes: 1,
+                ahead: None,
+                truncated: false
+            })
+        );
+    }
+
+    #[test]
+    fn a_folder_outside_any_repository_is_no_repo() {
+        let root = temp("plain");
+        // GIT_CEILING_DIRECTORIES keeps git from finding a repository above the temp folder.
+        let ceiling = root.0.parent().unwrap().to_str().unwrap().to_owned();
+        let mut env = ENV.to_vec();
+        env.push(("GIT_CEILING_DIRECTORIES", &ceiling));
+        assert_eq!(status_with(&root.0, LIMIT, &env), Ok(GitStatus::NoRepo));
+    }
+
+    #[test]
+    fn a_relative_or_missing_folder_is_refused() {
+        assert_eq!(status(Path::new("relative")), Err(GitError::Failed));
+        assert_eq!(
+            status(Path::new("/nonexistent/wyss/git/status")),
+            Err(GitError::Failed)
+        );
+    }
+
+    #[test]
+    fn porcelain_lines_are_read_as_branch_ahead_and_changes() {
+        let out = b"# branch.oid abc\n# branch.head (detached)\n1 .M N... 1 1 1 a a f\n? new\nu UU N... x\n";
+        assert_eq!(
+            parse(out, false),
+            GitStatus::Repo {
+                branch: None,
+                changes: 3,
+                ahead: None,
+                truncated: false
+            }
+        );
+        let out = b"# branch.head main\n# branch.upstream origin/main\n# branch.ab +4 -2\n";
+        assert_eq!(
+            parse(out, false),
+            GitStatus::Repo {
+                branch: Some("main".into()),
+                changes: 0,
+                ahead: Some(4),
+                truncated: false
+            }
+        );
+    }
+}

@@ -13,6 +13,8 @@ mod desktop;
 #[cfg(target_os = "linux")]
 pub mod events;
 #[cfg(target_os = "linux")]
+pub mod git_status;
+#[cfg(target_os = "linux")]
 pub mod lifecycle;
 #[cfg(target_os = "linux")]
 pub mod m3;

@@ -187,6 +187,7 @@ fn main() {
             "host_terminals",
             "host_info",
             "terminal_redraw",
+            "terminal_git_status",
             "terminal_attach",
             "terminal_attach_commit",
             "host_persistence",

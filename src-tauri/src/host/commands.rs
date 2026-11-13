@@ -206,6 +206,35 @@ pub async fn terminal_status(
     blocking(move || link.call("term_status", json!({"terminal_id": request.terminal_id}))).await
 }
 
+/// The git state of a session's folder (session bar). The folder is the one the host holds for
+/// that terminal, never a path from the window: the window can only name a terminal it has.
+#[tauri::command]
+pub async fn terminal_git_status(
+    link: State<'_, HostLink>,
+    request: TargetRequest,
+) -> Result<Value, WireError> {
+    if !id_ok(&request.terminal_id) {
+        return Err(invalid());
+    }
+    let link = link.inner().clone();
+    blocking(move || {
+        let info = link.call("term_status", json!({"terminal_id": request.terminal_id}))?;
+        let cwd = info
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute());
+        let Some(cwd) = cwd else {
+            return Ok(json!({"kind": "unknown"}));
+        };
+        Ok(match wyss_console::git_status::status(&cwd) {
+            Ok(status) => serde_json::to_value(status).unwrap_or(json!({"kind": "unknown"})),
+            Err(_) => json!({"kind": "unknown"}),
+        })
+    })
+    .await
+}
+
 /// A program that drew its screen before this window attached draws it again.
 #[tauri::command]
 pub async fn terminal_redraw(
@@ -524,6 +553,7 @@ const COMMANDS: &[&str] = &[
     "terminal_resize",
     "close_terminal",
     "terminal_status",
+    "terminal_git_status",
     "terminal_redraw",
     "terminal_attach",
     "terminal_attach_commit",
@@ -544,6 +574,7 @@ pub fn extension() -> wyss_console::Extension {
             terminal_resize,
             close_terminal,
             terminal_status,
+            terminal_git_status,
             terminal_redraw,
             terminal_attach,
             terminal_attach_commit,
