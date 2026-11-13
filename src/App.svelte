@@ -32,6 +32,7 @@
   import { NativeController } from './lib/features/native/controller';
   import ProfilesView from './lib/features/native/ProfilesView.svelte';
   import WorkspaceView from './lib/features/native/WorkspaceView.svelte';
+  import LaunchEditor from './lib/features/workspace/LaunchEditor.svelte';
   import { SettingsController } from './lib/features/settings/controller';
   import SettingsView from './lib/features/settings/SettingsView.svelte';
   import { whenWorkspaceReady } from './lib/features/native/bridge';
@@ -238,6 +239,7 @@
   $effect(() => {
     nativeController.setVisible(
       activeView === 'workspace' ||
+        activeView === 'launches' ||
         activeView === 'profiles' ||
         activeView === 'models' ||
         activeView === 'projects',
@@ -379,6 +381,18 @@
   }
 
   let terminal = $state<TerminalView>();
+  /** Shows the Console and opens a saved launch there (the launch editor's Try). */
+  async function openInConsole(id: string) {
+    go('console');
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await tick();
+      if (terminal) {
+        await terminal.open(id);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
   /** Shows the Console and opens a terminal that types `input`; waits for the workspace to mount. */
   async function runInConsole(title: string, cwd: string, input: string) {
     go('console');
@@ -412,7 +426,7 @@
     {items}
   />
   <main id="main-content" class="content" tabindex="-1" data-view={activeView}>
-    {#if activeView !== 'console'}
+    {#if activeView !== 'console' && activeView !== 'launches'}
       <p class="context-title">{t(title)}</p>
     {/if}
     {#if notice}
@@ -428,6 +442,13 @@
         onworkspace={observeWorkspace}
       />
     {/if}
+    <LaunchEditor
+      visible={activeView === 'launches'}
+      profiles={native.profiles}
+      recent={native.launcher?.projects ?? []}
+      choose={() => nativeController.choose()}
+      onopen={(id) => void openInConsole(id)}
+    />
     <WorkspaceView
       visible={activeView === 'workspace'}
       {native}

@@ -127,6 +127,8 @@ export interface PlanContext {
   folderSelection: string | null;
   /** The environment the draft's preset has now. */
   savedSpec: HomeSpec | null;
+  /** Everything of this provider in the library: a launch without a preset loads all of it. */
+  allItems: readonly Item[];
 }
 
 /** What one Save does, in order: preset → environment → launch → role. */
@@ -137,7 +139,7 @@ export function savePlan(draft: LaunchDraft, ctx: PlanContext): SavePlan {
     ? sortedItems(sel.items) !== sortedItems(draft.items) ||
       JSON.stringify([...sel.composites].sort()) !==
         JSON.stringify([...draft.composites].sort())
-    : draft.items.length > 0;
+    : sortedItems(draft.items) !== sortedItems(ctx.allItems);
   const specChanged =
     draft.agent === 'claude_code' &&
     draft.spec !== null &&
@@ -147,7 +149,7 @@ export function savePlan(draft: LaunchDraft, ctx: PlanContext): SavePlan {
   let preset: PresetStep;
   if (!sel) {
     preset =
-      draft.items.length > 0 || specChanged
+      contentChanged || specChanged
         ? { do: 'create', name: freeName(draft.name.trim(), names) }
         : { do: 'none' };
   } else if (!contentChanged && !specChanged) {

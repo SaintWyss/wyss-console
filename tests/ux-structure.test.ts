@@ -46,6 +46,7 @@ it('offers seven entries on the rail, and every other view under More', () => {
   const more = moreItems(all).map((i) => i.id);
   expect(more).toEqual([
     'projects',
+    'workspace',
     'sessions',
     'agents',
     'runtimes',

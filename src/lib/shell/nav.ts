@@ -2,6 +2,7 @@ import { msg } from '../i18n/msg';
 
 export type ViewId =
   | 'console'
+  | 'launches'
   | 'workspace'
   | 'sessions'
   | 'agents'
@@ -37,7 +38,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     id: 'workspace',
-    label: msg('Workspace'),
+    label: msg('Terminal agents'),
     subtitle: msg('Agents running in your terminals'),
     icon: 'M4 5h16v10H4zM8 19h8M12 15v4M8 9l2 2-2 2M12.5 13H16',
   },
@@ -202,7 +203,7 @@ export const RAIL_ITEMS: readonly RailItem[] = [
     id: 'workspace',
     label: msg('Workspace'),
     icon: 'M4 6h16M4 12h16M4 18h16M8 4v4M15 10v4M10 16v4',
-    view: 'workspace',
+    view: 'launches',
   },
   {
     id: 'arsenal',
@@ -245,8 +246,10 @@ export function railOf(shown: ShownView): RailId {
 }
 
 /** Views offered under More: every view of `navItems()` that the rail does not open itself,
- * plus Approvals, Events, Providers and Settings, which keep their own page there. */
+ * plus Approvals, Events, Providers and Settings, which keep their own page there. The
+ * Workspace of agents in terminals is there too, by that name: the rail's Workspace is the
+ * launch editor. */
 export function moreItems(items: readonly NavItem[]): readonly NavItem[] {
-  const own = new Set<ViewId>(['console', 'workspace', 'arsenal']);
+  const own = new Set<ViewId>(['console', 'launches', 'arsenal']);
   return items.filter((item) => !own.has(item.id));
 }

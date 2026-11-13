@@ -247,6 +247,37 @@ Decisión del dueño, a partir de la investigación [`docs/research/arsenal-home
 - **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales y cómo obtener el `trusted_hash` de un hook de Codex.
 - **`r3-gate` queda apagado por decisión del dueño (2026-11-13).** No es un control obligatorio de ningún modo y Arsenal no lo ofrece por defecto.
 
+## Workspace: editor de lanzamientos (2026-11-13)
+
+Decisiones del dueño del 2026-11-13. Este contrato no las reabre. El Workspace de la barra lateral pasa a ser el editor de lanzamientos. El Workspace anterior, de agentes corriendo en terminales, sigue entero en **Más → Agentes en terminales**.
+
+1. **Un lanzamiento es lanzamiento + preset + entorno**, editados juntos y guardados con un solo botón. Por debajo cada cosa se sigue guardando donde ya estaba: el TOML en `~/.config/wyss-console/launch/`, el preset en `selection` y el entorno en `environment.json`.
+2. **Preset propio:** si el preset que nombra el lanzamiento lo usa otro lanzamiento del mismo agente, o es el que recuerda la carpeta, al guardar se copia a uno nuevo con el nombre del lanzamiento. Nunca cambia otro lanzamiento.
+3. **Modelo = perfil:** el campo Modelo lista los perfiles del agente como "modelo · perfil", o "Por defecto (sin perfil)". No se escriben perfiles.
+4. **Contexto estimado por archivos:** bytes ÷ 4 de lo que se carga, sobre la base medida de 14.002 tokens (`src/lib/features/workspace/estimate.ts`). Cuenta las instrucciones con sus `@imports`, cada regla, nombre y descripción de cada skill y agente, las skills de la cuenta y lo que lista cada plugin. MCP queda "sin medir". El total de referencia es la estimación con todo prendido.
+   - **Control (2026-11-13, `~/.claude` real):** unos 40,4k sin MCP contra 68,1k medidos con los 18 MCP. La diferencia no se ajusta a mano.
+5. **Modo:** solo Nativa. Los lanzamientos abren sesiones nativas; las administradas se inician desde Sesiones.
+6. **Probar:** sin cambios, abre el lanzamiento guardado en la Consola. Con cambios es **Guardar y probar**: el escritorio solo arranca un preset guardado, y nunca se crea un preset escondido.
+7. **Obligatorios:** ninguno por ahora. Todo se puede destildar; cuando el dueño los defina, se marcan.
+8. **Roles:** los básicos son Orquestador, Trabajador, Investigador y Revisor, y no se borran. Los del dueño y la asignación de cada lanzamiento viven en `roles.json`, junto a `environment.json` (0600, temporal + rename; un archivo dañado se lee como los básicos). Al borrar un rol, sus lanzamientos pasan a Trabajador. El TOML no lleva el rol porque rechaza campos desconocidos.
+
+**Orden de un Guardar:** preset → entorno → lanzamiento → rol. Si un paso falla, el mensaje dice qué quedó guardado y el borrador se conserva. `replace` solo pisa el archivo que se está editando. Si cambia el nombre, se guarda con el nombre nuevo, se borra el archivo viejo y el rol pasa al nuevo.
+
+**Solo lectura:** un lanzamiento con `commands` o `before` se abre con Probar pero no se guarda ni se borra desde acá, porque `launch_save` reescribe el archivo entero.
+
+**Codex:** elige skills y agentes del preset. Lo demás (instrucciones, MCP, skills de la cuenta, hooks) es solo de Claude Code y no se dibuja. Todavía no hay estimación para Codex.
+
+| Elemento      | en                                                                    | es                                                                              |
+| ------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Roles básicos | Orchestrator · Worker · Researcher · Reviewer                         | Orquestador · Trabajador · Investigador · Revisor                               |
+| Grupos        | Instructions · Skills · MCP servers · Agents · Account skills · Hooks | Instrucciones · Skills · Servidores MCP · Agentes · Skills de la cuenta · Hooks |
+| Cabecera      | ~{n} · of {total} · estimated, MCP not measured                       | ~{n} · de {total} · estimado, MCP sin medir                                     |
+| Acciones      | Try · Save and try · Save · Delete launch                             | Probar · Guardar y probar · Guardar · Borrar lanzamiento                        |
+| Error a mitad | {what} Saved so far: {done}. Nothing else changed.                    | {what} Se guardó: {done}. Nada más cambió.                                      |
+| Carpeta       | Browse… · Saved · Recently used                                       | Examinar… · Guardadas · Usadas hace poco                                        |
+
+"Usadas hace poco" ordena por `last_used` del registro de proyectos. La app no cuenta usos, así que no se muestran números de veces.
+
 ## Fases de construcción
 
 | Fase | Entrega                                                                                                                               | Verificación                                                                                                          |

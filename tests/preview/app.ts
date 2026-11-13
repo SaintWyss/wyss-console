@@ -407,6 +407,93 @@ mockIPC((command, payload) => {
       return empty ? [] : selections;
     case 'arsenal_terminal_bindings':
       return [];
+    // Preview answers for the launch editor: example launches and sizes, not anyone's files.
+    case 'arsenal_roles':
+    case 'arsenal_role_write':
+      return {
+        custom: [],
+        assigned: { 'wyss-frontend': 'worker', estudiar: 'researcher' },
+      };
+    case 'arsenal_environment_options':
+      return {
+        hooks: [
+          {
+            key: 'k1',
+            event: 'SessionStart',
+            matcher: '',
+            command: 'auto-orient.sh',
+          },
+          {
+            key: 'k2',
+            event: 'PostToolUse',
+            matcher: 'Edit',
+            command: 'format.sh',
+          },
+        ],
+        mcp: ['context7', 'playwright', 'notebooklm'],
+        plugins: ['caveman@caveman'],
+        rules: ['invariantes.md', 'ux.md'],
+        account_skills: ['anthropic-skills:pdf'],
+        instructions: true,
+        token_stored: true,
+        sizes: {
+          instructions: 26000,
+          'rule:invariantes.md': 22000,
+          'rule:ux.md': 6000,
+          'account:anthropic-skills:pdf': 300,
+          'plugin:caveman@caveman': 4000,
+        },
+      };
+    case 'arsenal_environment':
+      return {
+        instructions: true,
+        rules_off: [],
+        hooks_off: [],
+        mcp: null,
+        plugins_off: [],
+        memory: true,
+        agents: true,
+        account_skills_off: [],
+      };
+    case 'arsenal_project_selection':
+      return null;
+    case 'launch_list':
+      return {
+        folder: '/home/owner/.config/wyss-console/launch',
+        launches: [
+          {
+            id: 'estudiar',
+            name: 'Estudiar',
+            directory: '/home/owner/UTN',
+            kind: 'session',
+            agent: 'claude_code',
+            profile: null,
+            before: [],
+            preset: null,
+          },
+          {
+            id: 'wyss-frontend',
+            name: 'wyss frontend',
+            directory: '/home/owner/Github_repos/example',
+            kind: 'session',
+            agent: 'claude_code',
+            profile: null,
+            before: [],
+            preset: null,
+          },
+          {
+            id: 'revision',
+            name: 'Revisión con Codex',
+            directory: '/home/owner/Github_repos',
+            kind: 'session',
+            agent: 'codex',
+            profile: null,
+            before: [],
+            preset: null,
+          },
+        ],
+        refused: [],
+      };
     case 'arsenal_sync_status':
     case 'arsenal_sync_now':
       return {
@@ -484,7 +571,7 @@ mount(App, { target });
 const label =
   [...NAV_ITEMS, RUNTIMES_NAV_ITEM, PROVIDERS_NAV_ITEM, PROJECTS_NAV_ITEM].find(
     (item) => item.id === view,
-  )?.label ?? (view === 'activity' ? 'Activity' : undefined);
+  )?.label ?? { activity: 'Activity', launches: 'Workspace' }[view];
 setTimeout(() => {
   [...document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item')]
     .find((b) => b.textContent?.trim() === label)

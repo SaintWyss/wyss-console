@@ -25,6 +25,13 @@
   import { applyOrder, loadOrder, moveLaunch, saveOrder } from './launch-order';
   import { msg, t } from '../../i18n/index.svelte';
   import SessionBar from './SessionBar.svelte';
+  import { arsenalClient } from '../../desktop/arsenal-client';
+  import {
+    estimateLaunch,
+    loadEstimateData,
+    type EstimateData,
+  } from '../workspace/data';
+  import { kTokens } from '../workspace/estimate';
   import { terminalGitStatus } from '../../desktop/terminal-client';
   let {
     onworkspace,
@@ -52,6 +59,8 @@
   /** The launch panel (ADR 0059): the owner's launch files, read when it opens. */
   let launches = $state<LaunchList | null>(null);
   let launchProfiles = $state<Profile[]>([]);
+  /** For each launch's estimated context; read when the menu opens, best effort. */
+  let estimates = $state<EstimateData | null>(null);
   let launchBusy = $state<string | null>(null);
   let launchNote = $state<LaunchNote[] | null>(null);
   let launchError = $state<{
@@ -136,12 +145,14 @@
     try {
       launches = await listLaunches();
       launchProfiles = await readProfiles().catch(() => []);
+      void loadEstimateData(arsenalClient).then((data) => (estimates = data));
     } catch (error) {
       launches = null;
       launchError = explain(error);
     }
   }
-  async function open(id: string) {
+  /** Opens a saved launch by its id (the launch editor's Try). */
+  export async function open(id: string) {
     const m = manager;
     if (!m || launchBusy) return;
     launchBusy = id;
@@ -441,6 +452,13 @@
                         ? 'Claude Code'
                         : 'Codex'}</span
                   >
+                  {#if estimates && estimateLaunch(launch, estimates)}
+                    <span class="launch-tokens"
+                      >~{kTokens(
+                        estimateLaunch(launch, estimates)!.total,
+                      )}</span
+                    >
+                  {/if}
                   {#if full}
                     <span
                       class="badge"

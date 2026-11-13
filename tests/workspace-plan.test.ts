@@ -59,6 +59,10 @@ const ctx = (over: Partial<PlanContext> = {}): PlanContext => ({
   selections: [selection()],
   folderSelection: null,
   savedSpec: null,
+  allItems: [
+    { capability: 'a', revision: null },
+    { capability: 'x', revision: null },
+  ],
   ...over,
 });
 
@@ -110,12 +114,17 @@ it('copies a shared preset to one of its own, named after the launch, and never 
   );
 });
 
-it('makes a preset for a launch that had none only when something is chosen, with a free name', () => {
-  expect(savePlan(draft({ selection: null, items: [] }), ctx()).preset).toEqual(
-    {
-      do: 'none',
-    },
-  );
+it('makes a preset for a launch that had none only when its choice differs from everything, with a free name', () => {
+  const all = [
+    { capability: 'a', revision: null },
+    { capability: 'x', revision: null },
+  ];
+  // Everything on, as a launch without a preset loads: nothing to make.
+  expect(
+    savePlan(draft({ selection: null, items: all }), ctx()).preset,
+  ).toEqual({
+    do: 'none',
+  });
   expect(
     savePlan(
       draft({ selection: null, items: [{ capability: 'x', revision: null }] }),
@@ -215,4 +224,5 @@ it('estimates the context by group from what is loaded, and leaves MCP unmeasure
   // Same input, same answer.
   expect(estimate({ ...base, spec: { ...DEFAULT_SPEC } })).toEqual(all);
   expect(kTokens(15_360)).toBe('15k');
+  expect(kTokens(240)).toBe('<1k');
 });

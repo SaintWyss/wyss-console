@@ -88,5 +88,5 @@ export function estimate(input: EstimateInput): Estimate {
 
 /** `12345` → `12k`, for the header and the launch menu. */
 export function kTokens(n: number): string {
-  return `${Math.round(n / 1000)}k`;
+  return n > 0 && n < 1000 ? '<1k' : `${Math.round(n / 1000)}k`;
 }

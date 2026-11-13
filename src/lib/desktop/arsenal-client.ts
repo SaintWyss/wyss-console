@@ -165,6 +165,10 @@ export const arsenalClient = {
     call('arsenal_environment_write', { selection, environment }).then(
       () => undefined,
     ),
+  /** Workspace roles: the owner's own and each launch's role, kept on this computer. */
+  roles: () => answer<Roles>('arsenal_roles', parseRoles),
+  writeRole: (change: RoleChange) =>
+    answer<Roles>('arsenal_role_write', parseRoles, { change }),
   /** The categories the owner made, kept on this computer. */
   categories: () =>
     answer<CustomCategory[]>('arsenal_categories', parseCategories),
@@ -209,6 +213,41 @@ export const arsenalClient = {
 };
 
 export type ArsenalClient = typeof arsenalClient;
+
+/** Workspace roles as the desktop answers them. */
+export interface Roles {
+  custom: { id: string; name: string }[];
+  /** Launch id → role id. A launch not listed is a Worker. */
+  assigned: Record<string, string>;
+}
+export type RoleChange =
+  | { do: 'create'; name: string }
+  | { do: 'delete'; id: string }
+  | { do: 'assign'; launch: string; role: string }
+  | { do: 'rename'; from: string; to: string }
+  | { do: 'forget'; launch: string };
+
+export function parseRoles(value: unknown): Roles {
+  const v = value as Record<string, unknown>;
+  if (typeof v !== 'object' || v === null || !Array.isArray(v.custom))
+    throw new Error('roles');
+  const custom = v.custom.map((entry: unknown) => {
+    const c = entry as Record<string, unknown>;
+    if (typeof c?.id !== 'string' || typeof c?.name !== 'string')
+      throw new Error('role');
+    return { id: c.id, name: c.name };
+  });
+  const assigned = v.assigned as Record<string, unknown>;
+  if (
+    typeof assigned !== 'object' ||
+    assigned === null ||
+    Array.isArray(assigned)
+  )
+    throw new Error('assigned');
+  if (Object.values(assigned).some((r) => typeof r !== 'string'))
+    throw new Error('assigned');
+  return { custom, assigned: assigned as Record<string, string> };
+}
 
 /** A change to the owner's categories, as the desktop takes it. */
 export type CategoryChange =
