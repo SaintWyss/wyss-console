@@ -219,6 +219,8 @@ Una corrección guardada con `group_id = models` sobre una regla se lee como `ru
 
 ### Hooks y MCP elegibles
 
+> **Reemplazado el 2026-11-13** por [Decisión del 2026-11-13: home por lanzamiento](#decisión-del-2026-11-13-home-por-lanzamiento). La migración al catálogo y el `--settings` que se describen abajo ya no se implementan; queda solo lo que se elige y la regla de no copiar credenciales.
+
 - **Qué se elige:** cada hook es una entrada `evento + matcher + comando`, y cada MCP es un servidor. El preset guarda la referencia (provider, tipo, clave estable = hash de evento+matcher+comando, o nombre del servidor), nunca una copia del comando ni de las variables del MCP, porque pueden tener credenciales.
 - **Migración, una sola vez y con el OK del dueño:** respaldo con fecha de `~/.claude/settings.json` y `~/.claude.json` → todos los hooks y MCP pasan al catálogo maestro `~/.local/share/wyss-console/arsenal/catalog-claude.json` (`0600`) → en el global quedan solo los que el dueño marque como **default**, que por defecto son los que hoy están activos (fuera de la Console nada cambia). Antes de mover nada se muestra la lista.
 - **Al lanzar:** Arsenal escribe en la carpeta privada de la terminal `hooks.json` (`{"hooks":…}` con lo que eligió el preset) y `mcp.json` (`{"mcpServers":…}`), y lanza `claude --settings hooks.json --mcp-config mcp.json --strict-mcp-config`. El global no se toca.
@@ -232,6 +234,17 @@ Una corrección guardada con `group_id = models` sobre una regla se lee como `ru
 
 - En Claude Code, los `/comando` propios hoy son skills (`~/.claude/commands` no existe en esta PC). Codex usa `~/.codex/prompts/*.md`, que tampoco existe todavía.
 - El tipo Comandos escanea `~/.claude/commands/*.md` y `~/.codex/prompts/*.md`. Se importan y se eligen igual que una regla (un archivo). Si no hay ninguno, el estado vacío dice: "No custom commands. Your /commands are skills here."
+
+## Decisión del 2026-11-13: home por lanzamiento
+
+Decisión del dueño, a partir de la investigación [`docs/research/arsenal-home-por-lanzamiento.md`](../research/arsenal-home-por-lanzamiento.md) (Claude Code 2.1.323, codex-cli 0.167.0).
+
+- **Aprobado como arquitectura de H:** cada lanzamiento tiene su propio home de configuración (`CLAUDE_CONFIG_DIR`; en Codex, `CODEX_HOME` + `HOME`). La composición por sección se regenera en cada lanzamiento desde el preset más los cambios volátiles. El global (`~/.claude`, `~/.codex`) no se modifica: quedan descartadas las alternativas A (filtro por hook) y B (mover hooks al catálogo).
+- **El estado de sesión persiste:** el home vive en `~/.local/state/…`, no en `/tmp`, y no se borra al cerrar, porque ahí están las sesiones para retomar.
+- **Claude Code:** validado como primer provider. **Codex:** condicionado a cerrar los pendientes de la investigación (hooks por home y efecto de cambiar `HOME`).
+- **Criterio de aceptación:** una capacidad desmarcada no puede aparecer como aislada si el provider todavía la carga. Lo que no se puede aislar se muestra como "siempre carga": fuentes del repo, `cc-plugin-*`, `/etc/codex`.
+- **Controles obligatorios del modo:** ningún preset los desactiva. Los hooks se clasifican como opcionales u obligatorios antes de implementar H.
+- **Implementación de H: todavía no autorizada.** Pendientes: renovación de credenciales, hooks por home en Codex, efecto de `HOME` en git/ssh/npm, y la decisión sobre `r3-gate`, que hoy no está registrado en el global.
 
 ## Fases de construcción
 
