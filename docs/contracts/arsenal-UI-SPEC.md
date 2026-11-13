@@ -5,7 +5,7 @@ sin excepciones el [contrato de interfaz](interface.md) (tokens, componentes com
 
 Decisiones del dueño (2026-11-11), que este contrato no reabre:
 
-1. **Preset + Lanzamiento.** Un preset es un kit de un provider. Un lanzamiento es agente + carpeta + permisos + un preset, se guarda desde Workspace y aparece en **Launch ▾**.
+1. **Preset + Lanzamiento.** Un preset es un kit de un provider. Un lanzamiento es agente + carpeta + permisos + un preset, se guarda desde Workspace y aparece en **+ Lanzar** (antes **Launch ▾**).
 2. **Clasificación por reglas** deterministas sobre nombre y descripción, con corrección manual guardada.
 3. **Panel de composición** fijo que muestra cómo queda armado el preset y cómo arranca la terminal.
 4. En Arsenal **todo se elige por provider**.
@@ -14,7 +14,7 @@ Decisiones del dueño (2026-11-11), que este contrato no reabre:
 
 1. Arsenal → elige provider → **New preset** → marca capacidades por grupo mientras el panel de composición muestra el resultado → **Save preset**.
 2. Workspace → elige agente, carpeta, permisos y **Preset** → **Start** (inicio suelto) o **Save as launch…**.
-3. Launch ▾ → el lanzamiento guardado → arranca con ese preset aplicado.
+3. - Lanzar → el lanzamiento guardado → arranca con ese preset aplicado.
 
 ## Modelo de datos
 

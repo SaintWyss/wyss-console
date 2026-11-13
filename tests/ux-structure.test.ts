@@ -3,13 +3,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import Sidebar from '../src/lib/shell/Sidebar.svelte';
-import { pendingAuthority } from '../src/lib/shell/authority';
-import { pendingLifecycle } from '../src/lib/shell/lifecycle';
 import {
   NAV_ITEMS,
+  RAIL_ITEMS,
+  moreItems,
   navItems,
-  navSections,
-  type ViewId,
+  railOf,
 } from '../src/lib/shell/nav';
 import {
   candidateMark,
@@ -32,54 +31,83 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-it('groups the sidebar without reordering it, every optional item included', () => {
+it('offers seven entries on the rail, and every other view under More', () => {
+  expect(RAIL_ITEMS.map((r) => r.label)).toEqual([
+    'Console',
+    'Workspace',
+    'Arsenal',
+    'Distributors',
+    'Activity',
+    'Settings',
+    'More',
+  ]);
+  // No view is lost: what the rail does not open itself is under More, optional ones included.
   const all = navItems(true, true, true);
-  const sections = navSections(all);
-  // The same order as the flat list: grouping never moves an item.
-  expect(sections.flatMap((s) => s.items.map((i) => i.id))).toEqual(
-    all.map((i) => i.id),
-  );
-  // Each group appears once: its items are consecutive.
-  expect(sections.map((s) => s.label)).toEqual([
-    'Terminals',
-    'Agents & activity',
-    'Capabilities',
-    'System',
+  const more = moreItems(all).map((i) => i.id);
+  expect(more).toEqual([
+    'projects',
+    'sessions',
+    'agents',
+    'runtimes',
+    'pipelines',
+    'remote',
+    'approvals',
+    'events',
+    'configuration',
+    'models',
+    'providers',
+    'profiles',
+    'credentials',
+    'settings',
   ]);
-  // Providers, Runtimes and Projects are optional: the base set has 2 + 6 + 4 + 2.
-  expect(navSections(NAV_ITEMS).map((s) => s.items.length)).toEqual([
-    2, 6, 4, 2,
-  ]);
+  for (const item of all)
+    expect(
+      more.includes(item.id) || RAIL_ITEMS.some((r) => r.view === item.id),
+      item.id,
+    ).toBe(true);
+  // Without the optional views, More has no entry for them.
+  expect(moreItems(NAV_ITEMS).map((i) => i.id)).not.toContain('runtimes');
+  expect(moreItems(NAV_ITEMS).map((i) => i.id)).not.toContain('projects');
+  // A view only reachable from More lights More.
+  expect(railOf('sessions')).toBe('more');
+  expect(railOf('providers')).toBe('distributors');
+  expect(railOf('activity')).toBe('activity');
 });
 
-it('renders each group as a labelled group and marks only the open view', () => {
+it('names every rail icon for screen readers and marks only the open view', () => {
   component = mount(Sidebar, {
     target: document.body,
     props: {
-      active: 'arsenal' as ViewId,
+      active: 'arsenal' as const,
       onselect: () => undefined,
       waiting: 2,
-      runtime: { label: 'Running', tone: 'ok' as const },
-      authority: pendingAuthority,
-      lifecycle: pendingLifecycle,
-      f8: null,
     },
   });
   flushSync();
-  const groups = [...document.querySelectorAll('.nav-group[role="group"]')];
-  expect(groups).toHaveLength(4);
-  for (const group of groups) {
-    const label = document.getElementById(
-      group.getAttribute('aria-labelledby')!,
-    );
-    expect(label?.textContent?.trim().length).toBeGreaterThan(0);
-  }
+  const rail = [...document.querySelectorAll('.rail-list .nav-item')];
+  expect(rail.map((b) => b.getAttribute('title'))).toEqual(
+    RAIL_ITEMS.map((r) => r.label),
+  );
+  expect(rail.map((b) => b.querySelector('.nav-label')?.textContent)).toEqual(
+    RAIL_ITEMS.map((r) => r.label),
+  );
   const current = [...document.querySelectorAll('[aria-current="page"]')];
   expect(current.map((b) => b.textContent?.trim())).toEqual(['Arsenal']);
-  // What waits for a decision is counted on its item.
+  // What waits for a decision is counted on Activity, and on Approvals under More.
   expect(
-    document.querySelector('.nav-tag.waiting')?.getAttribute('aria-label'),
-  ).toBe('2 waiting');
+    [...document.querySelectorAll('.nav-tag.waiting')].map((t) =>
+      t.getAttribute('aria-label'),
+    ),
+  ).toEqual(['2 waiting', '2 waiting']);
+  // More opens its menu and closes it.
+  const menu = document.querySelector<HTMLElement>('.rail-menu')!;
+  expect(menu.hidden).toBe(true);
+  document.querySelector<HTMLButtonElement>('.rail-more')!.click();
+  flushSync();
+  expect(menu.hidden).toBe(false);
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  flushSync();
+  expect(menu.hidden).toBe(true);
 });
 
 it('draws every compatibility, discovery and delegation state with a symbol, not color alone', () => {

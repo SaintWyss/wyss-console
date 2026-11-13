@@ -55,7 +55,7 @@ export function createRenderer(host: HTMLElement): TerminalRenderer {
     rows: 24,
     scrollback: look.scrollback,
     fontFamily:
-      'ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace',
+      '"IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace',
     fontSize: look.fontSize,
     cursorStyle: look.cursorStyle,
     cursorBlink: look.cursorBlink,

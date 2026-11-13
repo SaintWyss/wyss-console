@@ -180,7 +180,7 @@ it('never lets what is behind the window show through: no blur, no glass mode', 
   // The shell and its chrome paint opaque tokens.
   expect(stylesheet).toMatch(/\.shell\s*\{[^}]*background:\s*var\(--bg\);/s);
   expect(stylesheet).toMatch(
-    /\.top-bar\s*\{[^}]*background:\s*var\(--chrome\);/s,
+    /\.status-bar\s*\{[^}]*background:\s*var\(--chrome\);/s,
   );
   expect(stylesheet).toMatch(
     /\.sidebar\s*\{[^}]*background:\s*var\(--chrome\);/s,

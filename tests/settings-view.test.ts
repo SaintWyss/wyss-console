@@ -433,8 +433,8 @@ it('opens on the preferred view, unless the user already went somewhere', async 
   desktop(late);
   component = mount(App, { target: document.body });
   await flush();
-  document
-    .querySelectorAll<HTMLButtonElement>('.sidebar .nav-item')[2]!
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.sidebar .nav-item'))
+    .find((b) => b.textContent?.includes('Sessions'))!
     .click();
   await flush();
   answer(undefined);
@@ -462,7 +462,13 @@ it('opens on the Console when the preferences cannot be read', async () => {
   desktop(settings);
   component = mount(App, { target: document.body });
   await flush();
-  expect(text(document.querySelector('.context-title'))).toBe('Console');
+  // The Console is open: lit on the rail, and it draws no title.
+  expect(
+    document
+      .querySelector('.rail-list [aria-current="page"]')
+      ?.getAttribute('title'),
+  ).toBe('Console');
+  expect(document.querySelector('.context-title')).toBeNull();
   await openSettings();
   expect(page().querySelector('[role="alert"]')?.textContent).toContain(
     'could not be read',

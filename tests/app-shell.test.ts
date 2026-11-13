@@ -176,25 +176,36 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   component = mount(App, { target: document.body });
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
-  const nav = Array.from(
+  const rail = Array.from(
     document.querySelectorAll<HTMLButtonElement>(
-      '.sidebar .nav-scroll .nav-item',
+      '.sidebar .rail-list .nav-item',
     ),
   );
-  // The fifteen views include Pipelines, Arsenal and Providers, which only read.
-  expect(nav).toHaveLength(15);
-  expect(nav[0].getAttribute('aria-current')).toBe('page');
-  expect(nav.every((b) => !b.disabled)).toBe(true);
-  expect(nav.map((b) => b.textContent?.trim())).toEqual([
+  expect(rail[0].getAttribute('aria-current')).toBe('page');
+  expect(rail.every((b) => !b.disabled)).toBe(true);
+  expect(rail.map((b) => b.textContent?.trim())).toEqual([
     'Console',
     'Workspace',
+    'Arsenal',
+    'Distributors',
+    'Activity',
+    'Settings',
+    'More',
+  ]);
+  // Every view that is not redesigned is still offered, under More.
+  const more = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(
+      '.sidebar .rail-menu .nav-item',
+    ),
+  );
+  expect(more.every((b) => !b.disabled)).toBe(true);
+  expect(more.map((b) => b.textContent?.trim())).toEqual([
     'Sessions',
     'Agents',
     'Pipelines',
     'Remote PCs',
     'Approvals',
     'Events',
-    'Arsenal',
     'Configuration',
     'Models',
     'Providers',
@@ -206,7 +217,8 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   expect(document.querySelector('.nav-tag:not(.waiting)')).toBeNull();
   // Nothing waits for a decision: the Approvals item carries no count.
   expect(document.querySelector('.nav-tag.waiting')).toBeNull();
-  expect(document.querySelector('.context-title')?.textContent).toBe('Console');
+  // The Console draws no view title: its toolbar and session bar frame it.
+  expect(document.querySelector('.context-title')).toBeNull();
   // The workspace opens one terminal on mount, so the pill reports it running.
   expect(pill('terminal')?.textContent).toContain('Terminal');
   expect(pill('terminal')?.textContent).toContain('Running');

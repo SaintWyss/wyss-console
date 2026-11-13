@@ -24,21 +24,20 @@
   } from './launch';
   import { applyOrder, loadOrder, moveLaunch, saveOrder } from './launch-order';
   import { msg, t } from '../../i18n/index.svelte';
+  import SessionBar from './SessionBar.svelte';
+  import { terminalGitStatus } from '../../desktop/terminal-client';
   let {
     onworkspace,
-    onagents,
     visible = true,
     legend = $bindable(false),
     launchesOpen = $bindable(false),
   }: {
     onworkspace?: (state: WorkspaceState) => void;
-    /** Opens the place where an agent is started. */
-    onagents?: () => void;
     /** False while another view is shown. The terminals keep running. */
     visible?: boolean;
-    /** The shortcuts list. The button that shows it lives in the sidebar. */
+    /** The shortcuts list, opened from the Console's toolbar. */
     legend?: boolean;
-    /** The Launch menu is open. The button that opens it lives in the top bar. */
+    /** The Launch menu, opened from the Console's toolbar. */
     launchesOpen?: boolean;
   } = $props();
   let workspace = $state<WorkspaceState>({
@@ -102,7 +101,7 @@
   ): boolean {
     return !!manager?.launch(title, cwd, input);
   }
-  /** Used by the sidebar's tools. */
+  /** Used by the toolbar's split buttons. */
   export function split(dir: 'row' | 'col') {
     if (activeId) manager?.split(activeId, dir);
   }
@@ -129,7 +128,7 @@
       ? { text: error.message, translatable: false }
       : { text: msg('The launch could not be opened.'), translatable: true };
   }
-  /** Opens or closes the Launch menu; the top bar's button calls it. */
+  /** Opens or closes the Launch menu (the toolbar's + Launch). */
   export async function toggleLaunches() {
     launchesOpen = !launchesOpen;
     if (!launchesOpen) return;
@@ -165,6 +164,9 @@
     }
   }
   const activeId = $derived(workspace.active);
+  const focused = $derived(
+    workspace.sessions.find((s) => s.id === workspace.active),
+  );
   const count = $derived(workspace.sessions.length);
   const activeTab = $derived(
     workspace.tabs.find((t) => t.id === workspace.activeTab),
@@ -353,36 +355,57 @@
         </div>
       {/each}
     </div>
+    <div class="top-actions" role="group" aria-label={t('Terminal tools')}>
+      <button
+        type="button"
+        class="top-action icon"
+        disabled={!activeId}
+        title={t('Split side by side (Ctrl+Shift+D)')}
+        aria-label={t('Split side by side')}
+        onclick={() => split('row')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M4 5h16v14H4zM12 5v14" /></svg
+        >
+      </button>
+      <button
+        type="button"
+        class="top-action icon"
+        disabled={!activeId}
+        title={t('Split, one above the other (Ctrl+Shift+E)')}
+        aria-label={t('Split one above the other')}
+        onclick={() => split('col')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M4 5h16v14H4zM4 12h16" /></svg
+        >
+      </button>
+      <button
+        type="button"
+        class="top-action icon legend-trigger"
+        aria-expanded={legend}
+        aria-label={t('Keyboard shortcuts')}
+        title={t('Keyboard shortcuts')}
+        onclick={() => (legend = !legend)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M7 14h10" /></svg
+        >
+      </button>
+      <span class="toolbar-sep" aria-hidden="true"></span>
+      <button
+        type="button"
+        class="top-action launch-trigger"
+        aria-expanded={launchesOpen}
+        aria-haspopup="true"
+        aria-controls="launch-panel"
+        title={t('Your saved launches')}
+        onclick={() => void toggleLaunches()}>+ {t('Launch')}</button
+      >
+    </div>
   </div>
   {#if launchesOpen}
     <div id="launch-panel" class="launch-panel" aria-label={t('Launches')}>
-      <ul class="launch-list">
-        <li>
-          <button
-            class="launch-item"
-            disabled={workspace.creating}
-            onclick={() => {
-              closeMenu();
-              void manager?.create();
-            }}
-          >
-            <span class="launch-name">{t('New terminal')}</span>
-          </button>
-        </li>
-        {#if onagents}
-          <li>
-            <button
-              class="launch-item"
-              onclick={() => {
-                closeMenu();
-                onagents?.();
-              }}
-            >
-              <span class="launch-name">{t('Start agent…')}</span>
-            </button>
-          </li>
-        {/if}
-      </ul>
       {#if launches === null && !launchError}
         <p class="launch-empty">{t('Reading launches…')}</p>
       {:else if launches}
@@ -393,7 +416,7 @@
             })}
           </p>
         {:else}
-          <ul class="launch-list launch-files">
+          <ul class="launch-list">
             {#each ordered as launch, index (launch.id)}
               {@const full = isFullAccess(launch, launchProfiles)}
               <li class="launch-row">
@@ -533,6 +556,19 @@
     {/if}
   </div>
   {#if workspace.sessions.length === 0}<div class="terminal-empty">
-      {t('No terminals open. Create a new terminal to continue.')}
+      <p>{t('No terminals open.')}</p>
+      <button
+        type="button"
+        class="action"
+        disabled={workspace.creating || !manager}
+        onclick={() => void manager?.create()}
+        >{t('New terminal')} <kbd>Ctrl+Shift+T</kbd></button
+      >
     </div>{/if}
+  <SessionBar
+    session={focused}
+    {visible}
+    read={terminalGitStatus}
+    profiles={readProfiles}
+  />
 </section>

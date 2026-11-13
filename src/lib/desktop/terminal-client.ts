@@ -6,6 +6,8 @@ import {
   type HostLifecycle,
   parseHostTerminals,
   parseParserBrief,
+  parseSessionGit,
+  type SessionGit,
   type Attach,
   type HostTerminal,
   type TerminalInfo,
@@ -148,6 +150,14 @@ export function resizeTerminal(
 }
 export function terminalStatus(terminal_id: TerminalId): Promise<TerminalInfo> {
   return invoke<TerminalInfo>('terminal_status', { request: { terminal_id } });
+}
+/** The git state of the folder the host holds for this terminal; never a path the window names. */
+export async function terminalGitStatus(
+  terminal_id: TerminalId,
+): Promise<SessionGit> {
+  return parseSessionGit(
+    await invoke<unknown>('terminal_git_status', { request: { terminal_id } }),
+  );
 }
 export async function closeTerminal(
   terminal_id: TerminalId,

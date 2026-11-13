@@ -10,9 +10,20 @@
 export const ES: Readonly<Record<string, string>> = {
   // Shell: navigation
   Terminals: 'Terminales',
-  'Agents & activity': 'Agentes y actividad',
-  Capabilities: 'Capacidades',
   System: 'Sistema',
+  More: 'Más',
+  Distributors: 'Distribuidores',
+  // Console: toolbar and session bar
+  'Your saved launches': 'Tus lanzamientos guardados',
+  'No terminals open.': 'No hay terminales abiertas.',
+  Branch: 'Rama',
+  'no git': 'sin git',
+  'detached HEAD': 'HEAD suelta',
+  '✓ all committed': '✓ todo commiteado',
+  '● 1 change not committed': '● 1 cambio sin commitear',
+  '● {count} changes not committed': '● {count} cambios sin commitear',
+  '↑{count} not pushed': '↑{count} sin subir',
+  'Native · {agent}': 'Nativa · {agent}',
   Console: 'Consola',
   'Local terminal workspace': 'Terminales locales',
   Workspace: 'Workspace',

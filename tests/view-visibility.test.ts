@@ -69,10 +69,9 @@ it('takes no space for a view that is hidden, whatever display its class sets', 
   }
 });
 
-it('never removes a status from the sidebar, collapsed or not', () => {
+it('never removes a status: the status bar is hidden only on the Console, which has its session bar', () => {
   // A window of 800 px or less once dropped the Codex status, and one of 560 px or less
-  // the authority's: which of the three is broken could not be seen. A status may be drawn
-  // smaller (its state's word, then its name, are clipped); none may be taken away.
+  // the authority's: which of the three is broken could not be seen. None may be taken away.
   const statuses = [
     '.status-cluster',
     '.pill',
@@ -86,35 +85,16 @@ it('never removes a status from the sidebar, collapsed or not', () => {
     .flatMap((rule) => rule.selectors)
     .filter((selector) => statuses.includes(selector));
   expect(removed).toEqual([]);
-  // What is clipped is clipped for the eye only: it keeps a box, so it is still read out.
-  const rail = ".sidebar[data-rail='true']";
-  const narrow = [
-    `${rail} .pill-value`,
-    `${rail} .pill-key`,
-    `${rail} .pill-note`,
-  ];
-  const about = rules.filter((rule) =>
-    rule.selectors.some((selector) => narrow.includes(selector)),
-  );
-  for (const rule of about)
-    expect(rule.body).not.toMatch(/display:\s*none|visibility:\s*hidden/);
-  const clipped = about.filter((rule) =>
-    /clip-path:\s*inset\(50%\)/.test(rule.body),
-  );
-  expect(clipped.flatMap((rule) => rule.selectors).sort()).toEqual(
-    [...narrow].sort(),
-  );
+  const app = readFileSync(join(root, 'src/App.svelte'), 'utf8');
+  expect(app).toMatch(/<StatusBar\s+hidden=\{activeView === 'console'\}/);
 });
 
-it('keeps the collapsed sidebar at its width under the pointer and focus', () => {
-  // It widens only when the owner clicks the button at its foot.
+it('keeps the rail at 52 px: it never widens over the view', () => {
+  expect(css).toMatch(/--sidebar-w:\s*52px;/);
   const widening = rules.filter(
     (rule) =>
-      rule.selectors.some(
-        (selector) =>
-          selector.includes("[data-rail='true']") &&
-          /:hover|:has\(:focus-visible\)/.test(selector),
-      ) && /width:\s*232px/.test(rule.body),
+      rule.selectors.some((selector) => selector.startsWith('.sidebar')) &&
+      /width:\s*232px/.test(rule.body),
   );
   expect(widening).toEqual([]);
 });

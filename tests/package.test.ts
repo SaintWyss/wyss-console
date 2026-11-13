@@ -82,7 +82,7 @@ it('has one name, everywhere it is shown', () => {
   expect(tauriConfig.productName).toBe('Wyss Console');
   expect(tauriConfig.app.windows[0].title).toBe(tauriConfig.productName);
   expect(appInfo.name).toBe(tauriConfig.productName);
-  expect(read('src/lib/shell/TopBar.svelte')).toContain(
+  expect(read('src/App.svelte')).toContain(
     `<h1>${tauriConfig.productName}</h1>`,
   );
   expect(read('index.html')).toContain(

@@ -165,9 +165,8 @@ it('opens Sessions from the sidebar and reads nothing before that', async () => 
   expect(document.querySelector('.context-title')?.textContent).toBe(
     'Sessions',
   );
-  expect(document.querySelector('.context-subtitle')?.textContent).toBe(
-    'Managed agent sessions',
-  );
+  // The title alone: no subtitle under it.
+  expect(document.querySelector('.context-subtitle')).toBeNull();
   expect(view().hidden).toBe(false);
   expect(ipc.sent('managed_sessions_page')).toEqual([
     { command: 'managed_sessions_page', request: { before: null } },

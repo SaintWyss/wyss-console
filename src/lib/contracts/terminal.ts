@@ -336,3 +336,71 @@ export function parseHostLifecycle(value: unknown): HostLifecycle {
     events,
   };
 }
+
+/** The git state of a session's folder (session bar). `unknown`: the folder or git could not be read. */
+export type SessionGit = (
+  | { kind: 'unknown'; dir: string | null }
+  | { kind: 'no_repo'; dir: string }
+  | {
+      kind: 'repo';
+      dir: string;
+      /** `null` when HEAD is detached. */
+      branch: string | null;
+      changes: number;
+      /** `null` when the branch has no upstream. */
+      ahead: number | null;
+      /** The count of changes is a lower bound. */
+      truncated: boolean;
+    }
+) & {
+  /** The owner's home, to read the folder as ~/…; never used as a path. */
+  home?: string | null;
+};
+
+function count(value: unknown): number | null {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= 0xffff_ffff
+    ? value
+    : null;
+}
+function text(value: unknown, max = 4096): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    ? value
+    : null;
+}
+
+/** Reads what `terminal_git_status` answered; anything of another shape is `unknown`. */
+export function parseSessionGit(value: unknown): SessionGit {
+  if (typeof value !== 'object' || value === null)
+    return { kind: 'unknown', dir: null };
+  const v = value as Record<string, unknown>;
+  const dir = text(v.dir);
+  const home = text(v.home);
+  return { ...read(v, dir), home };
+}
+function read(v: Record<string, unknown>, dir: string | null): SessionGit {
+  if (v.kind === 'no_repo' && dir) return { kind: 'no_repo', dir };
+  if (v.kind === 'repo' && dir) {
+    const changes = count(v.changes);
+    const ahead = v.ahead === null ? null : count(v.ahead);
+    const branch = v.branch === null ? null : text(v.branch, 256);
+    if (
+      changes === null ||
+      (v.ahead !== null && ahead === null) ||
+      (v.branch !== null && branch === null) ||
+      typeof v.truncated !== 'boolean'
+    )
+      return { kind: 'unknown', dir };
+    return {
+      kind: 'repo',
+      dir,
+      branch,
+      changes,
+      ahead,
+      truncated: v.truncated,
+    };
+  }
+  return { kind: 'unknown', dir };
+}

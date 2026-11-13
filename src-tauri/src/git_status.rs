@@ -255,6 +255,42 @@ mod tests {
         );
     }
 
+    /// A repository whose index holds stale stat data for a file whose content did not change:
+    /// a plain `git status` refreshes and rewrites that index.
+    fn stale_index(name: &str) -> (Temp, PathBuf) {
+        let root = temp(name);
+        git(&root.0, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.0.join("same.txt"), "same\n").unwrap();
+        git(&root.0, &["add", "same.txt"]);
+        git(&root.0, &["commit", "-qm", "one"]);
+        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::write(root.0.join("same.txt"), "same\n").unwrap();
+        let index = root.0.join(".git/index");
+        (root, index)
+    }
+
+    #[test]
+    fn a_stale_index_is_not_rewritten_while_plain_git_status_would_rewrite_it() {
+        // Control: without the guards git refreshes the index, so the check below can fail.
+        let (control, index) = stale_index("control");
+        let before = std::fs::read(&index).unwrap();
+        git(&control.0, &["status", "--porcelain"]);
+        assert_ne!(
+            std::fs::read(&index).unwrap(),
+            before,
+            "plain git status rewrites a stale index"
+        );
+
+        let (guarded, index) = stale_index("guarded");
+        let before = std::fs::read(&index).unwrap();
+        assert!(matches!(
+            status_with(&guarded.0, LIMIT, ENV),
+            Ok(GitStatus::Repo { changes: 0, .. })
+        ));
+        assert!(!guarded.0.join(".git/index.lock").exists());
+        assert_eq!(std::fs::read(&index).unwrap(), before, "index untouched");
+    }
+
     #[test]
     fn a_branch_without_upstream_has_no_ahead_count() {
         let root = temp("local");

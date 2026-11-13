@@ -56,16 +56,14 @@
     type LifecycleObservation,
   } from './lib/shell/lifecycle';
   import Sidebar from './lib/shell/Sidebar.svelte';
-  import { setLanguage, t } from './lib/i18n/index.svelte';
-  import { loadSidebar, saveSidebar } from './lib/shell/sidebar-prefs';
-  import type { NavGroup } from './lib/shell/nav';
-  import TopBar from './lib/shell/TopBar.svelte';
+  import { msg, setLanguage, t } from './lib/i18n/index.svelte';
+  import StatusBar from './lib/shell/StatusBar.svelte';
   import {
     followAuthority,
     pendingAuthority,
     type AuthorityObservation,
   } from './lib/shell/authority';
-  import { navItems, type ViewId } from './lib/shell/nav';
+  import { navItems, type ShownView } from './lib/shell/nav';
   import {
     idleRuntime,
     summarizeRuntime,
@@ -73,21 +71,8 @@
   } from './lib/shell/runtime';
 
   let version = $state('');
-  let activeView = $state<ViewId>('console');
-  let sidebar = $state(loadSidebar());
-  function toggleRail() {
-    sidebar = { ...sidebar, rail: !sidebar.rail };
-    saveSidebar(sidebar);
-  }
-  function toggleGroup(group: NavGroup) {
-    sidebar = {
-      ...sidebar,
-      closed: sidebar.closed.includes(group)
-        ? sidebar.closed.filter((entry) => entry !== group)
-        : [...sidebar.closed, group],
-    };
-    saveSidebar(sidebar);
-  }
+  // Activity is not a view of its own: it shows Approvals over Events, both unchanged.
+  let activeView = $state<ShownView>('console');
   // The terminal workspace is mounted on the first visit to the Console, and stays mounted after
   // it. The provisional 'console' above does not count: the preference decides where the window opens.
   let consoleOpened = $state(false);
@@ -193,7 +178,14 @@
   );
   let opened = false;
   let navigated = false;
-  const current = $derived(items.find((item) => item.id === activeView));
+  const activity = $derived(activeView === 'activity');
+  // The name of the view, alone, over every view but the Console: under More it is the only
+  // place that says which view is open. No subtitle.
+  const title = $derived(
+    activity
+      ? msg('Activity')
+      : (items.find((item) => item.id === activeView)?.label ?? ''),
+  );
 
   // Sessions are read only while their view is shown.
   $effect(() => {
@@ -211,13 +203,13 @@
   // Approvals are read while their view is shown or a turn is being followed: an
   // approval exists only for a turn that runs. Nothing is read for them otherwise.
   $effect(() => {
-    approvalsController.setVisible(activeView === 'approvals');
+    approvalsController.setVisible(activeView === 'approvals' || activity);
   });
   $effect(() => {
     approvalsController.setWatching(agent.following);
   });
   $effect(() => {
-    eventsController.setVisible(activeView === 'events');
+    eventsController.setVisible(activeView === 'events' || activity);
   });
   // The Models view reads the same inventory as Configuration, the managed sessions of the
   // Sessions view and the profiles, and the runtime's list: it asks for nothing of its own.
@@ -329,7 +321,7 @@
     };
   });
 
-  function go(view: ViewId) {
+  function go(view: ShownView) {
     navigated = true;
     if (view === 'console') consoleOpened = true;
     activeView = view;
@@ -396,44 +388,33 @@
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
-  let canSplit = $state(false);
   let legend = $state(false);
   let launchOpen = $state(false);
   function observeWorkspace(state: WorkspaceState) {
     runtime = summarizeRuntime(state);
-    canSplit = !!state.active;
   }
+  const f8Link = $derived(
+    f8.gate === 'active' && f8.link ? linkText(f8.link) : null,
+  );
 </script>
 
-<div class="shell" data-rail={sidebar.rail}>
+<div class="shell">
   <a class="skip-link" href="#main-content">{t('Skip to main content')}</a>
-  <TopBar
-    title={current?.label ?? ''}
-    subtitle={current?.subtitle ?? ''}
-    {version}
-    tools={activeView === 'console'}
-    {canSplit}
-    onsplit={(dir) => terminal?.split(dir)}
-    {legend}
-    ontogglelegend={() => (legend = !legend)}
-    {launchOpen}
-    onlaunch={() => void terminal?.toggleLaunches()}
-  />
+  <!-- The product's name and version are read out; the window's title bar shows the name. -->
+  <div class="visually-hidden">
+    <h1>Wyss Console</h1>
+    {#if version}<span>v{version}</span>{/if}
+  </div>
   <Sidebar
     active={activeView}
     onselect={go}
     waiting={approvals.pending?.length ?? 0}
     {items}
-    rail={sidebar.rail}
-    closed={sidebar.closed}
-    ontogglegroup={toggleGroup}
-    {runtime}
-    {authority}
-    {lifecycle}
-    f8={f8.gate === 'active' && f8.link ? linkText(f8.link) : null}
-    ontogglerail={toggleRail}
   />
-  <main id="main-content" class="content" tabindex="-1">
+  <main id="main-content" class="content" tabindex="-1" data-view={activeView}>
+    {#if activeView !== 'console'}
+      <p class="context-title">{t(title)}</p>
+    {/if}
     {#if notice}
       <AuthorityNotice {notice} {retrying} onretry={retry} />
     {/if}
@@ -445,7 +426,6 @@
         bind:launchesOpen={launchOpen}
         visible={activeView === 'console'}
         onworkspace={observeWorkspace}
-        onagents={() => go('workspace')}
       />
     {/if}
     <WorkspaceView
@@ -502,14 +482,14 @@
       />
     {/if}
     <ApprovalsView
-      visible={activeView === 'approvals'}
+      visible={activeView === 'approvals' || activity}
       {approvals}
       controller={approvalsController}
       {authority}
       {names}
     />
     <EventsView
-      visible={activeView === 'events'}
+      visible={activeView === 'events' || activity}
       {events}
       controller={eventsController}
       {authority}
@@ -563,4 +543,12 @@
       <LifecycleCard />
     </SettingsView>
   </main>
+  <!-- On the Console the session bar takes its place; it stays mounted, and read out, there. -->
+  <StatusBar
+    hidden={activeView === 'console'}
+    {runtime}
+    {authority}
+    {lifecycle}
+    f8={f8Link}
+  />
 </div>

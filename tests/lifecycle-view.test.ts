@@ -298,7 +298,11 @@ it('keeps one lifecycle for every view, and no view starts anything for it', asy
   // lifecycle again, and none retries by itself.
   for (const view of ['Sessions', 'Agents', 'Approvals', 'Events', 'Console']) {
     await click(nav(view));
-    expect(document.querySelector('.context-title')?.textContent).toBe(view);
+    // Every view but the Console is titled; the Console is framed by its toolbar.
+    if (view === 'Console')
+      expect(document.querySelector('.context-title')).toBeNull();
+    else
+      expect(document.querySelector('.context-title')?.textContent).toBe(view);
     expect(document.querySelectorAll('.authority-notice')).toHaveLength(1);
   }
   expect(ipc.count('authority_lifecycle')).toBe(reads);

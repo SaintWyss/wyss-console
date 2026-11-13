@@ -1,14 +1,13 @@
 <script lang="ts">
   import { t } from '../i18n/index.svelte';
-  import StatusList from './StatusList.svelte';
-  import type { AuthorityObservation } from './authority';
-  import type { LifecycleObservation } from './lifecycle';
-  import type { RuntimeSummary, RuntimeTone } from './runtime';
   import {
     NAV_ITEMS,
-    navSections,
-    type NavGroup,
+    RAIL_ITEMS,
+    moreItems,
+    railOf,
     type NavItem,
+    type RailItem,
+    type ShownView,
     type ViewId,
   } from './nav';
 
@@ -17,118 +16,97 @@
     onselect,
     waiting = 0,
     items = NAV_ITEMS,
-    rail = false,
-    closed = [],
-    ontogglegroup,
-    runtime,
-    authority,
-    lifecycle,
-    f8,
-    ontogglerail,
   }: {
-    active: ViewId;
-    onselect: (id: ViewId) => void;
-    /** Approvals waiting for a decision. Shown on their own item. */
+    active: ShownView;
+    onselect: (id: ShownView) => void;
+    /** Approvals waiting for a decision. Counted on Activity and on Approvals under More. */
     waiting?: number;
-    /** What the sidebar offers. Runtimes is in it only while protocol 2 is active. */
+    /** Every view this window offers (Runtimes and Projects only when they exist). */
     items?: readonly NavItem[];
-    /** Collapsed to icons; it widens only when the owner clicks the button at its foot. */
-    rail?: boolean;
-    /** Groups the owner folded. A folded group opens while hovered and when it holds the view. */
-    closed?: readonly NavGroup[];
-    ontogglegroup?: (group: NavGroup) => void;
-    runtime: RuntimeSummary;
-    authority: AuthorityObservation;
-    lifecycle: LifecycleObservation;
-    f8: { label: string; tone: RuntimeTone; note: string | null } | null;
-    ontogglerail?: () => void;
   } = $props();
-  /** A group folded by a click stays folded under the pointer until the pointer leaves it. */
-  let folded = $state<NavGroup | null>(null);
-  function toggle(group: NavGroup) {
-    const closing = !closed.includes(group);
-    ontogglegroup?.(group);
-    folded = closing ? group : null;
+
+  let moreOpen = $state(false);
+  const lit = $derived(railOf(active));
+  const more = $derived(moreItems(items));
+
+  function choose(item: RailItem) {
+    if (item.view === null) {
+      moreOpen = !moreOpen;
+      return;
+    }
+    moreOpen = false;
+    onselect(item.view);
   }
-  function choose(item: NavItem) {
-    if (closed.includes(item.group)) ontogglegroup?.(item.group);
-    onselect(item.id);
+  function pick(id: ViewId) {
+    moreOpen = false;
+    onselect(id);
   }
-  const sections = $derived(navSections(items));
+  function onWindowClick(event: MouseEvent) {
+    if (
+      moreOpen &&
+      !(event.target as Element | null)?.closest('.rail-more, .rail-menu')
+    )
+      moreOpen = false;
+  }
+  function onWindowKey(event: KeyboardEvent) {
+    if (moreOpen && event.key === 'Escape') {
+      moreOpen = false;
+      document.querySelector<HTMLElement>('.rail-more')?.focus();
+    }
+  }
 </script>
 
-<div class="sidebar-slot">
-  <nav class="sidebar" aria-label={t('Primary')} data-rail={rail}>
-    <StatusList {runtime} {authority} {lifecycle} {f8} />
-    <div class="nav-scroll">
-      {#each sections as section (section.group)}
-        <div
-          class="nav-group"
-          role="group"
-          aria-labelledby={`nav-${section.group}`}
-          data-open={!closed.includes(section.group)}
-          data-folded={folded === section.group}
-          onmouseleave={() => {
-            if (folded === section.group) folded = null;
-          }}
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
+
+<nav class="sidebar" aria-label={t('Primary')}>
+  <ul class="rail-list">
+    {#each RAIL_ITEMS as item (item.id)}
+      <li class:rail-foot={item.id === 'more'}>
+        <button
+          type="button"
+          class="nav-item"
+          class:rail-more={item.id === 'more'}
+          aria-current={lit === item.id ? 'page' : undefined}
+          title={t(item.label)}
+          aria-haspopup={item.id === 'more' ? 'menu' : undefined}
+          aria-expanded={item.id === 'more' ? moreOpen : undefined}
+          onclick={() => choose(item)}
         >
-          <button
-            type="button"
-            class="nav-section"
-            id={`nav-${section.group}`}
-            aria-expanded={!closed.includes(section.group)}
-            onclick={() => toggle(section.group)}
+          <svg viewBox="0 0 24 24" aria-hidden="true"
+            ><path d={item.icon} /></svg
           >
-            <span>{t(section.label)}</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"
-              ><path d="M6 9l6 6 6-6" /></svg
+          <span class="nav-label visually-hidden">{t(item.label)}</span>
+          {#if item.id === 'activity' && waiting > 0}
+            <span
+              class="nav-tag waiting"
+              aria-label={t('{count} waiting', { count: waiting })}
+              >{waiting}</span
             >
-          </button>
-          <div class="nav-items">
-            <ul>
-              {#each section.items as item (item.id)}
-                <li>
-                  <button
-                    type="button"
-                    class="nav-item"
-                    aria-current={active === item.id ? 'page' : undefined}
-                    title={`${t(item.label)} · ${t(item.subtitle)}`}
-                    onclick={() => choose(item)}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true"
-                      ><path d={item.icon} /></svg
-                    >
-                    <span class="nav-label">{t(item.label)}</span>
-                    {#if item.id === 'approvals' && waiting > 0}
-                      <span
-                        class="nav-tag waiting"
-                        aria-label={t('{count} waiting', { count: waiting })}
-                        >{waiting}</span
-                      >
-                    {/if}
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        </div>
-      {/each}
-    </div>
-    <div class="sidebar-foot">
+          {/if}
+        </button>
+      </li>
+    {/each}
+  </ul>
+  <!-- Kept in the page while closed (hidden), so its views stay addressable by name. -->
+  <div class="rail-menu" role="menu" aria-label={t('More')} hidden={!moreOpen}>
+    {#each more as item (item.id)}
       <button
         type="button"
-        class="nav-item"
-        aria-pressed={rail}
-        title={rail ? t('Expand the sidebar') : t('Collapse the sidebar')}
-        onclick={() => ontogglerail?.()}
+        role="menuitem"
+        class="nav-item rail-menu-item"
+        aria-current={active === item.id ? 'page' : undefined}
+        onclick={() => pick(item.id)}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true"
-          ><path d="M4 5h16v14H4zM9 5v14" /></svg
-        >
-        <span class="nav-label"
-          >{rail ? t('Expand the sidebar') : t('Collapse the sidebar')}</span
-        >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
+        <span class="nav-label">{t(item.label)}</span>
+        {#if item.id === 'approvals' && waiting > 0}
+          <span
+            class="nav-tag waiting"
+            aria-label={t('{count} waiting', { count: waiting })}
+            >{waiting}</span
+          >
+        {/if}
       </button>
-    </div>
-  </nav>
-</div>
+    {/each}
+  </div>
+</nav>

@@ -15,20 +15,20 @@ Superficies opacas y estados honestos en toda la ventana principal. Fuente de to
 Fuente única: tokens en `src/app.css` (`:root`, `[data-theme='light']`, `[data-theme='high_contrast']`).
 Ningún componente usa hex, `rgba()`, `backdrop-filter`, `blur` ni `gradient` para una superficie.
 
-| Token                                                  | Uso                                               |
-| ------------------------------------------------------ | ------------------------------------------------- |
-| `--chrome`                                             | barra superior y barra lateral                    |
-| `--bg`                                                 | lienzo de la vista                                |
-| `--surface`                                            | tarjetas, paneles, diálogos, filas                |
-| `--surface-raised`                                     | campos, filas anidadas, menús                     |
-| `--surface-hover`                                      | hover de filas y botones                          |
-| `--surface-strong`                                     | presionado, pestaña activa                        |
-| `--accent-soft`                                        | seleccionado (sólido, nunca degradado)            |
-| `--line`                                               | divisores y bordes de tarjeta                     |
-| `--line-strong`                                        | bordes de controles (≥ 3:1 sobre toda superficie) |
-| `--focus`                                              | anillo de foco de 2 px con 2 px de separación     |
-| `--ok/-soft/-line`, `--warn…`, `--error…`, `--pending` | estados                                           |
-| `--shadow-pop`                                         | solo menús, diálogos y toasts flotantes           |
+| Token                                                  | Uso                                                 |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| `--chrome`                                             | barra lateral, barra de la Consola, barras de abajo |
+| `--bg`                                                 | lienzo de la vista                                  |
+| `--surface`                                            | tarjetas, paneles, diálogos, filas                  |
+| `--surface-raised`                                     | campos, filas anidadas, menús                       |
+| `--surface-hover`                                      | hover de filas y botones                            |
+| `--surface-strong`                                     | presionado, pestaña activa                          |
+| `--accent-soft`                                        | seleccionado (sólido, nunca degradado)              |
+| `--line`                                               | divisores y bordes de tarjeta                       |
+| `--line-strong`                                        | bordes de controles (≥ 3:1 sobre toda superficie)   |
+| `--focus`                                              | anillo de foco de 2 px con 2 px de separación       |
+| `--ok/-soft/-line`, `--warn…`, `--error…`, `--pending` | estados                                             |
+| `--shadow-pop`                                         | solo menús, diálogos y toasts flotantes             |
 
 Ventana siempre opaca, sin transparencia, blur de KWin ni atributo `data-glass`.
 
@@ -43,7 +43,7 @@ filas de lista 6–8 px. Separación mínima entre controles 8 px.
 
 ## Typography
 
-Familia del sistema (`system-ui`), mono `--font-mono` para rutas, comandos, ids, hashes y versiones.
+IBM Plex Sans (`--font-sans`) y IBM Plex Mono (`--font-mono`, también en la terminal) para rutas, comandos, ids, hashes y versiones. Las fuentes van incluidas en `src/assets/fonts/` (SIL OFL 1.1, `OFL.txt` al lado): la ventana nunca las pide a la red. `main.ts` espera la mono, con tope de 1,5 s, antes de montar, así la terminal mide sus celdas con la fuente final.
 
 | Token       | Tamaño       | Uso                        |
 | ----------- | ------------ | -------------------------- |
@@ -57,28 +57,35 @@ Ningún texto bajo 12 px. Pesos: 400 cuerpo, 500 etiquetas, 600 títulos y nombr
 
 ## Color
 
-Oscuro y claro siguen los temas Warp Dark y Warp Light (fondo, texto, acento y ANSI del oscuro); las superficies son grises neutros. El acento claro es más oscuro que el `#00c2ff` de Warp para cumplir 4,5:1 sobre blanco.
+Tema oscuro **grafito** (dueño, 2026-11-13): sin azul. El acento es blanco cálido y el color queda solo para estados: verde ok, ámbar pendiente, rojo error. `.action.primary` es el acento sólido con texto `--text-on-accent`. Radios de 4 a 6 px, sin cápsulas. Claro y alto contraste conservan sus superficies y pierden el azul del acento.
 
 Los tests de `tests/appearance.test.ts` comprueban que todo
 token de texto ≥ 4,5:1 sobre **todas** las superficies opacas de su tema; `--line-strong` y
 `--focus` ≥ 3:1 sobre todas. Los tonos `-soft` llevan su texto ≥ 4,5:1.
 
-| Tema           | chrome    | bg        | surface   | texto     | acento    |
-| -------------- | --------- | --------- | --------- | --------- | --------- |
-| Oscuro         | `#1c1c1c` | `#121212` | `#1c1c1c` | `#ffffff` | `#00c2ff` |
-| Claro          | `#ebebeb` | `#f5f5f5` | `#ffffff` | `#111111` | `#00678a` |
-| Alto contraste | `#000000` | `#000000` | `#000000` | `#ffffff` | `#00ffff` |
+**Excepción: `--faint`.** El tenue del dueño, `#737373`, da 4,07:1 sobre `--bg` y entre 3,03 y 3,85:1 sobre las demás superficies del grafito. Se usa solo para metadatos (horas, rutas secundarias, contadores), nunca como único portador de información. Piso 3:1, comprobado en el mismo test.
 
-## Barra lateral y controles
+| Tema             | chrome    | bg        | surface   | texto     | acento    |
+| ---------------- | --------- | --------- | --------- | --------- | --------- |
+| Oscuro (grafito) | `#151515` | `#0e0e0e` | `#151515` | `#ececec` | `#e8e3d8` |
+| Claro            | `#ebebeb` | `#f5f5f5` | `#ffffff` | `#111111` | `#4a4337` |
+| Alto contraste   | `#000000` | `#000000` | `#000000` | `#ffffff` | `#ffffff` |
 
-- Jerarquía de superficies del tema oscuro, medida en Warp: barra lateral y barra superior `#1c1c1c`, contenido y terminal `#121212`, paneles `#1c1c1c`, controles `#242424`. La barra lateral ocupa todo el alto de la ventana; la barra superior solo la columna del contenido.
-- El botón de abajo de la barra lateral la colapsa a una columna de iconos (52 px). Colapsada, se abre sobre la vista (232 px, 180 ms) mientras el puntero o el foco de teclado están encima, sin empujar el contenido. La preferencia se guarda en `localStorage` (`wyss-console.sidebar`); si no se puede leer, arranca abierta. La lista de vistas se desplaza sin dibujar barra de desplazamiento. La barra lateral no tiene cabecera: empieza con los estados.
-- Arriba de la lista van los estados (Terminal, Codex, Authority), uno por línea; colapsada queda el punto y el texto sigue leyéndose para lectores de pantalla. La versión no se dibuja: la leen los lectores de pantalla.
-- Cada grupo (Terminals, Agents & activity, Capabilities, System) se pliega con un clic en su título. Un grupo plegado se abre al pasar el puntero y queda abierto al elegir uno de sus ítems o al volver a hacer clic en el título. Plegar con clic cierra el grupo en el acto, aunque el puntero siga encima, hasta que el puntero salga.
-- Barra superior, en la Console: título y subtítulo en una línea, y a la derecha, centrados, cuatro botones de 28 px: dividir en dos columnas, dividir en dos filas, atajos de teclado y **Launch ▾**. Su menú (vertical) lista **New terminal**, **Start agent…** y los lanzamientos de `~/.config/wyss-console/launch`, en el orden que el dueño les dio con **Order** (flechas ▲▼; se guarda en `localStorage`, `wyss-console.launch-order`).
-- Botones: 28 px, borde `--line`, sin acento. `.action.primary` usa superficie neutra.
-- Pestañas de terminal: texto con subrayado de 2 px en la activa; no son botones con borde ni hay línea de base. Sin pestañas no se dibuja la franja.
-- Estado vacío de la Console: el mensaje centrado en toda el área de contenido, sin recuadro.
+Grafito, resto: controles `#1e1e1e`, hover `#232323`, presionado `#262626`, líneas `#2a2a2a`, bordes de control `#808080`, secundario `#a3a3a3`, tenue `#737373`, seleccionado `#232220`, texto sobre acento `#121212`, pendiente `#f5c044` (ámbar).
+
+## Barra lateral, barras y Consola
+
+- **Barra lateral:** columna de iconos de 52 px, fija, sin colapsar ni ensancharse, que ocupa todo el alto. Siete entradas: Consola, Workspace, Arsenal, Distribuidores, Actividad, Ajustes y **Más** (al pie). El nombre de cada una va en tooltip (`title`) y en texto oculto para lectores. La activa lleva `--accent-soft` y una barra de 3 px de acento.
+- **Más** abre un menú (`role="menu"`, Escape o clic afuera lo cierra) con cada vista de `navItems()` que la barra no abre: Sesiones, Agentes, Runtimes (solo con el protocolo 2 activo), Pipelines, PCs remotas, Aprobaciones, Eventos, Configuración, Modelos, Proveedores, Perfiles, Credenciales, Ajustes y Proyectos (solo si están activados). Una vista abierta desde Más ilumina Más.
+- **Mientras se rediseñan**, Distribuidores abre Proveedores y Actividad muestra Aprobaciones arriba y Eventos abajo, sin cambios en esas vistas. El contador de aprobaciones pendientes va en Actividad y en Aprobaciones.
+- **Sin barra superior.** Cada vista que no es la Consola lleva solo su nombre (`.context-title`), sin subtítulo. El nombre y la versión del producto quedan para lectores de pantalla.
+- **Barra de estados** (`.status-bar`, abajo): Terminal, Agente y Autoridad en una línea, en toda vista menos la Consola. En la Consola queda montada y oculta, y la reemplaza el pie de sesión.
+- **Barra de la Consola** (40 px): las pestañas a la izquierda; a la derecha, dividir al costado, dividir arriba/abajo, atajos (la lista de `keymap.ts`) y, tras un separador, **+ Lanzar**. Su menú lista solo los lanzamientos guardados, en el orden que el dueño les dio con **Order** (`localStorage`, `wyss-console.launch-order`), y los archivos rechazados con su motivo. Una terminal nueva se abre con Ctrl+Shift+T o con el botón del estado vacío.
+- **Pie de sesión** (`.session-bar`), del panel enfocado: carpeta (como `~/…`, la ruta completa en el tooltip) · rama (o "HEAD suelta") · "✓ todo commiteado" / "● N cambios sin commitear" (N+ si la salida se cortó) · "↑N sin subir" (solo si la rama tiene upstream y N > 0) · "sin git" fuera de un repositorio. A la derecha: "Terminal", o "Nativa · {agente}" con el modelo de su perfil, o el nombre del perfil si no fija modelo. Si git no se pudo leer, muestra solo la carpeta. Se lee al cambiar el foco y cada 5 s mientras la Consola está a la vista, con una consulta por vez. Una respuesta que llega después de que cambió el foco se descarta.
+- **De dónde sale el git:** `terminal_git_status { terminal_id }`. El escritorio pide al host la terminal y usa la carpeta actual de su proceso (`/proc/<pid>/cwd`) o, si no la puede leer, la de arranque; nunca una ruta de la ventana. Corre `git status --porcelain=v2 --branch` con `GIT_OPTIONAL_LOCKS=0`, `--no-optional-locks`, sin fsmonitor, hooks, pager ni prompt, stdin cerrado y 2 s de tope (`src-tauri/src/git_status.rs`).
+- **Botones:** 28 px, borde `--line`. `.action.primary` usa el acento sólido.
+- **Pestañas de terminal:** texto con subrayado de 2 px en la activa.
+- **Estado vacío de la Consola:** el mensaje y **Terminal nueva** centrados, sin recuadro.
 
 ## Copywriting
 
@@ -86,11 +93,11 @@ Inglés, como el resto de la app; sentence case; verbos que dicen lo que pasa. L
 
 ## Contenido
 
-| Elemento        | Valor                                                  | Fuente                          |
-| --------------- | ------------------------------------------------------ | ------------------------------- |
-| Navegación      | Terminals · Agents & activity · Capabilities · System  | `nav.ts`                        |
-| Compatibilidad  | Supported / Unverified / Unsupported con símbolo ✓ ? ✕ | `compatibility.status`          |
-| Datos de vistas | Los que devuelve el desktop                            | Contratos `src/lib/contracts/*` |
+| Elemento        | Valor                                                                      | Fuente                          |
+| --------------- | -------------------------------------------------------------------------- | ------------------------------- |
+| Navegación      | Consola · Workspace · Arsenal · Distribuidores · Actividad · Ajustes · Más | `RAIL_ITEMS` en `nav.ts`        |
+| Compatibilidad  | Supported / Unverified / Unsupported con símbolo ✓ ? ✕                     | `compatibility.status`          |
+| Datos de vistas | Los que devuelve el desktop                                                | Contratos `src/lib/contracts/*` |
 
 ## Estados
 
@@ -99,7 +106,8 @@ Inglés, como el resto de la app; sentence case; verbos que dicen lo que pasa. L
 | `.action`          | superficie + borde `--line-strong`                       | `--surface-hover`            | anillo `--focus`             | `--surface-strong`                                                        | opacidad .55 + `not-allowed`, sin hover | texto de la acción en curso (lo pone la vista) | —                         | —                                     |
 | `.action.primary`  | `--accent-soft` + borde acento + texto `--accent-strong` | acento un paso más fuerte    | anillo                       | —                                                                         | igual a disabled                        | —                                              | —                         | —                                     |
 | `.action.danger`   | `--error-soft` + borde error                             | más saturado                 | anillo                       | —                                                                         | igual a disabled                        | —                                              | —                         | —                                     |
-| Ítem de navegación | texto `--muted`                                          | `--surface-hover` + `--text` | anillo interior              | `aria-current`: `--accent-soft` sólido + barra 3 px acento + icono acento | —                                       | —                                              | —                         | —                                     |
+| Ítem de navegación | icono `--muted`                                          | `--surface-hover` + `--text` | anillo interior              | `aria-current`: `--accent-soft` sólido + barra 3 px acento + icono acento | —                                       | —                                              | —                         | —                                     |
+| Pie de sesión      | carpeta · rama · estado del git · agente                 | —                            | —                            | —                                                                         | —                                       | carpeta sola hasta que git responde            | sin sesión: no se dibuja  | git no leído: carpeta sola            |
 | Campo / select     | `--surface-raised`, borde `--line-strong`                | borde `--muted`              | anillo                       | —                                                                         | fondo `--chrome`, texto `--faint`       | —                                              | placeholder `--faint`     | borde `--error-line` + mensaje debajo |
 | Fila con estado    | franja según `data-tone`                                 | `--surface-hover`            | anillo                       | seleccionada: `--accent-soft` sólido                                      | —                                       | franja `pending`                               | `.empty-state` con acción | franja `error` + texto del error      |
 | Insignia           | texto + símbolo + borde del tono                         | —                            | —                            | —                                                                         | —                                       | —                                              | —                         | —                                     |
@@ -111,13 +119,13 @@ Ningún estado se comunica solo por color: siempre hay texto o símbolo.
 
 Ventana de escritorio, `min-width: 320px`.
 
-| Ancho        | Cambio                                                                                         |
-| ------------ | ---------------------------------------------------------------------------------------------- |
-| ≥ 1280 px    | navegación con secciones y etiquetas (232 px); vistas a dos columnas donde ya lo eran          |
-| 1024 px      | igual; píldoras de estado pierden notas                                                        |
-| 768 px       | Workspace y Settings a una columna; filtros de Arsenal se envuelven                            |
-| 720 px       | navegación pasa a riel de iconos de 60 px con `title`; secciones ocultas, separadores visibles |
-| 375 / 320 px | barra superior solo marca + estado; acciones de toolbar envuelven; sin scroll horizontal       |
+| Ancho        | Cambio                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------- |
+| ≥ 1280 px    | barra lateral de iconos de 52 px en todo ancho; vistas a dos columnas donde ya lo eran |
+| 1024 px      | igual; píldoras de estado pierden notas                                                |
+| 768 px       | Workspace y Settings a una columna; filtros de Arsenal se envuelven                    |
+| 640 px       | la barra de la Consola envuelve: pestañas en una fila, herramientas debajo             |
+| 375 / 320 px | el pie de sesión y la barra de estados envuelven; sin scroll horizontal                |
 
 Texto al 200 %: sin solapes; filas crecen en alto (`min-height`, nunca `height` fija). Rutas,
 comandos y nombres largos usan `overflow-wrap: anywhere` o elipsis con `title`. Ambos temas en

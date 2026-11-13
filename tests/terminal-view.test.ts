@@ -147,7 +147,9 @@ it('keeps AppInfo IPC in the minimal application header', async () => {
   component = mount(App, { target: document.body });
   await flush();
   expect(document.querySelector('h1')?.textContent).toBe('Wyss Console');
-  expect(document.querySelector('header')?.textContent).toContain('1B-test');
+  expect(document.querySelector('.visually-hidden')?.textContent).toContain(
+    '1B-test',
+  );
   expect(commands.filter((c) => c === 'get_app_info')).toHaveLength(1);
 });
 
@@ -437,18 +439,27 @@ it('preserves narrow IPC capabilities and production script/network restrictions
 });
 
 /** New terminal is the first entry of the Launch menu: opens the menu when it is closed. */
+/** New terminal: the empty state's button when nothing is open, Ctrl+Shift+T otherwise. The
+ * Launch menu lists only saved launches. */
 const newTerminal = () => {
-  const find = () =>
-    Array.from(document.querySelectorAll('.launch-panel button')).find((b) =>
-      b.textContent?.includes('New terminal'),
-    ) as HTMLButtonElement | undefined;
-  if (!find()) {
-    const exported = component as unknown as {
-      toggleLaunches(): Promise<void>;
-    };
-    flushSync(() => void exported.toggleLaunches());
-  }
-  return find()!;
+  const button = document.querySelector<HTMLButtonElement>(
+    '.terminal-empty button',
+  );
+  if (button) return button;
+  return {
+    disabled: false,
+    click() {
+      document.querySelector('.terminal-feature')!.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          code: 'KeyT',
+          ctrlKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+  };
 };
 it('creates distinct tabs, ARIA panels and selects the new terminal', async () => {
   component = mount(TerminalView, { target: document.body });
@@ -584,7 +595,16 @@ it('shows isolated failed tab and keeps new-terminal action available', async ()
   component = mount(TerminalView, { target: document.body });
   await flush();
   expect(document.querySelector('[role=tab]')?.textContent).toContain('failed');
-  expect(newTerminal().disabled).toBe(false);
+  // Ctrl+Shift+T is still taken by the Console with a failed tab open.
+  const chord = new KeyboardEvent('keydown', {
+    code: 'KeyT',
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.querySelector('.terminal-feature')!.dispatchEvent(chord);
+  expect(chord.defaultPrevented).toBe(true);
   expect(
     document.querySelector<HTMLButtonElement>('[aria-label="Close Terminal 1"]')
       ?.disabled,

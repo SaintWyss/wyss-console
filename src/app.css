@@ -88,8 +88,7 @@
   --font-mono:
     'IBM Plex Mono', ui-monospace, 'DejaVu Sans Mono', 'Liberation Mono',
     monospace;
-  --sidebar-w: 232px;
-  --topbar-h: 56px;
+  --sidebar-w: 52px;
   --control-h: 36px;
   font-family: var(--font-sans);
   font-size: var(--text-md);
@@ -338,75 +337,103 @@ code,
   background: var(--surface-hover);
 }
 
-/* Shell: an opaque window. Chrome (top bar, sidebar) one step darker than the view canvas,
-   regions divided by hairlines. Nothing behind the window shows through. */
+/* Shell: an opaque window. A 52 px rail of icons, the view, and (outside the Console) a
+   status bar. Nothing behind the window shows through. */
 .shell {
   position: relative;
   isolation: isolate;
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  transition: none;
-  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   background: var(--bg);
 }
-
-.top-bar {
-  grid-column: 2;
-  grid-row: 1;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  padding: 0 14px 0 6px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--line);
-}
-.shell[data-rail='true'] {
-  --sidebar-w: 52px;
-}
-/* The sidebar changes width only when the owner clicks the button at its foot. */
-.sidebar-slot {
+.sidebar {
   position: relative;
   z-index: 5;
   grid-column: 1;
   grid-row: 1 / -1;
   min-height: 0;
-}
-.sidebar {
-  position: absolute;
-  inset: 0 auto 0 0;
-  box-sizing: border-box;
-  width: 232px;
-  padding: 12px 8px 8px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   background: var(--chrome);
   border-right: 1px solid var(--line);
-  transition:
-    width 180ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 180ms ease;
 }
-.sidebar[data-rail='true'] {
-  width: 52px;
-}
-/* The list scrolls without drawing a scrollbar. */
-.nav-scroll {
+.rail-list {
   flex: 1;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: none;
 }
-.nav-scroll::-webkit-scrollbar {
+.rail-list > li.rail-foot {
+  margin-top: auto;
+}
+.rail-menu {
+  position: absolute;
+  z-index: 6;
+  left: calc(100% + 6px);
+  bottom: 8px;
+  width: 232px;
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+.rail-menu[hidden] {
   display: none;
 }
-.sidebar-foot {
+.nav-item.rail-menu-item {
+  min-height: 36px;
+  display: flex;
+  place-items: initial;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.nav-item.rail-menu-item:hover {
+  background: var(--surface-hover);
+}
+.nav-item.rail-menu-item[aria-current='page'] {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.rail-menu-item svg {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  overflow: hidden;
-  margin-top: 6px;
-  padding-top: 6px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.status-bar[hidden] {
+  display: none;
+}
+.context-title {
+  margin: 0 0 10px;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.status-bar {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--chrome);
   border-top: 1px solid var(--line);
 }
 .visually-hidden {
@@ -416,12 +443,6 @@ code,
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sidebar,
-  .nav-items {
-    transition: none;
-  }
 }
 .skip-link {
   position: fixed;
@@ -443,7 +464,7 @@ code,
 }
 .content {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -534,7 +555,7 @@ code,
   color: var(--faint);
 }
 
-/* Top bar */
+/* Console toolbar actions */
 .top-actions {
   flex-shrink: 0;
   display: flex;
@@ -575,63 +596,20 @@ code,
   background: var(--surface-strong);
   border-color: var(--line-strong);
 }
-.context {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.context-title {
-  font-size: var(--text-md);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.context-subtitle {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .status-cluster {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  flex-shrink: 0;
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 18px;
+  min-width: 0;
 }
-.sidebar .pill {
+.status-bar .pill {
   height: 26px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  overflow: hidden;
-}
-.sidebar .pill .pill-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sidebar[data-rail='true'] .pill {
-  justify-content: center;
   padding: 0;
-}
-/* Collapsed: the dot stays; the words are clipped for the eye and still read out. */
-.sidebar[data-rail='true'] .pill-key,
-.sidebar[data-rail='true'] .pill-value,
-.sidebar[data-rail='true'] .pill-note {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 .pill {
   display: inline-flex;
@@ -743,74 +721,7 @@ code,
   --stripe: var(--error);
 }
 
-/* Sidebar: the views in four groups, in the order they always had. */
-.nav-group + .nav-group {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-}
-.nav-section {
-  width: 100%;
-  min-height: 24px;
-  margin: 0;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--faint);
-}
-.nav-section:hover:not(:disabled) {
-  background: transparent;
-  color: var(--text);
-}
-.nav-section svg {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 180ms ease;
-}
-.nav-group[data-open='false'] .nav-section svg,
-.nav-group[data-open='false'][data-folded='true'] .nav-section svg {
-  transform: rotate(-90deg);
-}
-/* Items fold to nothing and open smoothly: while hovered, when held open, or when the view is theirs. */
-.nav-items {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 180ms cubic-bezier(0.2, 0, 0, 1);
-}
-.nav-items > ul {
-  min-height: 0;
-  overflow: hidden;
-}
-.nav-group[data-open='true'] .nav-items,
-.nav-group:not([data-folded='true']):hover .nav-items,
-.nav-group:has(:focus-visible) .nav-items {
-  grid-template-rows: 1fr;
-}
-/* Collapsed to icons: every group shows its icons and the titles give way to a hairline. */
-.sidebar[data-rail='true'] .nav-items {
-  grid-template-rows: 1fr;
-}
-.sidebar[data-rail='true'] .nav-section {
-  height: 0;
-  min-height: 0;
-  overflow: hidden;
-  visibility: hidden;
-}
+/* Rail: icons only, the name in the tooltip and read out. */
 .sidebar ul {
   list-style: none;
   margin: 0;
@@ -822,11 +733,10 @@ code,
 .nav-item {
   position: relative;
   width: 100%;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 0 9px;
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   white-space: nowrap;
   font-size: var(--text-sm);
@@ -879,13 +789,19 @@ code,
 }
 .nav-tag {
   margin-left: auto;
-  padding: 0 6px;
+  padding: 0 5px;
   font-size: var(--text-xs);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--faint);
 }
 /* Something waits for a decision: the one tag that asks for attention. */
+.nav-item .nav-tag {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  line-height: 16px;
+}
 .nav-tag.waiting {
   min-width: 18px;
   text-align: center;
@@ -921,13 +837,29 @@ code,
 }
 .workspace-toolbar {
   position: relative;
+  min-height: 40px;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0 8px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
 }
-/* No tabs, no strip: nothing to draw above the empty state. */
-.workspace-toolbar:not(:has(.terminal-tab)) {
-  display: none;
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line);
+}
+/* The Console fills the view: its toolbar and session bar are its frame. */
+.content[data-view='console'] {
+  padding: 0;
+}
+.content[data-view='console'] .terminal-feature {
+  gap: 0;
+}
+.content[data-view='console'] .pane-area {
+  margin: 0;
 }
 .terminal-tabs {
   flex: 1;
@@ -1201,21 +1133,74 @@ code,
 }
 .terminal-empty {
   position: absolute;
-  inset: 0;
+  inset: 40px 0 0;
   display: grid;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
   padding: 24px;
   color: var(--muted);
   font-size: var(--text-md);
   text-align: center;
   pointer-events: none;
 }
+.terminal-empty .action {
+  pointer-events: auto;
+}
+/* Session bar: where the focused terminal is and what runs in it. */
+.session-bar {
+  min-height: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 4px 14px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  background: var(--chrome);
+  border-top: 1px solid var(--line);
+}
+.session-bar .bar-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.session-bar .bar-folder {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48ch;
+}
+.session-bar svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.session-bar [data-tone='ok'] {
+  color: var(--ok);
+}
+.session-bar [data-tone='warn'] {
+  color: var(--warn);
+}
+.session-bar .bar-nogit {
+  color: var(--faint);
+}
+.session-bar .bar-agent {
+  margin-left: auto;
+}
 /* Launches (ADR 0059): a menu under the Launch button. New terminal and Start agent come first,
    then the owner's launch files in the order the owner gave them. */
 .launch-panel {
   position: absolute;
   z-index: 20;
-  top: 6px;
+  top: 38px;
   right: 8px;
   width: 320px;
   max-height: min(70vh, 520px);
@@ -2302,27 +2287,6 @@ code,
 }
 
 /* Narrow windows: the sidebar is an icon rail that opens over the view. */
-@media (max-width: 720px) {
-  .shell {
-    --sidebar-w: 52px;
-  }
-  .sidebar {
-    width: 52px;
-  }
-  .sidebar:hover,
-  .sidebar:has(:focus-visible) {
-    width: 232px;
-    box-shadow: var(--shadow-pop);
-  }
-  .context-subtitle {
-    display: none;
-  }
-}
-@media (max-width: 520px) {
-  .top-bar {
-    gap: 10px;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -219,18 +219,30 @@ pub async fn terminal_git_status(
     let link = link.inner().clone();
     blocking(move || {
         let info = link.call("term_status", json!({"terminal_id": request.terminal_id}))?;
-        let cwd = info
+        let started = info
             .get("cwd")
             .and_then(Value::as_str)
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_absolute());
-        let Some(cwd) = cwd else {
-            return Ok(json!({"kind": "unknown"}));
+        // Where the shell is now, after a `cd`: the folder of the process the host started,
+        // read from /proc. A process that ended or cannot be read falls back to where it started.
+        let now = info
+            .get("observed_pid")
+            .and_then(Value::as_u64)
+            .filter(|_| info.get("state").and_then(Value::as_str) == Some("running"))
+            .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/cwd")).ok())
+            .filter(|p| p.is_absolute() && p.is_dir());
+        let Some(dir) = now.or(started) else {
+            return Ok(json!({"kind": "unknown", "dir": null}));
         };
-        Ok(match wyss_console::git_status::status(&cwd) {
+        let mut reply = match wyss_console::git_status::status(&dir) {
             Ok(status) => serde_json::to_value(status).unwrap_or(json!({"kind": "unknown"})),
             Err(_) => json!({"kind": "unknown"}),
-        })
+        };
+        reply["dir"] = json!(dir.to_string_lossy());
+        // For reading the folder as ~/…; the window never uses it as a path.
+        reply["home"] = json!(std::env::var("HOME").ok().filter(|h| h.starts_with('/')));
+        Ok(reply)
     })
     .await
 }
