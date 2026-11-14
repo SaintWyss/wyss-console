@@ -148,7 +148,12 @@ async function show(launches: Launch[], over: Parameters<typeof fake>[0] = {}) {
       onopen: vi.fn(),
       client: f.client,
       launches: async () =>
-        ({ folder: '/c', launches, refused: [] }) as LaunchList,
+        ({
+          folder: '/c',
+          launches,
+          refused: [],
+          system: { id: 'cachyos', like: ['arch'], name: 'CachyOS' },
+        }) as LaunchList,
     },
   });
   for (let i = 0; i < 6; i++) await tick();
@@ -234,9 +239,14 @@ it('opens a launch with commands but does not save over it', async () => {
       directory: '/home/me',
       kind: 'commands',
       commands: ['ls'],
+      variants: [],
+      active: null,
+      template: null,
     },
   ]);
-  expect(text('.notice[data-tone="warn"]')).toContain('edit it in its file');
+  expect(text('.notice[data-tone="warn"]')).toContain(
+    'the file’s own commands run',
+  );
   expect(button('Save').disabled).toBe(true);
   expect(document.querySelector('.le-delete')).toBeNull();
 });
@@ -354,6 +364,7 @@ it('saves the draft as it was when Save was pressed, with the fields disabled me
           folder: '/c',
           launches: [session('estudiar', 'Estudio')],
           refused: [],
+          system: { id: 'cachyos', like: ['arch'], name: 'CachyOS' },
         }) as LaunchList,
     },
   });
@@ -395,6 +406,9 @@ it('shows a command launch as its name, a notice and Try: no distributor, model 
       directory: '/home/me',
       kind: 'commands',
       commands: ['paru'],
+      variants: [],
+      active: null,
+      template: null,
     },
   ]);
   expect(document.querySelector('.le-fields')).toBeNull();
@@ -408,4 +422,118 @@ it('says before saving that a file under another name is written anew and the ol
   expect(text('.notice[data-tone="warn"]')).toContain(
     'saved as a-mano.toml. Saving writes mi-lanzamiento.toml and removes a-mano.toml',
   );
+});
+
+const update: Launch = {
+  id: 'actualizar-sistema',
+  name: 'Actualizar sistema',
+  directory: '/home/me',
+  kind: 'commands',
+  commands: ['sudo pacman -Syu', 'paru -Sua'],
+  variants: [
+    {
+      distro: 'arch',
+      commands: ['sudo pacman -Syu'],
+      options: [],
+      manual: false,
+    },
+    {
+      distro: 'cachyos',
+      commands: ['sudo pacman -Syu', 'paru -Sua'],
+      options: ['aur'],
+      manual: false,
+    },
+  ],
+  active: 'cachyos',
+  template: 'system-update',
+};
+const script = () =>
+  document.querySelector<HTMLTextAreaElement>('.dv-script textarea')!.value;
+const switchOf = (label: string) =>
+  [...document.querySelectorAll<HTMLLabelElement>('.dv-switches label')]
+    .find((l) => l.textContent?.includes(label))!
+    .querySelector('input')!;
+
+it('a distribution’s switches rewrite its script, and the active one cannot be deleted', async () => {
+  await show([update]);
+  expect(text('.dv-system')).toContain('CachyOS (cachyos)');
+  expect(script()).toBe('sudo pacman -Syu\nparu -Sua');
+  expect(switchOf('Include AUR').checked).toBe(true);
+  expect(switchOf('--noconfirm').checked).toBe(false);
+  switchOf('--noconfirm').click();
+  flushSync();
+  expect(script()).toBe('sudo pacman -Syu --noconfirm\nparu -Sua --noconfirm');
+  switchOf('Include AUR').click();
+  flushSync();
+  expect(script()).toBe('sudo pacman -Syu --noconfirm');
+  expect(button('Delete').disabled).toBe(true);
+  button('Save').click();
+  await settle();
+  const saved = ipc.find((c) => c.command === 'launch_save_variants');
+  expect(saved?.args).toEqual({
+    request: {
+      id: 'actualizar-sistema',
+      variants: [
+        update.variants[0],
+        {
+          distro: 'cachyos',
+          commands: ['sudo pacman -Syu --noconfirm'],
+          options: ['noconfirm'],
+          manual: false,
+        },
+      ],
+    },
+  });
+});
+
+it('a script typed by hand turns the switches off until it goes back to them', async () => {
+  await show([update]);
+  const area = document.querySelector<HTMLTextAreaElement>(
+    '.dv-script textarea',
+  )!;
+  area.value = 'sudo pacman -Syu\n\necho listo';
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(
+    document.querySelector<HTMLFieldSetElement>('.dv-switches')!.disabled,
+  ).toBe(true);
+  button('Back to options').click();
+  flushSync();
+  expect(script()).toBe('sudo pacman -Syu\nparu -Sua');
+  // Another distribution can be picked and deleted; a new one is added with its defaults.
+  [...document.querySelectorAll<HTMLButtonElement>('.dv-list .le-item')]
+    .find((b) => b.textContent?.includes('Arch'))!
+    .click();
+  flushSync();
+  expect(button('Delete').disabled).toBe(false);
+  button('Delete').click();
+  flushSync();
+  expect(text('.dv-list')).not.toContain('Arch');
+  button('+ Add distribution').click();
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>('.dv-add .le-item')]
+    .find((b) => b.textContent?.includes('Fedora'))!
+    .click();
+  flushSync();
+  expect(script()).toBe('sudo dnf upgrade --refresh');
+});
+
+it('a variant edited in its file by hand opens with the switches off', async () => {
+  await show([
+    {
+      ...update,
+      variants: [
+        {
+          distro: 'cachyos',
+          commands: ['sysupdate'],
+          options: ['aur'],
+          manual: false,
+        },
+      ],
+    } as Launch,
+  ]);
+  expect(script()).toBe('sysupdate');
+  expect(
+    document.querySelector<HTMLFieldSetElement>('.dv-switches')!.disabled,
+  ).toBe(true);
 });

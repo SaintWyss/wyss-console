@@ -182,6 +182,12 @@ export async function openLaunch(
 ): Promise<Opened> {
   const launch = await deps.getLaunch(id);
   if (launch.kind === 'commands') {
+    if (launch.commands.length === 0)
+      throw new LaunchRefusal(
+        msg(
+          'This launch has no commands for this distribution. Add one in Workspace.',
+        ),
+      );
     deps.openTerminal(
       launch.name,
       launch.directory,

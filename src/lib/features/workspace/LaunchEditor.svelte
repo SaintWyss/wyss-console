@@ -13,7 +13,9 @@
     saveLaunch,
     LaunchError,
     type Launch,
+    type SystemInfo,
   } from '../../desktop/launch-client';
+  import DistroVariants from './DistroVariants.svelte';
   import { DEFAULT_SPEC, hookLabel, toggle } from '../arsenal/environment';
   import { distributorOf } from '../distributors/present';
   import { kTokens } from './estimate';
@@ -73,6 +75,7 @@
 
   let phase = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   let launches = $state<Launch[]>([]);
+  let system = $state<SystemInfo>({ id: '', like: [], name: '' });
   let roles = $state<Roles>({ custom: [], assigned: {}, damaged: false });
   let data = $state<EstimateData>(NO_DATA);
   let q = $state('');
@@ -109,6 +112,7 @@
         loadEstimateData(client),
       ]);
       launches = list.launches;
+      system = list.system;
       roles = r;
       data = read;
       phase = 'ready';
@@ -634,6 +638,7 @@
         <input
           class="le-title"
           disabled={busy}
+          readonly={current?.kind === 'commands'}
           aria-label={t('Launch name')}
           maxlength="60"
           bind:value={d.name}
@@ -686,21 +691,31 @@
             </button>
           {/if}
         {/if}
-        <button
-          type="button"
-          class="action"
-          disabled={busy || (!d.id && !canSave) || (dirty && !canSave)}
-          onclick={() => void tryIt()}
-          >{dirty || !d.id ? t('Save and try') : t('Try')}</button
-        >
-        <button
-          type="button"
-          class="action primary"
-          disabled={busy || !dirty || !canSave}
-          onclick={() => void save()}>{busy ? t('Saving…') : t('Save')}</button
-        >
+        {#if current?.kind !== 'commands'}<button
+            type="button"
+            class="action"
+            disabled={busy || (!d.id && !canSave) || (dirty && !canSave)}
+            onclick={() => void tryIt()}
+            >{dirty || !d.id ? t('Save and try') : t('Try')}</button
+          >
+          <button
+            type="button"
+            class="action primary"
+            disabled={busy || !dirty || !canSave}
+            onclick={() => void save()}
+            >{busy ? t('Saving…') : t('Save')}</button
+          >{/if}
       </header>
-      {#if current && !editable(current)}
+      {#if current?.kind === 'commands'}
+        <DistroVariants
+          launch={current}
+          {system}
+          {onopen}
+          onsaved={(fresh) => {
+            launches = launches.map((l) => (l.id === fresh.id ? fresh : l));
+          }}
+        />
+      {:else if current && !editable(current)}
         <p class="notice" data-tone="warn">
           {t(
             'This launch runs commands from its file. It opens from here; edit it in its file.',

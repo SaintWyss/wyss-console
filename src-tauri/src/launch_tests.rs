@@ -7,9 +7,16 @@ fn places() -> Places {
         .join(format!("wyss-launch-{}", uuid::Uuid::new_v4().simple()));
     let home = root.join("home");
     fs::create_dir_all(home.join("work")).unwrap();
+    let os_release = root.join("os-release");
+    fs::write(
+        &os_release,
+        "NAME=\"CachyOS Linux\"\nPRETTY_NAME=\"CachyOS\"\nID=cachyos\nID_LIKE=arch\n",
+    )
+    .unwrap();
     Places {
         folder: home.join(".config/wyss-console/launch"),
         home,
+        os_release,
     }
 }
 
@@ -27,12 +34,30 @@ fn a_missing_folder_is_made_once_with_the_shipped_launches() {
     let names: Vec<&str> = list.launches.iter().map(|l| l.name.as_str()).collect();
     assert_eq!(names, vec!["Actualizar sistema", "Claude Code", "Codex"]);
     let update = &list.launches[0];
+    let Kind::Commands {
+        commands,
+        variants,
+        active,
+        template,
+    } = &update.kind
+    else {
+        panic!("{update:?}")
+    };
+    // This computer is CachyOS: its variant is what runs, and no option starts switched on but AUR.
     assert_eq!(
-        update.kind,
-        Kind::Commands {
-            commands: vec!["sysupdate".into()]
-        }
+        commands,
+        &vec!["sudo pacman -Syu".to_owned(), "paru -Sua".to_owned()]
     );
+    assert_eq!(active.as_deref(), Some("cachyos"));
+    assert_eq!(template.as_deref(), Some("system-update"));
+    let ids: Vec<&str> = variants.iter().map(|v| v.distro.as_str()).collect();
+    assert_eq!(ids, vec!["arch", "cachyos", "debian", "fedora", "opensuse"]);
+    assert!(
+        variants
+            .iter()
+            .all(|v| !v.commands.join(" ").contains("noconfirm"))
+    );
+    assert_eq!(list.system.id, "cachyos");
     assert_eq!(update.directory, places.home.to_string_lossy());
     for (launch, agent) in [
         (&list.launches[1], "claude_code"),
@@ -188,7 +213,10 @@ fn a_launch_is_read_again_by_its_id_and_a_path_never_names_one() {
     assert_eq!(
         get(&places, "here").unwrap().kind,
         Kind::Commands {
-            commands: vec!["ls".into()]
+            commands: vec!["ls".into()],
+            variants: vec![],
+            active: None,
+            template: None,
         }
     );
 }
@@ -528,4 +556,183 @@ fn a_session_names_its_preset_and_an_empty_name_is_refused() {
     );
     let why = get(&places, "empty").unwrap_err();
     assert!(why.contains("preset must be"), "{why}");
+}
+
+fn system(id: &str, like: &[&str]) -> System {
+    System {
+        id: id.into(),
+        like: like.iter().map(|s| (*s).to_owned()).collect(),
+        name: id.into(),
+    }
+}
+
+#[test]
+fn a_distribution_without_its_own_variant_takes_the_one_it_is_like() {
+    let places = places();
+    let ubuntu = system("ubuntu", &["debian"]);
+    let launch = parse("u", SYSTEM_UPDATE, &places.home, &ubuntu).unwrap();
+    let Kind::Commands {
+        commands, active, ..
+    } = launch.kind
+    else {
+        panic!()
+    };
+    assert_eq!(active.as_deref(), Some("debian"));
+    assert_eq!(commands[0], "sudo apt update");
+    // Nothing matches: the launch is listed and has nothing to type.
+    let other = system("gentoo", &[]);
+    let launch = parse("u", SYSTEM_UPDATE, &places.home, &other).unwrap();
+    let Kind::Commands {
+        commands, active, ..
+    } = launch.kind
+    else {
+        panic!()
+    };
+    assert!(commands.is_empty() && active.is_none());
+    // A file's own commands are the fallback.
+    let text = "name = \"x\"\ncommands = [\"echo all\"]\n[distro.fedora]\ncommands = [\"dnf\"]\n";
+    let launch = parse("x", text, &places.home, &other).unwrap();
+    let Kind::Commands { commands, .. } = launch.kind else {
+        panic!()
+    };
+    assert_eq!(commands, vec!["echo all".to_owned()]);
+}
+
+#[test]
+fn os_release_is_read_with_quotes_and_like_list() {
+    let places = places();
+    fs::write(
+        &places.os_release,
+        "PRETTY_NAME='Linux Mint 22'\nID=linuxmint\nID_LIKE=\"ubuntu debian\"\n",
+    )
+    .unwrap();
+    let s = places.system();
+    assert_eq!(s.id, "linuxmint");
+    assert_eq!(s.like, vec!["ubuntu", "debian"]);
+    assert_eq!(s.name, "Linux Mint 22");
+    assert_eq!(
+        System::read(Path::new("/nonexistent/os-release"))
+            .chain()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn a_variant_with_a_bad_line_or_name_refuses_the_file() {
+    let places = places();
+    let s = system("cachyos", &[]);
+    for text in [
+        "name = \"x\"\n[distro.cachyos]\ncommands = []\n",
+        "name = \"x\"\n[distro.Cachy]\ncommands = [\"a\"]\n",
+        "name = \"x\"\n[distro.cachyos]\ncommands = [\"a\\nrm -rf ~\"]\n",
+        "name = \"x\"\n[distro.cachyos]\ncommands = [\"a\"]\n[session]\nagent = \"codex\"\n",
+    ] {
+        assert!(parse("x", text, &places.home, &s).is_err(), "{text}");
+    }
+}
+
+fn variant(distro: &str, commands: &[&str], options: &[&str], manual: bool) -> Variant {
+    Variant {
+        distro: distro.into(),
+        commands: commands.iter().map(|c| (*c).to_owned()).collect(),
+        options: options.iter().map(|o| (*o).to_owned()).collect(),
+        manual,
+    }
+}
+
+#[test]
+fn variants_are_saved_read_back_and_this_computers_one_stays() {
+    let places = places();
+    list(&places).unwrap();
+    let request = VariantsRequest {
+        id: "actualizar-sistema".into(),
+        variants: vec![
+            variant(
+                "cachyos",
+                &["sudo pacman -Syu --noconfirm"],
+                &["noconfirm"],
+                false,
+            ),
+            variant("void", &["sudo xbps-install -Su"], &[], true),
+        ],
+    };
+    let launch = save_variants(&places, &request).unwrap();
+    let Kind::Commands {
+        commands,
+        variants,
+        active,
+        template,
+    } = launch.kind
+    else {
+        panic!()
+    };
+    assert_eq!(commands, vec!["sudo pacman -Syu --noconfirm".to_owned()]);
+    assert_eq!(active.as_deref(), Some("cachyos"));
+    assert_eq!(template.as_deref(), Some("system-update"));
+    assert_eq!(variants, request.variants);
+    assert_eq!(
+        get(&places, "actualizar-sistema").unwrap().name,
+        "Actualizar sistema"
+    );
+    // Removing this computer's variant is refused and writes nothing.
+    let before = fs::read_to_string(places.folder.join("actualizar-sistema.toml")).unwrap();
+    let refused = VariantsRequest {
+        id: "actualizar-sistema".into(),
+        variants: vec![variant("void", &["x"], &[], true)],
+    };
+    assert!(
+        save_variants(&places, &refused)
+            .unwrap_err()
+            .contains("stays")
+    );
+    for bad in [
+        vec![
+            variant("cachyos", &["a"], &[], false),
+            variant("cachyos", &["b"], &[], false),
+        ],
+        vec![variant("cachyos", &["a\u{1b}[2J"], &[], false)],
+        vec![variant("cachyos", &[], &[], false)],
+        vec![
+            variant("cachyos", &["a"], &[], false),
+            variant("../x", &["a"], &[], false),
+        ],
+    ] {
+        let r = VariantsRequest {
+            id: "actualizar-sistema".into(),
+            variants: bad,
+        };
+        assert!(save_variants(&places, &r).is_err(), "{:?}", r.variants);
+    }
+    assert_eq!(
+        fs::read_to_string(places.folder.join("actualizar-sistema.toml")).unwrap(),
+        before
+    );
+    // A session launch has no distributions.
+    let r = VariantsRequest {
+        id: "codex".into(),
+        variants: vec![],
+    };
+    assert!(save_variants(&places, &r).is_err());
+}
+
+#[test]
+fn the_earlier_shipped_update_is_upgraded_only_while_untouched() {
+    let places = places();
+    write(&places, "actualizar-sistema.toml", SYSTEM_UPDATE_BEFORE);
+    let launch = get(&places, "actualizar-sistema").unwrap();
+    assert!(matches!(&launch.kind, Kind::Commands { variants, .. } if variants.is_empty()));
+    list(&places).unwrap();
+    assert_eq!(
+        fs::read_to_string(places.folder.join("actualizar-sistema.toml")).unwrap(),
+        SYSTEM_UPDATE
+    );
+    // An edited one is never touched.
+    let mine = format!("{SYSTEM_UPDATE_BEFORE}# mine\n");
+    write(&places, "actualizar-sistema.toml", &mine);
+    list(&places).unwrap();
+    assert_eq!(
+        fs::read_to_string(places.folder.join("actualizar-sistema.toml")).unwrap(),
+        mine
+    );
 }

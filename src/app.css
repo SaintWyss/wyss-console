@@ -4846,3 +4846,113 @@ li.native-row .native-note {
   font-size: var(--text-xs);
   color: var(--muted);
 }
+
+/* Workspace: a commands launch's distributions */
+.dv {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 0;
+  overflow: auto;
+}
+.dv-system {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.dv-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .dv-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.dv-list,
+.dv-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dv-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+}
+.dv-dot.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.dv-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--chrome);
+}
+.dv-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dv-head h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  color: var(--text);
+}
+.dv-badge {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.dv-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.dv-switches:disabled {
+  opacity: 0.55;
+}
+.dv-script {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dv-script textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.dv-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dv-spacer {
+  flex: 1;
+}
+.dv-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}

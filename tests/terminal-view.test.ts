@@ -293,6 +293,7 @@ it('preserves narrow IPC capabilities and production script/network restrictions
     'allow-launch-before',
     'allow-launch-save',
     'allow-launch-delete',
+    'allow-launch-save-variants',
     // The host that holds the terminals past the window (F9): what it holds, whether it is
     // a host process, and a redraw of a program's screen after a window attaches.
     'allow-host-terminals',
@@ -412,6 +413,12 @@ it('preserves narrow IPC capabilities and production script/network restrictions
       p !== 'allow-configuration-document-export' &&
       p !== 'allow-configuration-template-export' &&
       p !== 'allow-launch-save' &&
+      // Fourth exception, deliberate and bounded: a commands launch's distribution variants.
+      // The owner edits in Workspace the script each distribution types in a new terminal, so
+      // the window sends commands, for commands launches only: one line each, no control
+      // character, never a session's `before`; the file is re-parsed before it is written and
+      // the variant this computer runs cannot be removed (launch_tests.rs).
+      p !== 'allow-launch-save-variants' &&
       !p.startsWith('allow-native-'),
   ))
     expect(permission).not.toMatch(

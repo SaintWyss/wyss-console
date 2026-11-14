@@ -111,6 +111,9 @@ describe('openLaunch', () => {
       directory: '/home/me',
       kind: 'commands',
       commands: ['sudo -v', 'sysupdate'],
+      variants: [],
+      active: null,
+      template: null,
     });
     expect(await openLaunch('up', d)).toEqual({ notes: [] });
     expect(d.getLaunch).toHaveBeenCalledWith('up');
@@ -121,6 +124,25 @@ describe('openLaunch', () => {
     );
     expect(d.runBefore).not.toHaveBeenCalled();
     expect(d.start).not.toHaveBeenCalled();
+  });
+
+  it('a commands launch with nothing for this distribution opens no terminal and says why', async () => {
+    const { d } = deps({
+      id: 'up',
+      name: 'Actualizar sistema',
+      directory: '/home/me',
+      kind: 'commands',
+      commands: [],
+      variants: [
+        { distro: 'fedora', commands: ['dnf'], options: [], manual: false },
+      ],
+      active: null,
+      template: 'system-update',
+    });
+    await expect(openLaunch('up', d)).rejects.toThrow(
+      'no commands for this distribution',
+    );
+    expect(d.openTerminal).not.toHaveBeenCalled();
   });
 
   it('a session launch runs before, previews the named profile and starts with that plan', async () => {
@@ -301,6 +323,9 @@ it('full access is shown only for a session whose named profile is bypass for it
         directory: '/',
         kind: 'commands',
         commands: ['ls'],
+        variants: [],
+        active: null,
+        template: null,
       },
       PROFILES,
     ),

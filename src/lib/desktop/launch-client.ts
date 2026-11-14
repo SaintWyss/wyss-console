@@ -7,7 +7,12 @@ export type Launch =
       name: string;
       directory: string;
       kind: 'commands';
+      /** What runs on this computer: its distribution's variant, else the file's own commands. */
       commands: string[];
+      variants: Variant[];
+      /** The variant `commands` came from; it cannot be removed. */
+      active: string | null;
+      template: string | null;
     }
   | {
       id: string;
@@ -20,6 +25,21 @@ export type Launch =
       /** The Arsenal preset's name, for this agent (arsenal-UI-SPEC, phase D). */
       preset: string | null;
     };
+/** One distribution's commands for a launch, by its os-release ID. */
+export interface Variant {
+  distro: string;
+  commands: string[];
+  /** The switches the commands were composed from. */
+  options: string[];
+  /** Written by hand: the switches no longer make the commands. */
+  manual: boolean;
+}
+/** The distribution this computer runs, from os-release. */
+export interface SystemInfo {
+  id: string;
+  like: string[];
+  name: string;
+}
 /** What Workspace sends to save a session launch. There is no field for a command. */
 export interface SaveLaunchInput {
   name: string;
@@ -34,6 +54,7 @@ export interface LaunchList {
   folder: string;
   launches: Launch[];
   refused: { id: string; error: string }[];
+  system: SystemInfo;
 }
 export interface BeforeOutcome {
   command: string;
@@ -75,3 +96,6 @@ export const saveLaunch = (input: SaveLaunchInput) =>
 /** Deletes a launch Workspace saved. The owner's own files are refused. */
 export const deleteLaunch = (id: string) =>
   call<void>('launch_delete', { request: { id } });
+/** Replaces a commands launch's distributions; this computer's one cannot be removed. */
+export const saveVariants = (id: string, variants: Variant[]) =>
+  call<Launch>('launch_save_variants', { request: { id, variants } });

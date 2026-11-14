@@ -186,6 +186,7 @@ fn main() {
             "launch_before",
             "launch_save",
             "launch_delete",
+            "launch_save_variants",
             "host_terminals",
             "host_info",
             "terminal_redraw",

@@ -3,8 +3,10 @@
 //!
 //! A launch either opens a terminal in a folder and types its commands there, as if the owner
 //! typed them, or starts a Native session with an agent and a profile named by its name, after
-//! running its `before` commands. The window never sends a command: it names a file by its
-//! stem, and every command comes from that file. The folder sits in the synchronized home, as
+//! running its `before` commands. To start, the window names a file by its stem, and every
+//! command comes from that file. The one place the window writes commands is a commands
+//! launch's distribution variants (`save_variants`), as the owner edits them in Workspace:
+//! one line each, no control character, never a session's `before`. The folder sits in the synchronized home, as
 //! the shell's own start-up files do, so both computers get the same launches.
 use crate::arsenal::Arsenal;
 use crate::arsenal::store::Store;
@@ -43,7 +45,76 @@ struct Spec {
     before: Vec<String>,
     #[serde(default)]
     session: Option<SessionSpec>,
+    /// What builds the variants' scripts in the window (`system-update`); the desktop only keeps it.
+    #[serde(default)]
+    template: Option<String>,
+    /// One variant per distribution, by its os-release `ID`.
+    #[serde(default)]
+    distro: std::collections::BTreeMap<String, VariantSpec>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VariantSpec {
+    #[serde(default)]
+    commands: Vec<String>,
+    #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
+    manual: bool,
+}
+
+/// One distribution's commands for a launch, with the options the window composed them from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Variant {
+    pub distro: String,
+    pub commands: Vec<String>,
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// Written by hand: the options no longer make its commands.
+    #[serde(default)]
+    pub manual: bool,
+}
+
+/// The distribution this computer runs, from os-release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct System {
+    pub id: String,
+    pub like: Vec<String>,
+    pub name: String,
+}
+
+impl System {
+    pub fn read(path: &Path) -> Self {
+        let text = fs::read_to_string(path).unwrap_or_default();
+        let mut out = System::default();
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim().trim_matches('"').trim_matches('\'').to_owned();
+            match key.trim() {
+                "ID" => out.id = value.to_lowercase(),
+                "ID_LIKE" => out.like = value.split_whitespace().map(str::to_lowercase).collect(),
+                "PRETTY_NAME" => out.name = value,
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The ids a variant may be saved under for this computer, the most specific first.
+    fn chain(&self) -> Vec<&str> {
+        std::iter::once(self.id.as_str())
+            .chain(self.like.iter().map(String::as_str))
+            .filter(|id| !id.is_empty())
+            .collect()
+    }
+}
+
+pub const MAX_VARIANTS: usize = 24;
+pub const MAX_OPTIONS: usize = 16;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,8 +130,15 @@ struct SessionSpec {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Kind {
-    /// A new terminal in `directory` with these commands typed, each followed by Enter.
-    Commands { commands: Vec<String> },
+    /// A new terminal in `directory` with these commands typed, each followed by Enter: the
+    /// variant of this computer's distribution when there is one, else the file's own commands.
+    Commands {
+        commands: Vec<String>,
+        variants: Vec<Variant>,
+        /// The variant `commands` came from; it cannot be removed from here.
+        active: Option<String>,
+        template: Option<String>,
+    },
     /// A Native session; `before` runs first, without a terminal.
     Session {
         agent: String,
@@ -93,6 +171,7 @@ pub struct List {
     pub folder: String,
     pub launches: Vec<Launch>,
     pub refused: Vec<Refused>,
+    pub system: System,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -105,6 +184,7 @@ pub struct Outcome {
 pub struct Places {
     pub folder: PathBuf,
     pub home: PathBuf,
+    pub os_release: PathBuf,
 }
 
 impl Places {
@@ -119,21 +199,19 @@ impl Places {
         Some(Self {
             folder: config.join("wyss-console/launch"),
             home,
+            os_release: PathBuf::from("/etc/os-release"),
         })
+    }
+
+    pub fn system(&self) -> System {
+        System::read(&self.os_release)
     }
 }
 
 /// The launches that ship, written once when the folder does not exist yet. The owner edits or
 /// deletes them; a folder that exists is never written again.
 pub const DEFAULTS: [(&str, &str); 3] = [
-    (
-        "actualizar-sistema.toml",
-        r#"# Opens a new terminal in `directory` and types each command, followed by Enter.
-name = "Actualizar sistema"
-directory = "~"
-commands = ["sysupdate"]
-"#,
-    ),
+    ("actualizar-sistema.toml", SYSTEM_UPDATE),
     (
         "claude-code.toml",
         r#"# Starts Claude Code as a Native session with the profile named here (by its name).
@@ -165,6 +243,30 @@ profile = "Full access (bypass)"
 "#,
     ),
 ];
+
+/// The shipped system update: one variant per distribution, edited in Workspace.
+pub const SYSTEM_UPDATE: &str = r#"# Opens a new terminal in `directory` and types the commands of this computer's distribution.
+# Each [distro.<os-release ID>] is edited in Workspace; `options` are the switches it was built from.
+name = "Actualizar sistema"
+directory = "~"
+template = "system-update"
+
+[distro.cachyos]
+options = ["aur"]
+commands = ["sudo pacman -Syu", "paru -Sua"]
+
+[distro.arch]
+commands = ["sudo pacman -Syu"]
+
+[distro.debian]
+commands = ["sudo apt update", "sudo apt full-upgrade"]
+
+[distro.fedora]
+commands = ["sudo dnf upgrade --refresh"]
+
+[distro.opensuse]
+commands = ["sudo zypper refresh", "sudo zypper dup"]
+"#;
 
 fn text_ok(text: &str, most: usize) -> bool {
     !text.trim().is_empty() && text.chars().count() <= most && !text.chars().any(char::is_control)
@@ -204,7 +306,47 @@ fn directory(spec: Option<&str>, home: &Path) -> Result<PathBuf, &'static str> {
     Ok(path)
 }
 
-fn parse(id: &str, text: &str, home: &Path) -> Result<Launch, String> {
+fn commands_ok(commands: &[String]) -> Result<(), String> {
+    if commands.len() > MAX_COMMANDS || !commands.iter().all(|c| command_ok(c)) {
+        return Err(format!(
+            "at most {MAX_COMMANDS} commands, each one line of at most {MAX_COMMAND} characters"
+        ));
+    }
+    Ok(())
+}
+
+fn variants_of(
+    distro: std::collections::BTreeMap<String, VariantSpec>,
+) -> Result<Vec<Variant>, String> {
+    if distro.len() > MAX_VARIANTS {
+        return Err(format!("at most {MAX_VARIANTS} distributions"));
+    }
+    distro
+        .into_iter()
+        .map(|(id, v)| {
+            if !id_ok(&id) {
+                return Err(format!(
+                    "distro.{id}: an os-release ID is lowercase letters, digits, - or _"
+                ));
+            }
+            if v.commands.is_empty() {
+                return Err(format!("distro.{id} needs at least one command"));
+            }
+            commands_ok(&v.commands).map_err(|e| format!("distro.{id}: {e}"))?;
+            if v.options.len() > MAX_OPTIONS || !v.options.iter().all(|o| id_ok(o)) {
+                return Err(format!("distro.{id}: options are short lowercase names"));
+            }
+            Ok(Variant {
+                distro: id,
+                commands: v.commands,
+                options: v.options,
+                manual: v.manual,
+            })
+        })
+        .collect()
+}
+
+fn parse(id: &str, text: &str, home: &Path, system: &System) -> Result<Launch, String> {
     let spec: Spec = toml::from_str(text).map_err(|e| {
         let message = e.message().to_owned();
         format!("not a launch file: {message}")
@@ -213,25 +355,36 @@ fn parse(id: &str, text: &str, home: &Path) -> Result<Launch, String> {
         return Err(format!("name must be 1–{MAX_NAME} characters on one line"));
     }
     let folder = directory(spec.directory.as_deref(), home)?;
-    let kind = match (spec.session, spec.commands.is_empty()) {
-        (Some(_), false) => return Err("a launch has commands or a session, not both".into()),
-        (None, true) => return Err("a launch needs commands or a session".into()),
-        (None, false) => {
+    let runs = !spec.commands.is_empty() || !spec.distro.is_empty();
+    if spec.session.is_some() && (!spec.distro.is_empty() || spec.template.is_some()) {
+        return Err("distro and template belong to a commands launch".into());
+    }
+    if spec.template.as_deref().is_some_and(|t| !id_ok(t)) {
+        return Err("template must be a short lowercase name".into());
+    }
+    let kind = match (spec.session, runs) {
+        (Some(_), true) => return Err("a launch has commands or a session, not both".into()),
+        (None, false) => return Err("a launch needs commands or a session".into()),
+        (None, true) => {
             if !spec.before.is_empty() {
                 return Err(
                     "before belongs to a session; put the commands in order instead".into(),
                 );
             }
-            if spec.commands.len() > MAX_COMMANDS || !spec.commands.iter().all(|c| command_ok(c)) {
-                return Err(format!(
-                    "at most {MAX_COMMANDS} commands, each one line of at most {MAX_COMMAND} characters"
-                ));
-            }
+            commands_ok(&spec.commands)?;
+            let variants = variants_of(spec.distro)?;
+            let matched = system
+                .chain()
+                .into_iter()
+                .find_map(|id| variants.iter().find(|v| v.distro == id));
             Kind::Commands {
-                commands: spec.commands,
+                commands: matched.map(|v| v.commands.clone()).unwrap_or(spec.commands),
+                active: matched.map(|v| v.distro.clone()),
+                variants,
+                template: spec.template,
             }
         }
-        (Some(session), true) => {
+        (Some(session), false) => {
             if !matches!(session.agent.as_str(), "claude_code" | "codex") {
                 return Err("session agent must be claude_code or codex".into());
             }
@@ -307,8 +460,25 @@ fn read_one(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "not UTF-8".to_owned())
 }
 
+/// The system update as it shipped before it had variants. A file still byte-identical to it was
+/// never edited, and is replaced by the one with variants.
+pub const SYSTEM_UPDATE_BEFORE: &str = r#"# Opens a new terminal in `directory` and types each command, followed by Enter.
+name = "Actualizar sistema"
+directory = "~"
+commands = ["sysupdate"]
+"#;
+
+fn upgrade(folder: &Path) {
+    let target = folder.join("actualizar-sistema.toml");
+    if read_one(&target).is_ok_and(|text| text == SYSTEM_UPDATE_BEFORE) {
+        let _ = write_private(folder, &target, SYSTEM_UPDATE);
+    }
+}
+
 pub fn list(places: &Places) -> Result<List, String> {
     seed(&places.folder).map_err(|e| format!("launch folder: {e}"))?;
+    upgrade(&places.folder);
+    let system = places.system();
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     for entry in fs::read_dir(&places.folder).map_err(|e| format!("launch folder: {e}"))? {
         let Ok(entry) = entry else { continue };
@@ -335,7 +505,7 @@ pub fn list(places: &Places) -> Result<List, String> {
             });
             continue;
         }
-        match read_one(&path).and_then(|text| parse(&id, &text, &places.home)) {
+        match read_one(&path).and_then(|text| parse(&id, &text, &places.home, &system)) {
             Ok(launch) => launches.push(launch),
             Err(error) => refused.push(Refused { id, error }),
         }
@@ -345,6 +515,7 @@ pub fn list(places: &Places) -> Result<List, String> {
         folder: display(&places.folder, &places.home),
         launches,
         refused,
+        system,
     })
 }
 
@@ -354,7 +525,90 @@ pub fn get(places: &Places, id: &str) -> Result<Launch, String> {
         return Err("unknown launch".into());
     }
     let text = read_one(&places.folder.join(format!("{id}.toml")))?;
-    parse(id, &text, &places.home)
+    parse(id, &text, &places.home, &places.system())
+}
+
+/// What the window sends to replace a commands launch's distributions. The name, the folder,
+/// the template and the file's own commands stay as the file says.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VariantsRequest {
+    id: String,
+    variants: Vec<Variant>,
+}
+
+/// Rewrites a commands launch with these distributions. The variant this computer runs cannot
+/// be removed: the launch always keeps what this computer starts. The file is read back.
+pub fn save_variants(places: &Places, request: &VariantsRequest) -> Result<Launch, String> {
+    let launch = get(places, &request.id)?;
+    let Kind::Commands {
+        active, template, ..
+    } = &launch.kind
+    else {
+        return Err("only a commands launch has distributions".into());
+    };
+    let text = read_one(&places.folder.join(format!("{}.toml", request.id)))?;
+    let spec: Spec = toml::from_str(&text).map_err(|_| "not a launch file".to_owned())?;
+    if let Some(active) = active
+        && !request.variants.iter().any(|v| &v.distro == active)
+    {
+        return Err(format!(
+            "distro.{active} is this computer's distribution and stays"
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if !request
+        .variants
+        .iter()
+        .all(|v| seen.insert(v.distro.as_str()))
+    {
+        return Err("each distribution once".into());
+    }
+    if request.variants.is_empty() && spec.commands.is_empty() {
+        return Err("a launch needs commands or at least one distribution".into());
+    }
+    let list = |items: &[String]| {
+        format!(
+            "[{}]",
+            items
+                .iter()
+                .map(|c| toml_string(c))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let mut out = format!(
+        "# Edited in Workspace (Wyss Console). Each [distro.<os-release ID>] runs on that distribution.\nname = {}\ndirectory = {}\n",
+        toml_string(&spec.name),
+        toml_string(spec.directory.as_deref().unwrap_or("~")),
+    );
+    if let Some(t) = template {
+        out.push_str(&format!("template = {}\n", toml_string(t)));
+    }
+    if !spec.commands.is_empty() {
+        out.push_str(&format!("commands = {}\n", list(&spec.commands)));
+    }
+    for v in &request.variants {
+        if !id_ok(&v.distro) {
+            return Err(
+                "a distribution is its os-release ID: lowercase letters, digits, - or _".into(),
+            );
+        }
+        out.push_str(&format!("\n[distro.{}]\n", v.distro));
+        if !v.options.is_empty() {
+            out.push_str(&format!("options = {}\n", list(&v.options)));
+        }
+        if v.manual {
+            out.push_str("manual = true\n");
+        }
+        out.push_str(&format!("commands = {}\n", list(&v.commands)));
+    }
+    // Checked as the reader takes it before anything is written.
+    parse(&request.id, &out, &places.home, &places.system())?;
+    let target = places.folder.join(format!("{}.toml", request.id));
+    write_private(&places.folder, &target, &out)
+        .map_err(|e| format!("the launch could not be written: {e}"))?;
+    get(places, &request.id)
 }
 
 /// Runs a session launch's `before` commands in order, in its folder, each in `/bin/sh -c`
@@ -597,7 +851,7 @@ pub fn save(
     if let Some(preset) = &request.preset {
         text.push_str(&format!("preset = {}\n", toml_string(preset)));
     }
-    parse(&id, &text, &places.home).map_err(invalid)?;
+    parse(&id, &text, &places.home, &places.system()).map_err(invalid)?;
     write_private(&places.folder, &target, &text)
         .map_err(|e| invalid(format!("the launch could not be written: {e}")))?;
     get(places, &id).map_err(invalid)
@@ -729,6 +983,15 @@ pub async fn launch_save(
 }
 
 #[tauri::command]
+pub async fn launch_save_variants(request: VariantsRequest) -> Result<Launch, HostError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_variants(&places()?, &request).map_err(refused)
+    })
+    .await
+    .map_err(|_| HostError::new("internal"))?
+}
+
+#[tauri::command]
 pub async fn launch_delete(request: LaunchRequest) -> Result<(), HostError> {
     tauri::async_runtime::spawn_blocking(move || delete(&places()?, &request.id).map_err(refused))
         .await
@@ -741,6 +1004,7 @@ const COMMANDS: &[&str] = &[
     "launch_before",
     "launch_save",
     "launch_delete",
+    "launch_save_variants",
 ];
 
 pub fn extension() -> wyss_console::Extension {
@@ -751,7 +1015,8 @@ pub fn extension() -> wyss_console::Extension {
             launch_get,
             launch_before,
             launch_save,
-            launch_delete
+            launch_delete,
+            launch_save_variants
         ]),
         install: Box::new(|builder| builder),
         on_exit: None,

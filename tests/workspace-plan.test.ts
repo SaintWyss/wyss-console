@@ -189,6 +189,9 @@ it('opens a launch with commands or before lines but does not save over it', () 
       directory: '/',
       kind: 'commands',
       commands: ['ls'],
+      variants: [],
+      active: null,
+      template: null,
     }),
   ).toBe(false);
 });

@@ -3647,4 +3647,42 @@ export const ES: Readonly<Record<string, string>> = {
   'This project is in a folder another account can write. Arsenal lists it as read only and does not copy it.':
     'Este proyecto está en una carpeta que otra cuenta puede escribir. Arsenal lo lista como solo lectura y no lo copia.',
   'This skill cannot be imported.': 'Esta skill no se puede importar.',
+  // Workspace: a launch's distributions
+  'Update Flatpak apps': 'Actualizar apps Flatpak',
+  'No confirmation (--noconfirm)': 'Sin confirmar (--noconfirm)',
+  'Include AUR (paru)': 'Incluir AUR (paru)',
+  'Skip AUR review (--skipreview)': 'Saltar revisión AUR (--skipreview)',
+  'Clean the package cache (paccache -rk2)':
+    'Limpiar caché de paquetes (paccache -rk2)',
+  'No confirmation (-y)': 'Sin confirmar (-y)',
+  'Remove unused packages (autoremove)': 'Quitar paquetes sin uso (autoremove)',
+  'This launch has no commands for this distribution. Add one in Workspace.':
+    'Este lanzamiento no tiene comandos para esta distribución. Agregala en Workspace.',
+  Distributions: 'Distribuciones',
+  'Detected on this computer: {name} ({id})':
+    'Detectado en esta PC: {name} ({id})',
+  'This computer’s distribution could not be read (/etc/os-release).':
+    'No se pudo leer la distribución de esta PC (/etc/os-release).',
+  'No distribution here matches this computer: the file’s own commands run.':
+    'Ninguna distribución coincide con esta PC: corren los comandos propios del archivo.',
+  'No distribution here matches this computer: add {id} to start it here.':
+    'Ninguna distribución coincide con esta PC: agregá {id} para lanzarlo acá.',
+  'This computer’s distribution: it cannot be deleted.':
+    'Es la distribución de esta PC: no se puede borrar.',
+  active: 'activa',
+  'os-release ID, e.g. void': 'ID de os-release, p. ej. void',
+  'Distribution ID': 'ID de la distribución',
+  'Add distribution': 'Agregar distribución',
+  'runs on this computer': 'corre en esta PC',
+  Options: 'Opciones',
+  'The script was written by hand, so the options are off.':
+    'El script se editó a mano, así que las opciones quedan apagadas.',
+  'Back to options': 'Volver a las opciones',
+  'Script it runs': 'Script que se lanza',
+  'One command per line, typed in a new terminal in {folder}.':
+    'Un comando por línea, escrito en una terminal nueva en {folder}.',
+  Discard: 'Descartar',
+  'No distributions yet.': 'Todavía no hay distribuciones.',
+  'The file’s own commands, for every distribution. Add one to give it its own.':
+    'Los comandos propios del archivo, para cualquier distribución. Agregá una para darle los suyos.',
 };

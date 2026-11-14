@@ -31,6 +31,14 @@ At most 64 sorted TOML candidates are processed, 64 KiB per file, with validated
 filename grammar. The current implementation collects all matching directory entries
 before that processing limit; this is not a hard directory-enumeration memory bound. A file selects either commands
 (at most 16, each at most 4096 Unicode scalar values; one line, no controls) or a Native agent with an optional profile and an optional `preset`, never Managed.
+A commands launch may also hold one variant per distribution, `[distro.<os-release ID>]` (at
+most 24, each with its own commands and the `options` it was composed from, or `manual = true`),
+and a `template` name. The variant whose ID is this computer's `ID`, else the first of its
+`ID_LIKE`, is what runs; with none, the file's own `commands`. Workspace edits the variants with
+`launch_save_variants`: the window sends commands for commands launches only (never a session's
+`before`), each line validated as above, the file re-parsed before it is written, and the
+variant this computer runs cannot be removed. The shipped `actualizar-sistema.toml` is replaced
+by the variant one only while it is byte-identical to the earlier shipped file.
 The backend parser in `src-tauri/src/launch.rs` owns exact keys and validation.
 
 `preset` is the name of an Arsenal preset of that agent's provider. A launch that names one
