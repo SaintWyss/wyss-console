@@ -386,3 +386,26 @@ it('says roles.json is damaged and that roles are not saved', async () => {
     'roles.json could not be read',
   );
 });
+
+it('shows a command launch as its name, a notice and Try: no distributor, model or estimate', async () => {
+  await show([
+    {
+      id: 'upd',
+      name: 'Actualizar',
+      directory: '/home/me',
+      kind: 'commands',
+      commands: ['paru'],
+    },
+  ]);
+  expect(document.querySelector('.le-fields')).toBeNull();
+  expect(document.querySelector('.le-loads')).toBeNull();
+  expect(text('.le-total')).toBe('');
+  expect(button('Try').disabled).toBe(false);
+});
+
+it('says before saving that a file under another name is written anew and the old one removed', async () => {
+  await show([{ ...session('a-mano', null), name: 'Mi Lanzamiento' }]);
+  expect(text('.notice[data-tone="warn"]')).toContain(
+    'saved as a-mano.toml. Saving writes mi-lanzamiento.toml and removes a-mano.toml',
+  );
+});

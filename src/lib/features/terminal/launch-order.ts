@@ -58,3 +58,14 @@ export function saveOrder(order: readonly string[]): void {
     /* An order that cannot be kept is not an error. */
   }
 }
+
+/** The order with a renamed launch in its old place, so a rename does not move it in the menu. */
+export function renameInOrder(
+  order: readonly string[],
+  from: string,
+  to: string,
+): string[] {
+  return order.includes(from)
+    ? order.filter((id) => id !== to).map((id) => (id === from ? to : id))
+    : [...order];
+}

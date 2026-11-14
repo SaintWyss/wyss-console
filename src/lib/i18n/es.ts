@@ -14,6 +14,12 @@ export const ES: Readonly<Record<string, string>> = {
   More: 'Más',
   Distributors: 'Distribuidores',
   // Workspace: launch editor
+  'Choose it with Browse… or from the known folders.':
+    'Elegila con Examinar… o entre las carpetas conocidas.',
+  'This launch’s folder is not a project the Console knows. Choose it once with Browse… in Workspace, then try again.':
+    'La carpeta de este lanzamiento no es un proyecto que la Consola conozca. Elegila una vez con Examinar… en Workspace y volvé a probar.',
+  'This launch is saved as {file}.toml. Saving writes {next}.toml and removes {file}.toml.':
+    'Este lanzamiento está guardado como {file}.toml. Al guardar se escribe {next}.toml y se borra {file}.toml.',
   role: 'rol',
   'Saved as “{name}”. The file under the old name could not be deleted: it is still listed.':
     'Se guardó como “{name}”. No se pudo borrar el archivo con el nombre anterior: sigue en la lista.',

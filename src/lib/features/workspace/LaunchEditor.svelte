@@ -17,6 +17,11 @@
   import { DEFAULT_SPEC, hookLabel, toggle } from '../arsenal/environment';
   import { kTokens } from './estimate';
   import {
+    loadOrder,
+    renameInOrder,
+    saveOrder,
+  } from '../terminal/launch-order';
+  import {
     allItemsOf,
     estimateLaunch,
     estimateOf,
@@ -166,6 +171,16 @@
   }
   const dirty = $derived(draft !== null && JSON.stringify(draft) !== baseline);
   const current = $derived(launches.find((l) => l.id === selected) ?? null);
+  /** A launch that runs commands or `before` lines: opened from here, edited in its file. */
+  const readOnly = $derived(current !== null && !editable(current));
+  /** Saving writes the file its name gives; another file name is removed after it. */
+  const renames = $derived(
+    current !== null &&
+      !readOnly &&
+      draft !== null &&
+      launchId(draft.name) !== '' &&
+      launchId(draft.name) !== current.id,
+  );
   const canSave = $derived(
     draft !== null &&
       (current === null || editable(current)) &&
@@ -189,7 +204,9 @@
   );
 
   const est = $derived(
-    draft ? estimateOf(draft.agent, draft.items, draft.spec, data) : null,
+    draft && !readOnly
+      ? estimateOf(draft.agent, draft.items, draft.spec, data)
+      : null,
   );
   const ceiling = $derived(
     draft
@@ -206,12 +223,10 @@
       ? profiles.filter((p) => p.body.applies_to.includes(draft!.agent))
       : [],
   );
+  // Only folders the Console knows as projects: the desktop reads no other.
+  const known = $derived(new Set(recent.map((r) => r.path)));
   const saved = $derived([
-    ...new Set(
-      launches
-        .map((l) => l.directory)
-        .filter((d) => d.startsWith('/') || d.startsWith('~')),
-    ),
+    ...new Set(launches.map((l) => l.directory).filter((d) => known.has(d))),
   ]);
   const used = $derived(
     [...recent].sort((a, b) => b.last_used - a.last_used).slice(0, 8),
@@ -450,6 +465,8 @@
       if (plan.removeOld) {
         try {
           await deleteLaunch(plan.removeOld);
+          // It keeps its place in + Launch.
+          saveOrder(renameInOrder(loadOrder(), plan.removeOld, launch.id));
         } catch {
           error = t(
             'Saved as “{name}”. The file under the old name could not be deleted: it is still listed.',
@@ -634,7 +651,7 @@
                 total: kTokens(ceiling.total),
               })}</span
             >
-          {:else if d.agent === 'codex'}
+          {:else if d.agent === 'codex' && !readOnly}
             <span class="le-meta">{t('No estimate for Codex yet.')}</span>
           {/if}
         </span>
@@ -704,181 +721,203 @@
           {notice}
         </p>{/if}
 
-      <fieldset class="le-fieldset" disabled={busy}>
-        <div class="le-fields">
-          <label class="le-field"
-            ><span>{t('Role')}</span>
-            <select class="le-input" bind:value={d.role}>
-              {#each allRoles as role (role.id)}
-                <option value={role.id}>{role.name}</option>
-              {/each}
-            </select>
-          </label>
-          <label class="le-field"
-            ><span>{t('Distributor')}</span>
-            <select
-              class="le-input"
-              value={d.agent}
-              onchange={(e) => setAgent(e.currentTarget.value as Agent)}
-            >
-              {#each AGENTS as a (a.id)}
-                <option value={a.id}
-                  >{a.distributor} · {a.id === 'claude_code'
-                    ? 'Claude Code'
-                    : 'Codex'}</option
-                >
-              {/each}
-            </select>
-          </label>
-          <label class="le-field"
-            ><span>{t('Model')}</span>
-            <select
-              class="le-input"
-              value={d.profile ?? ''}
-              onchange={(e) => (d.profile = e.currentTarget.value || null)}
-            >
-              <option value="">{t('Default (no profile)')}</option>
-              {#each agentProfiles as p (p.id)}
-                <option value={p.body.name}
-                  >{p.body.model ?? t('default model')} · {p.body.name}</option
-                >
-              {/each}
-            </select>
-          </label>
-          <label class="le-field"
-            ><span>{t('Mode')}</span>
-            <select
-              class="le-input"
-              disabled
-              title={t(
-                'Launches open Native sessions. Managed sessions start from Sessions.',
-              )}
-            >
-              <option>Native</option>
-            </select>
-          </label>
-          <div class="le-field le-wide">
-            <span>{t('Folder')}</span>
-            <div class="le-folder">
-              <input
+      {#if renames && current && draft}
+        <p class="notice" data-tone="warn">
+          {t(
+            'This launch is saved as {file}.toml. Saving writes {next}.toml and removes {file}.toml.',
+            { file: current.id, next: launchId(draft.name) },
+          )}
+        </p>
+      {/if}
+      {#if !readOnly}
+        <fieldset class="le-fieldset" disabled={busy}>
+          <div class="le-fields">
+            <label class="le-field"
+              ><span>{t('Role')}</span>
+              <select class="le-input" bind:value={d.role}>
+                {#each allRoles as role (role.id)}
+                  <option value={role.id}>{role.name}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="le-field"
+              ><span>{t('Distributor')}</span>
+              <select
                 class="le-input"
-                aria-label={t('Folder')}
-                bind:value={d.directory}
-              />
-              <button
-                type="button"
-                class="top-action icon"
-                aria-label={t('Saved and recent folders')}
-                title={t('Saved and recent folders')}
-                aria-expanded={foldersOpen}
-                onclick={() => (foldersOpen = !foldersOpen)}
+                value={d.agent}
+                onchange={(e) => setAgent(e.currentTarget.value as Agent)}
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true"
-                  ><path
-                    d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"
-                  /></svg
+                {#each AGENTS as a (a.id)}
+                  <option value={a.id}
+                    >{a.distributor} · {a.id === 'claude_code'
+                      ? 'Claude Code'
+                      : 'Codex'}</option
+                  >
+                {/each}
+              </select>
+            </label>
+            <label class="le-field"
+              ><span>{t('Model')}</span>
+              <select
+                class="le-input"
+                value={d.profile ?? ''}
+                onchange={(e) => (d.profile = e.currentTarget.value || null)}
+              >
+                <option value="">{t('Default (no profile)')}</option>
+                {#each agentProfiles as p (p.id)}
+                  <option value={p.body.name}
+                    >{p.body.model ?? t('default model')} · {p.body
+                      .name}</option
+                  >
+                {/each}
+              </select>
+            </label>
+            <label class="le-field"
+              ><span>{t('Mode')}</span>
+              <select
+                class="le-input"
+                disabled
+                title={t(
+                  'Launches open Native sessions. Managed sessions start from Sessions.',
+                )}
+              >
+                <option>Native</option>
+              </select>
+            </label>
+            <div class="le-field le-wide">
+              <span>{t('Folder')}</span>
+              <div class="le-folder">
+                <!-- Read only: a folder is chosen in the dialog or among the known projects. The
+                     desktop reads only those, so a typed path could never start. -->
+                <input
+                  class="le-input"
+                  aria-label={t('Folder')}
+                  readonly
+                  title={t('Choose it with Browse… or from the known folders.')}
+                  value={d.directory}
+                />
+                <button
+                  type="button"
+                  class="top-action icon"
+                  aria-label={t('Saved and recent folders')}
+                  title={t('Saved and recent folders')}
+                  aria-expanded={foldersOpen}
+                  onclick={() => (foldersOpen = !foldersOpen)}
                 >
-              </button>
-              <button type="button" class="action" onclick={() => void browse()}
-                >{t('Browse…')}</button
-              >
-              {#if foldersOpen}
-                <div class="le-folders">
-                  {#if saved.length > 0}<p class="le-role">{t('Saved')}</p>{/if}
-                  {#each saved as folder (folder)}
-                    <button
-                      type="button"
-                      class="le-item"
-                      onclick={() => {
-                        d.directory = folder;
-                        foldersOpen = false;
-                      }}><span class="le-name">{folder}</span></button
-                    >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"
+                    ><path
+                      d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"
+                    /></svg
+                  >
+                </button>
+                <button
+                  type="button"
+                  class="action"
+                  onclick={() => void browse()}>{t('Browse…')}</button
+                >
+                {#if foldersOpen}
+                  <div class="le-folders">
+                    {#if saved.length > 0}<p class="le-role">
+                        {t('Saved')}
+                      </p>{/if}
+                    {#each saved as folder (folder)}
+                      <button
+                        type="button"
+                        class="le-item"
+                        onclick={() => {
+                          d.directory = folder;
+                          foldersOpen = false;
+                        }}><span class="le-name">{folder}</span></button
+                      >
+                    {/each}
+                    {#if used.length > 0}<p class="le-role">
+                        {t('Recently used')}
+                      </p>{/if}
+                    {#each used as entry (entry.path)}
+                      <button
+                        type="button"
+                        class="le-item"
+                        onclick={() => {
+                          d.directory = entry.path;
+                          foldersOpen = false;
+                        }}><span class="le-name">{entry.path}</span></button
+                      >
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </div>
+        </fieldset>
+        <div class="le-loads" inert={busy}>
+          {#if d.agent === 'codex'}
+            <p class="le-meta le-pad">
+              {t(
+                'For Codex a launch chooses skills and agents; the rest is Claude Code only.',
+              )}
+            </p>
+          {/if}
+          {#each groupsOf as group (group.id)}
+            {@const n = group.rows.filter((r) => r.on).length}
+            <div class="le-group">
+              <div class="le-ghead">
+                <input
+                  type="checkbox"
+                  aria-label={t(group.label)}
+                  checked={n === group.rows.length && n > 0}
+                  indeterminate={n > 0 && n < group.rows.length}
+                  disabled={group.rows.length === 0}
+                  onchange={(e) => setAll(group, e.currentTarget.checked)}
+                />
+                <button
+                  type="button"
+                  class="le-gtoggle"
+                  aria-expanded={open === group.id}
+                  onclick={() => (open = open === group.id ? null : group.id)}
+                >
+                  <span class="le-chev" class:open={open === group.id}>›</span>
+                  {t(group.label)}
+                  <span class="le-meta"
+                    >{t('{on} of {all}', {
+                      on: n,
+                      all: group.rows.length,
+                    })}</span
+                  >
+                </button>
+                <span class="le-cost"
+                  >{group.tokens === null
+                    ? group.note
+                      ? t(group.note)
+                      : ''
+                    : group.tokens === 0
+                      ? '0'
+                      : group.tokens < 1000
+                        ? kTokens(group.tokens)
+                        : `~${kTokens(group.tokens)}`}</span
+                >
+              </div>
+              {#if open === group.id}
+                <div class="le-rows">
+                  {#each group.rows as row (row.key)}
+                    <label class="le-row" class:off={!row.on}>
+                      <input
+                        type="checkbox"
+                        checked={row.on}
+                        disabled={row.disabled}
+                        onchange={(e) => row.set(e.currentTarget.checked)}
+                      />
+                      <span title={row.label}>{row.label}</span>
+                    </label>
                   {/each}
-                  {#if used.length > 0}<p class="le-role">
-                      {t('Recently used')}
-                    </p>{/if}
-                  {#each used as entry (entry.path)}
-                    <button
-                      type="button"
-                      class="le-item"
-                      onclick={() => {
-                        d.directory = entry.path;
-                        foldersOpen = false;
-                      }}><span class="le-name">{entry.path}</span></button
-                    >
-                  {/each}
+                  {#if group.rows.length === 0}
+                    <p class="le-meta">{t('Nothing of this kind.')}</p>
+                  {/if}
                 </div>
               {/if}
             </div>
-          </div>
+          {/each}
         </div>
-      </fieldset>
-      <div class="le-loads" inert={busy}>
-        {#if d.agent === 'codex'}
-          <p class="le-meta le-pad">
-            {t(
-              'For Codex a launch chooses skills and agents; the rest is Claude Code only.',
-            )}
-          </p>
-        {/if}
-        {#each groupsOf as group (group.id)}
-          {@const n = group.rows.filter((r) => r.on).length}
-          <div class="le-group">
-            <div class="le-ghead">
-              <input
-                type="checkbox"
-                aria-label={t(group.label)}
-                checked={n === group.rows.length && n > 0}
-                indeterminate={n > 0 && n < group.rows.length}
-                disabled={group.rows.length === 0}
-                onchange={(e) => setAll(group, e.currentTarget.checked)}
-              />
-              <button
-                type="button"
-                class="le-gtoggle"
-                aria-expanded={open === group.id}
-                onclick={() => (open = open === group.id ? null : group.id)}
-              >
-                <span class="le-chev" class:open={open === group.id}>›</span>
-                {t(group.label)}
-                <span class="le-meta"
-                  >{t('{on} of {all}', { on: n, all: group.rows.length })}</span
-                >
-              </button>
-              <span class="le-cost"
-                >{group.tokens === null
-                  ? group.note
-                    ? t(group.note)
-                    : ''
-                  : group.tokens === 0
-                    ? '0'
-                    : group.tokens < 1000
-                      ? kTokens(group.tokens)
-                      : `~${kTokens(group.tokens)}`}</span
-              >
-            </div>
-            {#if open === group.id}
-              <div class="le-rows">
-                {#each group.rows as row (row.key)}
-                  <label class="le-row" class:off={!row.on}>
-                    <input
-                      type="checkbox"
-                      checked={row.on}
-                      disabled={row.disabled}
-                      onchange={(e) => row.set(e.currentTarget.checked)}
-                    />
-                    <span title={row.label}>{row.label}</span>
-                  </label>
-                {/each}
-                {#if group.rows.length === 0}
-                  <p class="le-meta">{t('Nothing of this kind.')}</p>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
+      {/if}
     </div>
   {:else if phase === 'failed'}
     <div class="le-editor">

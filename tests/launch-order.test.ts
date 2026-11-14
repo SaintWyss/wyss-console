@@ -3,6 +3,7 @@ import {
   applyOrder,
   moveLaunch,
   parseOrder,
+  renameInOrder,
 } from '../src/lib/features/terminal/launch-order';
 
 const items = ['a', 'b', 'c', 'd'].map((id) => ({ id }));
@@ -43,4 +44,14 @@ describe('launch order', () => {
     expect(parseOrder('{"a":1}')).toEqual([]);
     expect(parseOrder('["a",3,"b"]')).toEqual(['a', 'b']);
   });
+});
+
+it('keeps a renamed launch in its place and drops a stale entry of the new name', () => {
+  expect(renameInOrder(['b', 'old', 'c'], 'old', 'new')).toEqual([
+    'b',
+    'new',
+    'c',
+  ]);
+  expect(renameInOrder(['new', 'old'], 'old', 'new')).toEqual(['new']);
+  expect(renameInOrder(['a'], 'old', 'new')).toEqual(['a']);
 });

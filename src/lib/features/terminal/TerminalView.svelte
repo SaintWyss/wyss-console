@@ -132,6 +132,13 @@
     };
     if (e?.failure?.code)
       return { text: failureText(e.failure.code), translatable: true };
+    if (e?.code === 'project_unknown' || e?.code === 'project_refused')
+      return {
+        text: msg(
+          'This launch’s folder is not a project the Console knows. Choose it once with Browse… in Workspace, then try again.',
+        ),
+        translatable: true,
+      };
     if (e?.reasons?.length) return { text: e.reasons[0], translatable: false };
     return error instanceof Error
       ? { text: error.message, translatable: false }
