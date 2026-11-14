@@ -219,6 +219,8 @@ export interface Roles {
   custom: { id: string; name: string }[];
   /** Launch id → role id. A launch not listed is a Worker. */
   assigned: Record<string, string>;
+  /** roles.json could not be read: it is not written over. */
+  damaged: boolean;
 }
 export type RoleChange =
   | { do: 'create'; name: string }
@@ -246,7 +248,11 @@ export function parseRoles(value: unknown): Roles {
     throw new Error('assigned');
   if (Object.values(assigned).some((r) => typeof r !== 'string'))
     throw new Error('assigned');
-  return { custom, assigned: assigned as Record<string, string> };
+  return {
+    custom,
+    assigned: assigned as Record<string, string>,
+    damaged: v.damaged === true,
+  };
 }
 
 /** A change to the owner's categories, as the desktop takes it. */

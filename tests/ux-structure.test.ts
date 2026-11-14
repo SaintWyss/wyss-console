@@ -117,6 +117,19 @@ it('names every rail icon for screen readers and marks only the open view', asyn
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   flushSync();
   expect(menu.hidden).toBe(true);
+  // Choosing a view from More sends the keyboard to the view, not to a hidden button.
+  const main = document.createElement('main');
+  main.id = 'main-content';
+  main.tabIndex = -1;
+  document.body.append(main);
+  more.click();
+  flushSync();
+  await tick();
+  menu.querySelector<HTMLButtonElement>('button')!.click();
+  flushSync();
+  await tick();
+  expect(menu.hidden).toBe(true);
+  expect(document.activeElement).toBe(main);
 });
 
 it('draws every compatibility, discovery and delegation state with a symbol, not color alone', () => {

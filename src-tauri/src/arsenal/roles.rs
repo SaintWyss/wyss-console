@@ -1,8 +1,9 @@
 //! The roles launches are grouped by in Workspace (Orchestrator, Worker, Researcher, Reviewer and
 //! the owner's own) and which role each launch has. Kept in `roles.json` beside `environment.json`:
 //! a launch file rejects unknown fields (an older Console would list it as refused), and the
-//! library's schema stays the one older builds open. Local to this computer. A damaged file loads
-//! as the basic roles with no assignment, and loading never writes.
+//! library's schema stays the one older builds open. Local to this computer. A damaged file reads
+//! as the basic roles with no assignment and is never overwritten: writing is refused (`damaged`)
+//! until the owner fixes or removes it, so nothing in it is lost silently.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -46,6 +47,8 @@ struct State {
 pub struct Roles {
     pub custom: Vec<Custom>,
     pub assigned: BTreeMap<String, String>,
+    /// `roles.json` exists and could not be read: shown, and not written over.
+    pub damaged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -98,34 +101,45 @@ fn known(state: &State, role: &str) -> bool {
     BASIC.contains(&role) || state.custom.iter().any(|c| c.id == role)
 }
 
-fn load(directory: &Path) -> State {
-    let read = || -> Option<State> {
-        let meta = fs::symlink_metadata(directory.join(FILE)).ok()?;
-        if !meta.is_file() {
-            return None;
-        }
-        let bytes = store::read_bounded(&directory.join(FILE), MAX_FILE_BYTES)?;
-        let state: State = serde_json::from_slice(&bytes).ok()?;
-        let valid = state.schema_version == VERSION
-            && state.custom.len() <= MAX_ROLES
-            && state.assigned.len() <= MAX_ASSIGNED
-            && state
-                .custom
-                .iter()
-                .all(|c| custom_id_ok(&c.id) && name_ok(&c.name))
-            && state.assigned.iter().all(|(launch, role)| {
-                launch_ok(launch) && (BASIC.contains(&role.as_str()) || custom_id_ok(role))
-            });
-        valid.then_some(state)
-    };
-    read().unwrap_or(State {
+/// `None` when the file exists and is damaged; an absent file is the empty state.
+fn load(directory: &Path) -> Option<State> {
+    let empty = State {
         schema_version: VERSION,
         ..State::default()
-    })
+    };
+    let Ok(meta) = fs::symlink_metadata(directory.join(FILE)) else {
+        return Some(empty);
+    };
+    if !meta.is_file() {
+        return None;
+    }
+    let bytes = store::read_bounded(&directory.join(FILE), MAX_FILE_BYTES)?;
+    let state: State = serde_json::from_slice(&bytes).ok()?;
+    let mut ids = std::collections::BTreeSet::new();
+    let mut names = std::collections::BTreeSet::new();
+    let valid = state.schema_version == VERSION
+        && state.custom.len() <= MAX_ROLES
+        && state.assigned.len() <= MAX_ASSIGNED
+        && state.custom.iter().all(|c| {
+            custom_id_ok(&c.id)
+                && name_ok(&c.name)
+                && ids.insert(c.id.clone())
+                && names.insert(c.name.trim().to_lowercase())
+        })
+        && state.assigned.iter().all(|(launch, role)| {
+            launch_ok(launch) && (BASIC.contains(&role.as_str()) || custom_id_ok(role))
+        });
+    valid.then_some(state)
 }
 
 pub fn read(directory: &Path) -> Roles {
-    let state = load(directory);
+    let Some(state) = load(directory) else {
+        return Roles {
+            custom: Vec::new(),
+            assigned: BTreeMap::new(),
+            damaged: true,
+        };
+    };
     let assigned = state
         .assigned
         .iter()
@@ -141,11 +155,12 @@ pub fn read(directory: &Path) -> Roles {
     Roles {
         custom: state.custom,
         assigned,
+        damaged: false,
     }
 }
 
 pub fn write(directory: &Path, change: Change) -> Result<Roles, Refusal> {
-    let mut state = load(directory);
+    let mut state = load(directory).ok_or(Refusal::Invalid("damaged"))?;
     match change {
         Change::Create { name } => {
             let name = name.trim().to_owned();
@@ -359,26 +374,40 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_file_loads_as_the_basic_roles_and_is_written_private() {
+    fn a_damaged_file_reads_as_the_basic_roles_and_is_never_written_over() {
         let dir = scratch("damaged");
         fs::write(dir.join(FILE), "{not json").unwrap();
+        let roles = read(&dir);
+        assert!(roles.damaged);
+        assert!(roles.custom.is_empty() && roles.assigned.is_empty());
+        // Writing over it is refused, and the file is as it was.
         assert_eq!(
-            read(&dir),
-            Roles {
-                custom: vec![],
-                assigned: BTreeMap::new()
-            }
+            write(&dir, Change::Create { name: "QA".into() }),
+            Err(Refusal::Invalid("damaged"))
         );
+        assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), "{not json");
+        // Duplicate ids or names are damage too.
+        for bad in [
+            r#"{"schema_version":1,"custom":[{"id":"u-0a","name":"A"},{"id":"u-0a","name":"B"}],"assigned":{}}"#,
+            r#"{"schema_version":1,"custom":[{"id":"u-0a","name":"A"},{"id":"u-0b","name":" a"}],"assigned":{}}"#,
+        ] {
+            fs::write(dir.join(FILE), bad).unwrap();
+            assert!(read(&dir).damaged, "{bad}");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_role_that_no_longer_exists_reads_as_worker_and_the_file_is_private() {
+        let dir = scratch("gone");
         fs::write(
             dir.join(FILE),
             r#"{"schema_version":1,"custom":[],"assigned":{"x":"u-0000abcd"}}"#,
         )
         .unwrap();
-        // A role id of the right shape that no longer exists reads as Worker.
-        assert_eq!(
-            read(&dir).assigned.get("x").map(String::as_str),
-            Some("worker")
-        );
+        let roles = read(&dir);
+        assert!(!roles.damaged);
+        assert_eq!(roles.assigned.get("x").map(String::as_str), Some("worker"));
         write(&dir, Change::Forget { launch: "x".into() }).unwrap();
         use std::os::unix::fs::PermissionsExt;
         let mode = fs::metadata(dir.join(FILE)).unwrap().permissions().mode() & 0o777;

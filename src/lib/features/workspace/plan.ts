@@ -171,11 +171,15 @@ export function savePlan(draft: LaunchDraft, ctx: PlanContext): SavePlan {
           }
         : { do: 'write', id: sel.id, name: sel.name };
   }
+  // A changed environment is written, a default one too (the desktop then removes the entry);
+  // a new or copied preset gets one only when it is not the default.
   const environment =
     draft.agent === 'claude_code' &&
     draft.spec !== null &&
-    (specChanged || preset.do === 'copy' || preset.do === 'create') &&
-    !isDefault(draft.spec);
+    preset.do !== 'none' &&
+    (specChanged ||
+      ((preset.do === 'copy' || preset.do === 'create') &&
+        !isDefault(draft.spec)));
   const renamed = draft.id !== null && draft.id !== id ? draft.id : null;
   return {
     preset,

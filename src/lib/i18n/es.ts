@@ -14,6 +14,11 @@ export const ES: Readonly<Record<string, string>> = {
   More: 'Más',
   Distributors: 'Distribuidores',
   // Workspace: launch editor
+  role: 'rol',
+  'Saved as “{name}”. The file under the old name could not be deleted: it is still listed.':
+    'Se guardó como “{name}”. No se pudo borrar el archivo con el nombre anterior: sigue en la lista.',
+  'roles.json could not be read. Roles are shown as the basic ones and are not saved until the file is fixed or removed.':
+    'No se pudo leer roles.json. Se muestran los roles básicos y no se guardan hasta que el archivo se arregle o se borre.',
   'Terminal agents': 'Agentes en terminales',
   Orchestrator: 'Orquestador',
   Worker: 'Trabajador',

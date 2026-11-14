@@ -389,7 +389,7 @@ pub struct Options {
     pub sizes: std::collections::BTreeMap<String, u64>,
 }
 
-/// Most bytes read of a file only to size it.
+/// Most bytes read of a file to parse it (imports, front matter). Sizes are the files' own.
 const SIZE_READ: u64 = 512 * 1024;
 
 fn file_bytes(path: &Path) -> u64 {
@@ -398,7 +398,7 @@ fn file_bytes(path: &Path) -> u64 {
         .filter(|m| m.is_file() || m.file_type().is_symlink())
         .and_then(|_| fs::metadata(path).ok())
         .filter(|m| m.is_file())
-        .map_or(0, |m| m.len().min(SIZE_READ))
+        .map_or(0, |m| m.len())
 }
 
 /// The instruction files and the files they import with a line `@path` (one level), as Claude

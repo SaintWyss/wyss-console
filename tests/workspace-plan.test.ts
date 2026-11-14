@@ -134,6 +134,23 @@ it('makes a preset for a launch that had none only when its choice differs from 
   expect(freeName('Estudio', ['Estudio', 'estudio 2'])).toBe('Estudio 3');
 });
 
+it('writes a default environment over a changed one, so the desktop removes the entry', () => {
+  const off = { ...DEFAULT_SPEC, memory: false };
+  const back = savePlan(
+    draft({ spec: { ...DEFAULT_SPEC } }),
+    ctx({ savedSpec: off }),
+  );
+  expect(back.preset.do).toBe('write');
+  expect(back.environment).toBe(true);
+  // A new preset with the default environment needs no entry.
+  expect(
+    savePlan(
+      draft({ selection: null, items: [{ capability: 'x', revision: null }] }),
+      ctx(),
+    ).environment,
+  ).toBe(false);
+});
+
 it('writes the environment only when it changed, and never for Codex', () => {
   const off = { ...DEFAULT_SPEC, memory: false };
   expect(savePlan(draft({ spec: off }), ctx()).environment).toBe(true);
@@ -225,4 +242,12 @@ it('estimates the context by group from what is loaded, and leaves MCP unmeasure
   expect(estimate({ ...base, spec: { ...DEFAULT_SPEC } })).toEqual(all);
   expect(kTokens(15_360)).toBe('15k');
   expect(kTokens(240)).toBe('<1k');
+  // Bytes, not UTF-16 units: "ñ" is two bytes, an emoji four.
+  const wide = estimate({
+    ...base,
+    spec: { ...DEFAULT_SPEC },
+    agents: [],
+    skills: [{ name: 'ñ', description: '😀'.repeat(18) }],
+  });
+  expect(wide.skills).toBe(Math.ceil((2 + 72 + 24) / 4));
 });

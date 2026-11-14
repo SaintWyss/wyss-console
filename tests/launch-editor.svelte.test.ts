@@ -78,7 +78,14 @@ const env: HomeSpec = {
   plugins_off: ['caveman@caveman'],
 };
 
-function fake(over: Partial<{ roles: Roles; launches: Launch[] }> = {}): {
+function fake(
+  over: Partial<{
+    roles: Roles;
+    launches: Launch[];
+    failRole: boolean;
+    failEnvironment: boolean;
+  }> = {},
+): {
   client: ArsenalClient;
   calls: Record<string, unknown[]>;
 } {
@@ -88,11 +95,13 @@ function fake(over: Partial<{ roles: Roles; launches: Launch[] }> = {}): {
   const roles: Roles = over.roles ?? {
     custom: [],
     assigned: { estudiar: 'researcher' },
+    damaged: false,
   };
   const client = {
     roles: async () => roles,
     writeRole: async (change: unknown) => {
       note('writeRole', change);
+      if (over.failRole) throw new Error('roles.json could not be written.');
       return roles;
     },
     capabilities: async () => [
@@ -119,13 +128,15 @@ function fake(over: Partial<{ roles: Roles; launches: Launch[] }> = {}): {
     },
     writeEnvironment: async (id: string, spec: HomeSpec) => {
       note('writeEnvironment', { id, spec });
+      if (over.failEnvironment)
+        throw new Error('environment.json could not be written.');
     },
   } as unknown as ArsenalClient;
   void over.launches;
   return { client, calls };
 }
 
-async function show(launches: Launch[], over = {}) {
+async function show(launches: Launch[], over: Parameters<typeof fake>[0] = {}) {
   const f = fake(over);
   component = mount(LaunchEditor, {
     target: document.body,
@@ -250,4 +261,128 @@ it('says what was saved when a later step fails, and keeps the draft', async () 
   );
   // The draft is still there to save again.
   expect(button('Save').disabled).toBe(false);
+});
+
+const skillsGroup = () =>
+  [...document.querySelectorAll('.le-group')].find((g) =>
+    g.textContent?.includes('Skills'),
+  )!;
+function untickAllSkills() {
+  skillsGroup().querySelector<HTMLInputElement>('.le-ghead input')!.click();
+  flushSync();
+}
+function rename(name: string) {
+  const title = document.querySelector<HTMLInputElement>('.le-title')!;
+  title.value = name;
+  title.dispatchEvent(new Event('input'));
+  flushSync();
+}
+
+it('stops at a failed environment and says the preset was saved, launch untouched', async () => {
+  const { calls } = await show([session('estudiar', 'Estudio')], {
+    failEnvironment: true,
+  });
+  // Memory off is drawn nowhere: change a hook-less thing the editor shows instead.
+  const mcp = [...document.querySelectorAll('.le-group')].find((g) =>
+    g.textContent?.includes('MCP servers'),
+  )!;
+  mcp.querySelector<HTMLInputElement>('.le-ghead input')!.click();
+  flushSync();
+  button('Save').click();
+  await settle();
+  expect(calls.writeEnvironment).toHaveLength(1);
+  expect(ipc.some((c) => c.command === 'launch_save')).toBe(false);
+  expect(text('.notice[data-tone="error"]')).toContain(
+    'environment.json could not be written.',
+  );
+});
+
+it('on a rename, keeps the old file when the role cannot follow, and says so', async () => {
+  const { calls } = await show([session('estudiar', 'Estudio')], {
+    failRole: true,
+  });
+  rename('Estudiar SIG');
+  button('Save').click();
+  await settle();
+  expect(ipc.some((c) => c.command === 'launch_save')).toBe(true);
+  // The role did not follow: the old file is not deleted.
+  expect(ipc.some((c) => c.command === 'launch_delete')).toBe(false);
+  expect(calls.writeRole).toEqual([
+    { do: 'rename', from: 'estudiar', to: 'estudiar-sig' },
+  ]);
+  expect(text('.notice[data-tone="error"]')).toContain('Saved so far:');
+  expect(text('.notice[data-tone="error"]')).toContain('launch');
+});
+
+it('on a rename that saves, moves the role before deleting the old file', async () => {
+  const { calls } = await show([session('estudiar', 'Estudio')]);
+  rename('Estudiar SIG');
+  button('Save').click();
+  await settle();
+  expect(calls.writeRole).toEqual([
+    { do: 'rename', from: 'estudiar', to: 'estudiar-sig' },
+    { do: 'assign', launch: 'estudiar-sig', role: 'researcher' },
+  ]);
+  const order = ipc
+    .map((c) => c.command)
+    .filter((c) => c === 'launch_save' || c === 'launch_delete');
+  expect(order).toEqual(['launch_save', 'launch_delete']);
+});
+
+it('saves the draft as it was when Save was pressed, with the fields disabled meanwhile', async () => {
+  let release: () => void = () => undefined;
+  const { client, calls } = fake();
+  const gate = new Promise<void>((r) => (release = r));
+  const slow = {
+    ...client,
+    projectSelection: async () => {
+      await gate;
+      return null;
+    },
+  } as ArsenalClient;
+  component = mount(LaunchEditor, {
+    target: document.body,
+    props: {
+      visible: true,
+      profiles: [],
+      recent: [],
+      choose: async () => null,
+      onopen: vi.fn(),
+      client: slow,
+      launches: async () =>
+        ({
+          folder: '/c',
+          launches: [session('estudiar', 'Estudio')],
+          refused: [],
+        }) as LaunchList,
+    },
+  });
+  await settle();
+  untickAllSkills();
+  button('Save').click();
+  flushSync();
+  expect(document.querySelector<HTMLInputElement>('.le-title')!.disabled).toBe(
+    true,
+  );
+  expect(
+    document.querySelector<HTMLFieldSetElement>('.le-fieldset')!.disabled,
+  ).toBe(true);
+  // Typed while saving: not saved.
+  rename('Otro nombre');
+  release();
+  await settle();
+  const save = ipc.find((c) => c.command === 'launch_save')!.args as {
+    request: Record<string, unknown>;
+  };
+  expect(save.request.name).toBe('Estudiar');
+  expect(calls.saveSelection).toHaveLength(1);
+});
+
+it('says roles.json is damaged and that roles are not saved', async () => {
+  await show([session('estudiar', null)], {
+    roles: { custom: [], assigned: {}, damaged: true },
+  });
+  expect(text('.notice[data-tone="warn"]')).toContain(
+    'roles.json could not be read',
+  );
 });

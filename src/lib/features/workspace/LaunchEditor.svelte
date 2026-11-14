@@ -68,7 +68,7 @@
 
   let phase = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   let launches = $state<Launch[]>([]);
-  let roles = $state<Roles>({ custom: [], assigned: {} });
+  let roles = $state<Roles>({ custom: [], assigned: {}, damaged: false });
   let data = $state<EstimateData>(NO_DATA);
   let q = $state('');
   let selected = $state<string | null>(null);
@@ -380,7 +380,8 @@
   /** One Save: preset → environment → launch → role. Says what was saved if a step fails. */
   async function save(): Promise<string | null> {
     if (!draft || !canSave || busy) return null;
-    const d = draft;
+    // A frozen copy: the fields are disabled while saving, and nothing typed meanwhile mixes in.
+    const d: LaunchDraft = $state.snapshot(draft) as LaunchDraft;
     busy = true;
     error = null;
     notice = null;
@@ -429,8 +430,8 @@
         replace: plan.launch.replace,
       });
       done.push(t('launch'));
-      if (plan.removeOld)
-        await deleteLaunch(plan.removeOld).catch(() => undefined);
+      // The role follows the new name before the old file goes: a failure here leaves both
+      // files, never a launch without its role.
       if (plan.role.renamedFrom)
         roles = await client.writeRole({
           do: 'rename',
@@ -442,11 +443,23 @@
         launch: launch.id,
         role: d.role,
       });
-      notice = t('Saved.');
+      done.push(t('role'));
+      if (plan.removeOld) {
+        try {
+          await deleteLaunch(plan.removeOld);
+        } catch {
+          error = t(
+            'Saved as “{name}”. The file under the old name could not be deleted: it is still listed.',
+            { name: launch.name },
+          );
+        }
+      }
+      const failed = error;
       await load();
       const fresh = launches.find((l) => l.id === launch.id) ?? null;
       pick(fresh);
-      notice = t('Saved.');
+      error = failed;
+      notice = failed ? null : t('Saved.');
       return launch.id;
     } catch (e) {
       const exists = e instanceof LaunchError && e.code === 'exists';
@@ -600,6 +613,7 @@
       <header class="le-head">
         <input
           class="le-title"
+          disabled={busy}
           aria-label={t('Launch name')}
           maxlength="60"
           bind:value={d.name}
@@ -673,6 +687,13 @@
           )}
         </p>
       {/if}
+      {#if roles.damaged}
+        <p class="notice" data-tone="warn">
+          {t(
+            'roles.json could not be read. Roles are shown as the basic ones and are not saved until the file is fixed or removed.',
+          )}
+        </p>
+      {/if}
       {#if error}<p class="notice" data-tone="error" role="alert">
           {error}
         </p>{/if}
@@ -680,116 +701,117 @@
           {notice}
         </p>{/if}
 
-      <div class="le-fields">
-        <label class="le-field"
-          ><span>{t('Role')}</span>
-          <select class="le-input" bind:value={d.role}>
-            {#each allRoles as role (role.id)}
-              <option value={role.id}>{role.name}</option>
-            {/each}
-          </select>
-        </label>
-        <label class="le-field"
-          ><span>{t('Distributor')}</span>
-          <select
-            class="le-input"
-            value={d.agent}
-            onchange={(e) => setAgent(e.currentTarget.value as Agent)}
-          >
-            {#each AGENTS as a (a.id)}
-              <option value={a.id}
-                >{a.distributor} · {a.id === 'claude_code'
-                  ? 'Claude Code'
-                  : 'Codex'}</option
-              >
-            {/each}
-          </select>
-        </label>
-        <label class="le-field"
-          ><span>{t('Model')}</span>
-          <select
-            class="le-input"
-            value={d.profile ?? ''}
-            onchange={(e) => (d.profile = e.currentTarget.value || null)}
-          >
-            <option value="">{t('Default (no profile)')}</option>
-            {#each agentProfiles as p (p.id)}
-              <option value={p.body.name}
-                >{p.body.model ?? t('default model')} · {p.body.name}</option
-              >
-            {/each}
-          </select>
-        </label>
-        <label class="le-field"
-          ><span>{t('Mode')}</span>
-          <select
-            class="le-input"
-            disabled
-            title={t(
-              'Launches open Native sessions. Managed sessions start from Sessions.',
-            )}
-          >
-            <option>Native</option>
-          </select>
-        </label>
-        <div class="le-field le-wide">
-          <span>{t('Folder')}</span>
-          <div class="le-folder">
-            <input
+      <fieldset class="le-fieldset" disabled={busy}>
+        <div class="le-fields">
+          <label class="le-field"
+            ><span>{t('Role')}</span>
+            <select class="le-input" bind:value={d.role}>
+              {#each allRoles as role (role.id)}
+                <option value={role.id}>{role.name}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="le-field"
+            ><span>{t('Distributor')}</span>
+            <select
               class="le-input"
-              aria-label={t('Folder')}
-              bind:value={d.directory}
-            />
-            <button
-              type="button"
-              class="top-action icon"
-              aria-label={t('Saved and recent folders')}
-              title={t('Saved and recent folders')}
-              aria-expanded={foldersOpen}
-              onclick={() => (foldersOpen = !foldersOpen)}
+              value={d.agent}
+              onchange={(e) => setAgent(e.currentTarget.value as Agent)}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true"
-                ><path
-                  d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"
-                /></svg
+              {#each AGENTS as a (a.id)}
+                <option value={a.id}
+                  >{a.distributor} · {a.id === 'claude_code'
+                    ? 'Claude Code'
+                    : 'Codex'}</option
+                >
+              {/each}
+            </select>
+          </label>
+          <label class="le-field"
+            ><span>{t('Model')}</span>
+            <select
+              class="le-input"
+              value={d.profile ?? ''}
+              onchange={(e) => (d.profile = e.currentTarget.value || null)}
+            >
+              <option value="">{t('Default (no profile)')}</option>
+              {#each agentProfiles as p (p.id)}
+                <option value={p.body.name}
+                  >{p.body.model ?? t('default model')} · {p.body.name}</option
+                >
+              {/each}
+            </select>
+          </label>
+          <label class="le-field"
+            ><span>{t('Mode')}</span>
+            <select
+              class="le-input"
+              disabled
+              title={t(
+                'Launches open Native sessions. Managed sessions start from Sessions.',
+              )}
+            >
+              <option>Native</option>
+            </select>
+          </label>
+          <div class="le-field le-wide">
+            <span>{t('Folder')}</span>
+            <div class="le-folder">
+              <input
+                class="le-input"
+                aria-label={t('Folder')}
+                bind:value={d.directory}
+              />
+              <button
+                type="button"
+                class="top-action icon"
+                aria-label={t('Saved and recent folders')}
+                title={t('Saved and recent folders')}
+                aria-expanded={foldersOpen}
+                onclick={() => (foldersOpen = !foldersOpen)}
               >
-            </button>
-            <button type="button" class="action" onclick={() => void browse()}
-              >{t('Browse…')}</button
-            >
-            {#if foldersOpen}
-              <div class="le-folders">
-                {#if saved.length > 0}<p class="le-role">{t('Saved')}</p>{/if}
-                {#each saved as folder (folder)}
-                  <button
-                    type="button"
-                    class="le-item"
-                    onclick={() => {
-                      d.directory = folder;
-                      foldersOpen = false;
-                    }}><span class="le-name">{folder}</span></button
-                  >
-                {/each}
-                {#if used.length > 0}<p class="le-role">
-                    {t('Recently used')}
-                  </p>{/if}
-                {#each used as entry (entry.path)}
-                  <button
-                    type="button"
-                    class="le-item"
-                    onclick={() => {
-                      d.directory = entry.path;
-                      foldersOpen = false;
-                    }}><span class="le-name">{entry.path}</span></button
-                  >
-                {/each}
-              </div>
-            {/if}
+                <svg viewBox="0 0 24 24" aria-hidden="true"
+                  ><path
+                    d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"
+                  /></svg
+                >
+              </button>
+              <button type="button" class="action" onclick={() => void browse()}
+                >{t('Browse…')}</button
+              >
+              {#if foldersOpen}
+                <div class="le-folders">
+                  {#if saved.length > 0}<p class="le-role">{t('Saved')}</p>{/if}
+                  {#each saved as folder (folder)}
+                    <button
+                      type="button"
+                      class="le-item"
+                      onclick={() => {
+                        d.directory = folder;
+                        foldersOpen = false;
+                      }}><span class="le-name">{folder}</span></button
+                    >
+                  {/each}
+                  {#if used.length > 0}<p class="le-role">
+                      {t('Recently used')}
+                    </p>{/if}
+                  {#each used as entry (entry.path)}
+                    <button
+                      type="button"
+                      class="le-item"
+                      onclick={() => {
+                        d.directory = entry.path;
+                        foldersOpen = false;
+                      }}><span class="le-name">{entry.path}</span></button
+                    >
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
-      </div>
-
-      <div class="le-loads">
+      </fieldset>
+      <div class="le-loads" inert={busy}>
         {#if d.agent === 'codex'}
           <p class="le-meta le-pad">
             {t(

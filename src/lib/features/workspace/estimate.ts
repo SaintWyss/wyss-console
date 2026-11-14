@@ -49,11 +49,14 @@ export interface Estimate {
 }
 
 const tokens = (bytes: number) => Math.ceil(Math.max(0, bytes) / 4);
+const utf8 = new TextEncoder();
+/** Bytes, not UTF-16 units: an accented or wide character weighs what the file holds. */
+const bytesOf = (text: string) => utf8.encode(text).length;
 const listed = (items: readonly Listed[]) =>
   items.reduce(
     (sum, item) =>
       sum +
-      tokens(item.name.length + item.description.length + LISTED_OVERHEAD),
+      tokens(bytesOf(item.name) + bytesOf(item.description) + LISTED_OVERHEAD),
     0,
   );
 

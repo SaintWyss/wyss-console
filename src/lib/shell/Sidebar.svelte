@@ -48,6 +48,10 @@
   function pick(id: ViewId) {
     moreOpen = false;
     onselect(id);
+    // The list it was chosen from closes: the keyboard goes on in the view it opened.
+    void tick().then(() =>
+      document.querySelector<HTMLElement>('#main-content')?.focus(),
+    );
   }
   function onWindowClick(event: MouseEvent) {
     if (
