@@ -407,10 +407,10 @@ fn instruction_bytes(dir: &Path, home: Option<&Path>) -> u64 {
     let mut seen = BTreeSet::new();
     let mut total = 0;
     let mut count = |path: &Path, total: &mut u64| {
-        if let Ok(real) = fs::canonicalize(path) {
-            if seen.insert(real) {
-                *total += file_bytes(path);
-            }
+        if let Ok(real) = fs::canonicalize(path)
+            && seen.insert(real)
+        {
+            *total += file_bytes(path);
         }
     };
     for name in INSTRUCTIONS {
