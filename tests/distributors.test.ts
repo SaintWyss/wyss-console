@@ -4,7 +4,11 @@ import {
   type ModelCatalogue,
 } from '../src/lib/contracts/models';
 import { parseInventoryReply } from '../src/lib/contracts/configuration';
-import type { ModelsState } from '../src/lib/features/models/controller';
+import {
+  ModelsController,
+  type ModelsState,
+} from '../src/lib/features/models/controller';
+import { ConfigurationController } from '../src/lib/features/configuration/controller';
 import {
   distributorCards,
   distributorOf,
@@ -298,4 +302,88 @@ it('says each state in Spanish in the words the owner fixed', () => {
   expect(tPhrase(anthropic.notes[0])).toBe(
     'Esta herramienta no le lista sus modelos a la Console.',
   );
+});
+
+it('says a configured model is from an earlier read only on a card that shows one', () => {
+  const note = { text: 'Configured models are from an earlier read.' };
+  const stale = distributorCards(launcher(), idle, items, profiles(), [], true);
+  expect(card(stale, 'anthropic').notes).toContainEqual(note);
+  expect(card(stale, 'opencode').notes).not.toContainEqual(note);
+  expect(card(stale, 'openai').notes).not.toContainEqual(note);
+  expect(card(stale, 'kimi').notes).toEqual([]);
+  const whole = distributorCards(
+    launcher(),
+    idle,
+    items,
+    profiles(),
+    [],
+    false,
+  );
+  expect(card(whole, 'anthropic').notes).not.toContainEqual(note);
+  setLanguage('es');
+  expect(tPhrase(note)).toBe(
+    'Los modelos configurados son de una lectura anterior.',
+  );
+});
+
+it('hands whoever refreshes the Codex list the read already in flight', async () => {
+  let answer!: (value: ModelCatalogue) => void;
+  let reads = 0;
+  let state!: ModelsState;
+  const controller = new ModelsController((next) => (state = next), {
+    catalogue: () => {
+      reads++;
+      return new Promise((resolve) => (answer = resolve));
+    },
+  });
+  let first = false;
+  let second = false;
+  void controller.refresh().then(() => (first = true));
+  void controller.refresh().then(() => (second = true));
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  // One read, and neither request is over before it answers.
+  expect(reads).toBe(1);
+  expect([first, second]).toEqual([false, false]);
+  answer(withModel('model-c'));
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect([first, second]).toEqual([true, true]);
+  expect(listedIds(state)).toEqual(['model-a', 'model-b', 'model-c']);
+  // The next request reads again.
+  void controller.refresh();
+  expect(reads).toBe(2);
+  controller.dispose();
+});
+
+it('lets a configuration read be waited for, and reports a failed one as older', async () => {
+  const reply = parseInventoryReply(inventory);
+  let answer!: {
+    resolve: (v: typeof reply) => void;
+    reject: (e: unknown) => void;
+  };
+  let reads = 0;
+  const controller = new ConfigurationController(() => undefined, {
+    inventory: () => {
+      reads++;
+      return new Promise((resolve, reject) => (answer = { resolve, reject }));
+    },
+    changes: async () => ({ result: 'same', revision: reply.revision }),
+  });
+  let done = false;
+  void Promise.all([controller.refresh(), controller.refresh()]).then(
+    () => (done = true),
+  );
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(reads).toBe(1);
+  expect(done).toBe(false);
+  answer.resolve(reply);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(done).toBe(true);
+  expect(controller.state().stale).toBe(false);
+  // A read that fails still settles, and what is held is said to be older.
+  const failed = controller.refresh();
+  answer.reject(new Error('gone'));
+  await failed;
+  expect(controller.state().reply).toBe(reply);
+  expect(controller.state().stale).toBe(true);
+  controller.dispose();
 });

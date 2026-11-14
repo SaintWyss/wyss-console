@@ -420,9 +420,9 @@
   }
   /** Distributors' refresh: the tools, the agents' files, the profiles and the Codex list. */
   async function refreshDistributors(): Promise<boolean> {
-    configurationController.refresh();
     const [answered] = await Promise.all([
       nativeController.rediscover(),
+      configurationController.refresh(),
       nativeController.refreshProfiles(),
       modelsController.refresh(),
     ]);
@@ -521,6 +521,7 @@
       {native}
       {models}
       configItems={configuration.reply?.inventory.items ?? null}
+      configStale={configuration.stale}
       onrefresh={refreshDistributors}
     />
     <ProvidersView

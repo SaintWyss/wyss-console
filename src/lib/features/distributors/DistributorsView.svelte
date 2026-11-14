@@ -11,12 +11,15 @@
     native,
     models,
     configItems,
+    configStale,
     onrefresh,
   }: {
     visible: boolean;
     native: NativeState;
     models: ModelsState;
     configItems: readonly ConfigItem[] | null;
+    /** The last read of the agents' files failed: what is held is from an earlier one. */
+    configStale: boolean;
     /** Reads the tools, the configuration and the Codex list again; false when the tools did not answer. */
     onrefresh: () => Promise<boolean>;
   } = $props();
@@ -68,6 +71,7 @@
       configItems,
       native.profiles,
       fresh,
+      configStale,
     ),
   );
 </script>

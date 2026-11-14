@@ -23,6 +23,8 @@ export const ES: Readonly<Record<string, string>> = {
   'Not configured': 'Sin configurar',
   'new model': 'nuevo',
   'Configured model: {model}': 'Modelo configurado: {model}',
+  'Configured models are from an earlier read.':
+    'Los modelos configurados son de una lectura anterior.',
   'Profile {name}: {model}': 'Perfil {name}: {model}',
   'This tool does not list its models to the Console.':
     'Esta herramienta no le lista sus modelos a la Console.',

@@ -56,6 +56,10 @@ const NOT_LISTED: Phrase = {
   text: msg('This tool does not list its models to the Console.'),
 };
 
+const EARLIER_READ: Phrase = {
+  text: msg('Configured models are from an earlier read.'),
+};
+
 /** Installed or not as `native_launcher` answered; unknown when it did not, or did not name it. */
 function statusOf(
   launcher: Launcher | null,
@@ -155,6 +159,7 @@ export function distributorCards(
   items: readonly ConfigItem[] | null,
   profiles: readonly Profile[],
   fresh: readonly string[] = [],
+  configStale = false,
 ): DistributorCard[] {
   return DISTRIBUTORS.map((d): DistributorCard => {
     if (d.agent === null)
@@ -167,12 +172,18 @@ export function distributorCards(
         models: [],
         notes: [],
       };
+    const named =
+      d.agent === 'codex' ? [] : namedModels(d.agent, items, profiles);
     const listing =
       d.agent === 'codex'
         ? codexModels(models, fresh)
         : {
-            models: namedModels(d.agent, items, profiles),
-            notes: [NOT_LISTED],
+            models: named,
+            // A configured model that is shown and was not read again is said to be older.
+            notes:
+              configStale && named.some((m) => m.key.startsWith('configured:'))
+                ? [NOT_LISTED, EARLIER_READ]
+                : [NOT_LISTED],
           };
     return {
       id: d.id,

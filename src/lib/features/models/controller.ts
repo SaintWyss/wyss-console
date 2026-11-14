@@ -30,7 +30,8 @@ export class ModelsController {
   private stale = false;
   private failure: SessionFailureCode | null = null;
   private disposed = false;
-  private reading = false;
+  /** The read in flight, so that whoever asks again waits for the same one. */
+  private reading: Promise<void> | null = null;
 
   constructor(
     private readonly publish: (state: ModelsState) => void,
@@ -52,9 +53,12 @@ export class ModelsController {
   setVisible(visible: boolean) {
     if (visible && this.phase === 'idle') void this.refresh();
   }
-  async refresh() {
-    if (this.disposed || this.reading) return;
-    this.reading = true;
+  /** Reads the list now. Settles when the read has answered; a read in flight is the one awaited. */
+  refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    return (this.reading ??= this.read());
+  }
+  private async read() {
     if (this.phase === 'idle') {
       this.phase = 'loading';
       this.emit();
@@ -71,7 +75,7 @@ export class ModelsController {
       this.stale = this.catalogue !== null;
       this.phase = this.catalogue !== null ? 'ready' : 'failed';
     } finally {
-      this.reading = false;
+      this.reading = null;
     }
     this.emit();
   }

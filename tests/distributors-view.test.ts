@@ -48,7 +48,9 @@ const catalogueWith = (...ids: string[]) => ({
 function desktop() {
   const calls: string[] = [];
   const answers = {
+    /** A value, or a function called on each read (a promise leaves the read in flight). */
     catalogue: catalogues.listed as unknown,
+    inventory: (() => inventory) as () => unknown,
     launcherFails: false,
   };
   mockIPC((command, payload) => {
@@ -68,9 +70,11 @@ function desktop() {
       case 'native_profiles':
         return profiles();
       case 'managed_model_catalogue':
-        return answers.catalogue;
+        return typeof answers.catalogue === 'function'
+          ? (answers.catalogue as () => unknown)()
+          : answers.catalogue;
       case 'configuration_inventory':
-        return inventory;
+        return answers.inventory();
       case 'configuration_changes':
         return { result: 'same', revision: 1 };
       case 'managed_sessions_page':
@@ -266,4 +270,117 @@ it('says unknown, not missing, when the tools did not answer a refresh', async (
   await refresh();
   expect(status('anthropic')).toBe('Installed · 2.1.303 (Claude Code)');
   expect(status('openai')).toBe('Tool not installed');
+});
+
+const refreshButton = () =>
+  Array.from(view().querySelectorAll('button')).find(
+    (b) => text(b) === 'Refresh models',
+  )!;
+const more = (label: string) =>
+  Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.rail-menu .nav-item'),
+  ).find((b) => text(b) === label)!;
+/** The fixture inventory with Claude Code's `model` set to `model`. */
+const inventoryWith = (model: string) => {
+  const copy = structuredClone(inventory);
+  for (const item of copy.inventory.items)
+    if (
+      item.provider === 'claude_code' &&
+      item.kind === 'model_preference' &&
+      item.name === 'model' &&
+      item.detail?.kind === 'text'
+    )
+      (item.detail.value as { text: string }).text = model;
+  return copy;
+};
+
+it('waits for a Codex read already in flight before it compares, so its answer is the one marked', async () => {
+  const ipc = desktop();
+  component = mount(App, { target: document.body });
+  await flush();
+  rail('Distributors').click();
+  await flush();
+  expect(rows('openai')).toEqual(['model-a', 'model-b']);
+
+  // The Models view starts a read of the list, and it does not answer yet.
+  let answer!: (value: unknown) => void;
+  ipc.answers.catalogue = () =>
+    new Promise((resolve) => {
+      answer = resolve;
+    });
+  more('Models').click();
+  await flush();
+  Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.models-view button'),
+  )
+    .find((b) => text(b) === 'Read again')!
+    .click();
+  await flush();
+  const reads = ipc.count('managed_model_catalogue');
+
+  // Refresh models while it is in flight: no second read, and nothing is compared yet.
+  rail('Distributors').click();
+  await flush();
+  refreshButton().click();
+  await flush();
+  expect(ipc.count('managed_model_catalogue')).toBe(reads);
+  expect(refreshButton().disabled).toBe(true);
+  expect(refreshButton().getAttribute('aria-busy')).toBe('true');
+  expect(rows('openai')).toEqual(['model-a', 'model-b']);
+
+  // It answers with a model not seen before: that answer is what is compared.
+  answer(catalogueWith('model-c'));
+  await flush();
+  expect(refreshButton().disabled).toBe(false);
+  expect(rows('openai')).toEqual(['model-a', 'model-b', 'model-c new model']);
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([
+    'model-a',
+    'model-b',
+    'model-c',
+  ]);
+});
+
+it('waits for the configuration read, and says when the configured model shown is from an earlier one', async () => {
+  const ipc = desktop();
+  component = mount(App, { target: document.body });
+  await flush();
+  rail('Distributors').click();
+  await flush();
+  expect(rows('anthropic')[0]).toBe('Configured model: opus');
+  const note = 'Configured models are from an earlier read.';
+  expect(text(view())).not.toContain(note);
+
+  // The refresh is not over until the agents' files were read again.
+  let answer!: (value: unknown) => void;
+  ipc.answers.inventory = () =>
+    new Promise((resolve) => {
+      answer = resolve;
+    });
+  refreshButton().click();
+  await flush();
+  expect(refreshButton().getAttribute('aria-busy')).toBe('true');
+  expect(refreshButton().disabled).toBe(true);
+  expect(rows('anthropic')[0]).toBe('Configured model: opus');
+  answer(inventoryWith('haiku'));
+  await flush();
+  expect(refreshButton().disabled).toBe(false);
+  expect(rows('anthropic')[0]).toBe('Configured model: haiku');
+  expect(text(view())).not.toContain(note);
+
+  // The read fails: what is shown is the earlier read, and the card says so.
+  ipc.answers.inventory = () => {
+    throw { code: 'internal' };
+  };
+  await refresh();
+  expect(rows('anthropic')[0]).toBe('Configured model: haiku');
+  expect(text(card('anthropic'))).toContain(note);
+  // A card that shows no configured model claims nothing about one.
+  expect(text(card('opencode'))).not.toContain(note);
+  expect(text(card('openai'))).not.toContain(note);
+
+  // It is read whole again: nothing is said to be older.
+  ipc.answers.inventory = () => inventoryWith('sonnet');
+  await refresh();
+  expect(rows('anthropic')[0]).toBe('Configured model: sonnet');
+  expect(text(view())).not.toContain(note);
 });

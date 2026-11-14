@@ -55,6 +55,10 @@ export class ConfigurationController {
   private visible = false;
   private disposed = false;
   private reading = false;
+  /** The inventory read in flight, so that whoever asks again waits for the same one. */
+  private read: Promise<void> | null = null;
+  /** The change check in flight: a read asked for meanwhile starts once it has answered. */
+  private checking: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -87,21 +91,27 @@ export class ConfigurationController {
       return;
     }
     // Shown again: what is held is shown at once and read again.
-    this.refresh();
+    void this.refresh();
   }
 
-  /** Reads the inventory now. One read at a time. */
-  refresh() {
-    if (this.disposed || this.reading) return;
+  /**
+   * Reads the inventory now. One read at a time: the promise settles when the read that
+   * answers this request has, whether it came back whole or not (`stale`/`failure` say which).
+   */
+  refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.read) return this.read;
+    if (this.checking) return this.checking.then(() => this.refresh());
     this.stopTimer();
     this.reading = true;
     if (this.reply === null) {
       this.phase = 'loading';
       this.emit();
     }
-    void this.client.inventory().then(
+    this.read = this.client.inventory().then(
       (reply) => {
         this.reading = false;
+        this.read = null;
         if (this.disposed) return;
         this.reply = reply;
         this.phase = 'ready';
@@ -118,6 +128,7 @@ export class ConfigurationController {
       },
       (error: unknown) => {
         this.reading = false;
+        this.read = null;
         if (this.disposed) return;
         this.failure =
           error instanceof ConfigurationCallError ? error.code : 'internal';
@@ -132,6 +143,7 @@ export class ConfigurationController {
         if (this.failure !== 'unavailable') this.schedule();
       },
     );
+    return this.read;
   }
 
   private schedule() {
@@ -151,19 +163,21 @@ export class ConfigurationController {
     if (this.disposed || !this.visible || this.reading) return;
     const held = this.reply;
     if (held === null) {
-      this.refresh();
+      void this.refresh();
       return;
     }
     this.reading = true;
-    void this.client.changes(held.revision).then(
+    this.checking = this.client.changes(held.revision).then(
       (changes) => {
         this.reading = false;
+        this.checking = null;
         if (this.disposed) return;
         if (changes.result === 'same' && !this.stale) this.schedule();
-        else this.refresh();
+        else void this.refresh();
       },
       () => {
         this.reading = false;
+        this.checking = null;
         if (this.disposed) return;
         this.stale = true;
         this.emit();
