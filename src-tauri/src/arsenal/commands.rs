@@ -272,6 +272,11 @@ const COMMANDS: &[&str] = &[
     "arsenal_group_move",
     "arsenal_categories",
     "arsenal_category_write",
+    "arsenal_environment",
+    "arsenal_environment_options",
+    "arsenal_environment_write",
+    "arsenal_roles",
+    "arsenal_role_write",
     "arsenal_terminal_plan",
     "arsenal_terminal_bind",
     "arsenal_terminal_bindings",
@@ -1918,5 +1923,36 @@ mod tests {
             ids_of(&one_identity, None),
             [full_ids[0].clone(), full_ids[2].clone()]
         );
+    }
+}
+
+#[cfg(test)]
+mod routing_tests {
+    /// A command the handler serves but `COMMANDS` does not list is never routed to it: the
+    /// window gets a bare error ("arsenal: internal"). Every command of this file is listed.
+    #[test]
+    fn every_command_of_the_file_is_routed() {
+        let source = include_str!("commands.rs");
+        let mut missing = Vec::new();
+        let mut lines = source.lines().peekable();
+        while let Some(line) = lines.next() {
+            if line.trim() != "#[tauri::command]" {
+                continue;
+            }
+            let Some(next) = lines.peek() else { break };
+            let name = next
+                .trim()
+                .trim_start_matches("pub ")
+                .trim_start_matches("async ")
+                .trim_start_matches("fn ")
+                .split('(')
+                .next()
+                .unwrap_or("")
+                .to_owned();
+            if !super::COMMANDS.contains(&name.as_str()) {
+                missing.push(name);
+            }
+        }
+        assert!(missing.is_empty(), "not routed: {missing:?}");
     }
 }

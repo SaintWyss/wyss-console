@@ -97,7 +97,10 @@
     try {
       const [list, r, read] = await Promise.all([
         loadLaunches(),
-        client.roles(),
+        // Roles that cannot be read leave the basic ones; the editor still opens.
+        client
+          .roles()
+          .catch((): Roles => ({ custom: [], assigned: {}, damaged: true })),
         loadEstimateData(client),
       ]);
       launches = list.launches;
