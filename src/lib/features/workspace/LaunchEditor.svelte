@@ -15,6 +15,7 @@
     type Launch,
   } from '../../desktop/launch-client';
   import { DEFAULT_SPEC, hookLabel, toggle } from '../arsenal/environment';
+  import { distributorOf } from '../distributors/present';
   import { kTokens } from './estimate';
   import {
     loadOrder,
@@ -66,10 +67,9 @@
     { id: 'researcher', name: msg('Researcher') },
     { id: 'reviewer', name: msg('Reviewer') },
   ];
-  const AGENTS: readonly { id: Agent; distributor: string }[] = [
-    { id: 'claude_code', distributor: 'Anthropic' },
-    { id: 'codex', distributor: 'OpenAI' },
-  ];
+  const AGENTS: readonly { id: Agent; distributor: string }[] = (
+    ['claude_code', 'codex'] as const
+  ).map((id) => ({ id, distributor: distributorOf(id) }));
 
   let phase = $state<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   let launches = $state<Launch[]>([]);

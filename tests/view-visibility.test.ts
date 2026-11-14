@@ -34,6 +34,7 @@ it('finds every view the window mounts and hides', () => {
     'agent-feature',
     'approvals-feature',
     'configuration-feature',
+    'distributors-feature',
     'events-feature',
     'native-feature',
     'native-feature',

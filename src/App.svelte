@@ -22,6 +22,7 @@
   import PipelinesView from './lib/features/orchestration/PipelinesView.svelte';
   import RemoteView from './lib/features/remote/RemoteView.svelte';
   import { desktopM3 } from './lib/desktop/m3-client';
+  import DistributorsView from './lib/features/distributors/DistributorsView.svelte';
   import { ProjectsController } from './lib/features/projects/controller';
   import ProjectsGate from './lib/features/projects/ProjectsGate.svelte';
   import ProjectsView from './lib/features/projects/ProjectsView.svelte';
@@ -180,12 +181,22 @@
   let opened = false;
   let navigated = false;
   const activity = $derived(activeView === 'activity');
-  // The name of the view, alone, over every view but the Console: under More it is the only
-  // place that says which view is open. No subtitle.
+  // The name of the view, alone, over Activity and over the views that draw no heading of
+  // their own: there it is the only place that says which view is open. No subtitle.
+  const TITLED: readonly ShownView[] = [
+    'workspace',
+    'agents',
+    'projects',
+    'models',
+    'profiles',
+    'credentials',
+  ];
   const title = $derived(
     activity
       ? msg('Activity')
-      : (items.find((item) => item.id === activeView)?.label ?? ''),
+      : TITLED.includes(activeView)
+        ? (items.find((item) => item.id === activeView)?.label ?? '')
+        : '',
   );
 
   // Sessions are read only while their view is shown.
@@ -216,7 +227,9 @@
   // Sessions view and the profiles, and the runtime's list: it asks for nothing of its own.
   $effect(() => {
     configurationController.setVisible(
-      activeView === 'configuration' || activeView === 'models',
+      activeView === 'configuration' ||
+        activeView === 'models' ||
+        activeView === 'distributors',
     );
   });
   $effect(() => {
@@ -228,7 +241,9 @@
   });
   $effect(() => {
     modelsController.setVisible(
-      activeView === 'models' || activeView === 'profiles',
+      activeView === 'models' ||
+        activeView === 'profiles' ||
+        activeView === 'distributors',
     );
   });
   $effect(() => {
@@ -242,6 +257,7 @@
         activeView === 'launches' ||
         activeView === 'profiles' ||
         activeView === 'models' ||
+        activeView === 'distributors' ||
         activeView === 'projects',
     );
   });
@@ -402,6 +418,16 @@
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
+  /** Distributors' refresh: the tools, the agents' files, the profiles and the Codex list. */
+  async function refreshDistributors(): Promise<boolean> {
+    configurationController.refresh();
+    const [answered] = await Promise.all([
+      nativeController.rediscover(),
+      nativeController.refreshProfiles(),
+      modelsController.refresh(),
+    ]);
+    return answered;
+  }
   let legend = $state(false);
   let launchOpen = $state(false);
   function observeWorkspace(state: WorkspaceState) {
@@ -426,7 +452,7 @@
     {items}
   />
   <main id="main-content" class="content" tabindex="-1" data-view={activeView}>
-    {#if activeView !== 'console' && activeView !== 'launches'}
+    {#if title}
       <p class="context-title">{t(title)}</p>
     {/if}
     {#if notice}
@@ -490,6 +516,13 @@
         nativeProfiles={native.profiles}
       />
     {/if}
+    <DistributorsView
+      visible={activeView === 'distributors'}
+      {native}
+      {models}
+      configItems={configuration.reply?.inventory.items ?? null}
+      onrefresh={refreshDistributors}
+    />
     <ProvidersView
       visible={activeView === 'providers'}
       view={m3}

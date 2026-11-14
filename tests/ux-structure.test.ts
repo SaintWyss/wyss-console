@@ -71,7 +71,12 @@ it('offers seven entries on the rail, and every other view under More', () => {
   expect(moreItems(NAV_ITEMS).map((i) => i.id)).not.toContain('projects');
   // A view only reachable from More lights More.
   expect(railOf('sessions')).toBe('more');
-  expect(railOf('providers')).toBe('distributors');
+  // Providers is a view of its own under More; the rail's Distributors opens its own view.
+  expect(railOf('providers')).toBe('more');
+  expect(railOf('distributors')).toBe('distributors');
+  expect(RAIL_ITEMS.find((r) => r.id === 'distributors')?.view).toBe(
+    'distributors',
+  );
   expect(railOf('activity')).toBe('activity');
 });
 

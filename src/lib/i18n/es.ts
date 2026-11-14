@@ -13,6 +13,19 @@ export const ES: Readonly<Record<string, string>> = {
   System: 'Sistema',
   More: 'Más',
   Distributors: 'Distribuidores',
+  // Distributors
+  'Refresh models': 'Actualizar modelos',
+  'Last read: {time}': 'Última lectura: {time}',
+  'Only Codex reports new models.': 'Solo Codex informa modelos nuevos.',
+  'Installed · {version}': 'Instalado · {version}',
+  'Installed · version not reported': 'Instalado · versión no informada',
+  'Tool not installed': 'No instalado',
+  'Not configured': 'Sin configurar',
+  'new model': 'nuevo',
+  'Configured model: {model}': 'Modelo configurado: {model}',
+  'Profile {name}: {model}': 'Perfil {name}: {model}',
+  'This tool does not list its models to the Console.':
+    'Esta herramienta no le lista sus modelos a la Console.',
   // Workspace: launch editor
   'Choose it with Browse… or from the known folders.':
     'Elegila con Examinar… o entre las carpetas conocidas.',

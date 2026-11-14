@@ -3,6 +3,7 @@ import { msg } from '../i18n/msg';
 export type ViewId =
   | 'console'
   | 'launches'
+  | 'distributors'
   | 'workspace'
   | 'sessions'
   | 'agents'
@@ -174,7 +175,7 @@ export function navItems(
   return runtimes || projects || providers ? items : NAV_ITEMS;
 }
 
-/** The rail (redesign, stage 1): seven entries. Each opens a view that already exists. */
+/** The rail: seven entries. Each opens a view of its own; Activity shows two. */
 export type RailId =
   | 'console'
   | 'workspace'
@@ -215,7 +216,7 @@ export const RAIL_ITEMS: readonly RailItem[] = [
     id: 'distributors',
     label: msg('Distributors'),
     icon: 'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12L4 7.5',
-    view: 'providers',
+    view: 'distributors',
   },
   {
     id: 'activity',

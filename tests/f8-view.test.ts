@@ -183,8 +183,10 @@ it('shows Runtimes after Agents when the interface is active, and reads nothing 
   await flush();
   expect(view().hidden).toBe(false);
   expect(nav('Runtimes')!.getAttribute('aria-current')).toBe('page');
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Runtimes',
+  // Its own heading names it: no title is drawn over it.
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().querySelector('h2')?.textContent).toBe(
+    'Managed runtimes · protocol 2',
   );
   expect(ipc.last('f8_sessions')?.request).toEqual({ before: null });
   // The one wait for the next commit holds a watcher slot while the view is shown.

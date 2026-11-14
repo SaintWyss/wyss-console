@@ -296,13 +296,27 @@ it('keeps one lifecycle for every view, and no view starts anything for it', asy
   const reads = ipc.count('authority_lifecycle');
   // Every view is opened in turn. Each shows the same notice; none asks for the
   // lifecycle again, and none retries by itself.
+  // A view that draws its own heading is named by it; one that draws none is titled; the
+  // Console is framed by its toolbar.
+  const headings: Record<string, string | null> = {
+    Sessions: 'Managed sessions',
+    Agents: null,
+    Approvals: 'Approvals',
+    Events: 'Events',
+  };
   for (const view of ['Sessions', 'Agents', 'Approvals', 'Events', 'Console']) {
     await click(nav(view));
-    // Every view but the Console is titled; the Console is framed by its toolbar.
-    if (view === 'Console')
-      expect(document.querySelector('.context-title')).toBeNull();
-    else
-      expect(document.querySelector('.context-title')?.textContent).toBe(view);
+    const title = document.querySelector('.context-title');
+    if (view === 'Console') expect(title).toBeNull();
+    else if (headings[view] === null) expect(title?.textContent).toBe(view);
+    else {
+      expect(title, view).toBeNull();
+      expect(
+        document.querySelector('.content > section:not([hidden]) h2')
+          ?.textContent,
+        view,
+      ).toBe(headings[view]);
+    }
     expect(document.querySelectorAll('.authority-notice')).toHaveLength(1);
   }
   expect(ipc.count('authority_lifecycle')).toBe(reads);

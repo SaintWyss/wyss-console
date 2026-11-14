@@ -530,6 +530,20 @@ export class NativeController {
     };
     this.emit();
   }
+  /**
+   * Discovers the tools again because the owner asked (Distributors). True when the desktop
+   * answered; what was held stays when it did not, and the caller says it is not known.
+   */
+  async rediscover(): Promise<boolean> {
+    if (this.disposed) return false;
+    const seq = this.catalogueSeq + 1;
+    try {
+      await this.refreshCatalogue();
+      return !this.disposed && seq === this.catalogueSeq;
+    } catch {
+      return false;
+    }
+  }
   async refreshLauncher() {
     if (this.disposed) return;
     const confirmed = await this.readReadiness();

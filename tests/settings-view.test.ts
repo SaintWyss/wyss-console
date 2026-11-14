@@ -132,7 +132,9 @@ afterEach(async () => {
 
 it('opens from the sidebar with every section, in order, and the defaults selected', async () => {
   await show();
-  expect(text(document.querySelector('.context-title'))).toBe('Settings');
+  // Its own heading names it: no title is drawn over it, so the name is said once.
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(text(page().querySelector('h2'))).toBe('Settings');
   expect(Array.from(page().querySelectorAll('h3')).map((h) => text(h))).toEqual(
     [
       'Appearance',
@@ -344,7 +346,7 @@ it('is in English until Spanish is chosen, then redraws the page and the shell a
   await choose('setting-language', 'es');
   expect(document.documentElement.lang).toBe('es');
   expect(text(page().querySelector('h2'))).toBe('Ajustes');
-  expect(text(document.querySelector('.context-title'))).toBe('Ajustes');
+  expect(document.querySelector('.context-title')).toBeNull();
   expect(
     Array.from(page().querySelectorAll('h3'))
       .slice(0, 7)
@@ -388,6 +390,16 @@ it('opens in the language that was saved', async () => {
   expect(text(page().querySelector('.sessions-count'))).toBe(
     'Guardado en esta computadora',
   );
+  // Settings names itself; a view the shell titles is titled in the language in force.
+  expect(text(page().querySelector('h2'))).toBe('Ajustes');
+  expect(document.querySelector('.context-title')).toBeNull();
+  document
+    .querySelector<HTMLButtonElement>(
+      '.rail-list .nav-item[title="Actividad"]',
+    )!
+    .click();
+  await flush();
+  expect(text(document.querySelector('.context-title'))).toBe('Actividad');
 });
 
 it('keeps a scrollback it was handed that is not one of the steps', async () => {
@@ -412,7 +424,10 @@ it('opens on the preferred view, unless the user already went somewhere', async 
   desktop(settings);
   component = mount(App, { target: document.body });
   await flush();
-  expect(text(document.querySelector('.context-title'))).toBe('Events');
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(text(document.querySelector('.events-feature:not([hidden]) h2'))).toBe(
+    'Events',
+  );
   await unmount(component);
   component = undefined;
   document.body.replaceChildren();
@@ -439,7 +454,13 @@ it('opens on the preferred view, unless the user already went somewhere', async 
   await flush();
   answer(undefined);
   await flush();
-  expect(text(document.querySelector('.context-title'))).toBe('Sessions');
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(
+    text(document.querySelector('.sessions-feature:not([hidden]) h2')),
+  ).toBe('Managed sessions');
+  expect(document.querySelector<HTMLElement>('.events-feature')!.hidden).toBe(
+    true,
+  );
 });
 
 it('starts the Events view on the preferred filter, and follows a change of it', async () => {

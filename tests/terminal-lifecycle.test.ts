@@ -192,9 +192,10 @@ it('retrying failed preferences never reapplies the landing page during this win
   expect(retry).not.toBeNull();
   retry!.click();
   await settle();
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Settings',
-  );
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(
+    document.querySelector('.settings-feature:not([hidden]) h2')?.textContent,
+  ).toBe('Settings');
   await navigateTo('Console');
   expect(created()).toBe(1);
 });

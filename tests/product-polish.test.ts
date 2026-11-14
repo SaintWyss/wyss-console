@@ -161,7 +161,7 @@ for (const [label, link, first] of [
   });
 }
 
-it('gives every view a title, a useful empty state and a way back to the Console', async () => {
+it('names every view once, with a useful empty state and a way back to the Console', async () => {
   desktop(connected, lifecycle({ phase: 'ready', origin: 'managed' }));
   component = mount(App, { target: document.body });
   await flush();
@@ -171,13 +171,31 @@ it('gives every view a title, a useful empty state and a way back to the Console
     Approvals: /Nothing is waiting for a decision\./,
     Events: /No events yet\./,
   };
+  // The heading a view draws itself; null where it draws none and the shell titles it.
+  const headings: Record<string, string | null> = {
+    Sessions: 'Managed sessions',
+    Agents: null,
+    Approvals: 'Approvals',
+    Events: 'Events',
+    Settings: 'Settings',
+  };
+  const named = (name: string) => {
+    const title = document.querySelector('.context-title');
+    const own = headings[name];
+    if (own === null) expect(text(title), name).toBe(name);
+    else {
+      // Never both: the name is not said twice.
+      expect(title, name).toBeNull();
+      expect(text(visible()[0].querySelector('h2')), name).toBe(own);
+    }
+  };
   for (const [name, empty] of Object.entries(expected)) {
     await visit(name);
-    expect(text(document.querySelector('.context-title'))).toBe(name);
+    named(name);
     expect(text(visible()[0]), name).toMatch(empty);
   }
   await visit('Settings');
-  expect(text(document.querySelector('.context-title'))).toBe('Settings');
+  named('Settings');
   // The Console never left: its terminal is still the one the workspace opened.
   await visit('Console');
   expect(text(document.querySelector('.pill.terminal'))).toContain('Running');

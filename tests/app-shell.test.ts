@@ -227,6 +227,23 @@ it('renders the shell with brand, every view enabled and Console selected', asyn
   // Nothing was read from the authority yet, and nothing is claimed about it.
   expect(pill('authority')?.textContent).toContain('Connecting');
   expect(pill('agent')?.textContent).toContain('Unknown');
+
+  // The rail's Distributors opens its own view; Providers is still a view, under More.
+  const shown = (name: string) =>
+    !document.querySelector<HTMLElement>(`.${name}-feature`)!.hidden;
+  rail[3].click();
+  await flush();
+  expect(rail[3].getAttribute('aria-current')).toBe('page');
+  expect(shown('distributors')).toBe(true);
+  expect(shown('providers')).toBe(false);
+  more.find((b) => b.textContent?.trim() === 'Providers')!.click();
+  await flush();
+  expect(shown('providers')).toBe(true);
+  expect(shown('distributors')).toBe(false);
+  expect(rail[3].getAttribute('aria-current')).toBeNull();
+  expect(
+    document.querySelector('.rail-more')?.getAttribute('aria-current'),
+  ).toBe('page');
 });
 
 it('provides a keyboard skip link to the focusable main content landmark', async () => {

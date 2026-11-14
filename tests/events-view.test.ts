@@ -179,7 +179,9 @@ it('is a view of its own that reads history only while it is shown', async () =>
   expect(ipc.count('managed_events')).toBe(0);
   await click(nav('Events'));
   expect(view().hidden).toBe(false);
-  expect(document.querySelector('.context-title')?.textContent).toBe('Events');
+  // Its own heading names it: no title is drawn over it.
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().querySelector('h2')?.textContent).toBe('Events');
   expect(ipc.of('managed_events')).toEqual([
     { command: 'managed_events', request: {} },
   ]);
@@ -434,15 +436,19 @@ it('shows what a record is about and takes the reader to where that lives', asyn
   // And to the session in Sessions, selected.
   await click(nav('Events'));
   await click(button('Open session', details()!));
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Sessions',
-  );
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().hidden).toBe(true);
+  expect(
+    document.querySelector('.content > section:not([hidden]) h2')?.textContent,
+  ).toBe('Managed sessions');
   expect(
     text(document.querySelector('.sessions-feature .session-details h3')),
   ).toBe('rag-corp');
   // From a session's details, its loaded history.
   await click(button('Events', document.querySelector('.sessions-feature')!));
-  expect(document.querySelector('.context-title')?.textContent).toBe('Events');
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().hidden).toBe(false);
+  expect(view().querySelector('h2')?.textContent).toBe('Events');
   // Sessions has listed it, so the scope is named for it and not only by its identity.
   expect(text(view().querySelector('.events-scope'))).toContain('rag-corp');
   expect(titles()).toHaveLength(3);
@@ -499,9 +505,11 @@ it('asks the authority what an approval is now, and says when it no longer knows
     'The approval could not be read from the authority.',
   );
   await click(button('Open Approvals', details()!));
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Approvals',
-  );
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().hidden).toBe(true);
+  expect(
+    document.querySelector('.content > section:not([hidden]) h2')?.textContent,
+  ).toBe('Approvals');
 });
 
 it('loads older history when asked, and says where history ends', async () => {

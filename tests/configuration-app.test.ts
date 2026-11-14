@@ -124,9 +124,9 @@ it('is a view of its own that reads configuration only while it is shown', async
   nav('Configuration').click();
   await flush();
   expect(view().hidden).toBe(false);
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Configuration',
-  );
+  // Its own heading names it: no title is drawn over it.
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().querySelector('h2')?.textContent).toBe('Configuration');
   expect(ipc.count('configuration_inventory')).toBe(1);
   expect(text(view().querySelector('.sessions-count'))).toBe(
     '13 items from 21 places',

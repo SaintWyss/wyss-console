@@ -247,9 +247,9 @@ it('opens Approvals from the sidebar and reads nothing for it before that', asyn
 
   await click(nav('Approvals'));
   expect(approvalsView().hidden).toBe(false);
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Approvals',
-  );
+  // Its own heading names it: no title is drawn over it.
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(approvalsView().querySelector('h2')?.textContent).toBe('Approvals');
   expect(ipc.of('managed_approvals').map((c) => c.request)).toEqual([{}]);
   expect(text(approvalsView())).toContain('0 waiting for a decision');
   expect(text(approvalsView())).toContain('Nothing is waiting for a decision.');

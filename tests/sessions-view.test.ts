@@ -162,9 +162,8 @@ it('opens Sessions from the sidebar and reads nothing before that', async () => 
   await open();
   expect(nav('Sessions').getAttribute('aria-current')).toBe('page');
   expect(nav('Console').getAttribute('aria-current')).toBeNull();
-  expect(document.querySelector('.context-title')?.textContent).toBe(
-    'Sessions',
-  );
+  expect(document.querySelector('.context-title')).toBeNull();
+  expect(view().querySelector('h2')?.textContent).toBe('Managed sessions');
   // The title alone: no subtitle under it.
   expect(document.querySelector('.context-subtitle')).toBeNull();
   expect(view().hidden).toBe(false);
