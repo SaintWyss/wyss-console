@@ -556,6 +556,16 @@ pub fn save_variants(places: &Places, request: &VariantsRequest) -> Result<Launc
             "distro.{active} is this computer's distribution and stays"
         ));
     }
+    // Bounded before anything is built from it: the window's request is never trusted.
+    if request.variants.len() > MAX_VARIANTS {
+        return Err(format!("at most {MAX_VARIANTS} distributions"));
+    }
+    for v in &request.variants {
+        commands_ok(&v.commands)?;
+        if v.options.len() > MAX_OPTIONS || !v.options.iter().all(|o| id_ok(o)) {
+            return Err("options are short lowercase names".into());
+        }
+    }
     let mut seen = std::collections::BTreeSet::new();
     if !request
         .variants
@@ -602,6 +612,9 @@ pub fn save_variants(places: &Places, request: &VariantsRequest) -> Result<Launc
             out.push_str("manual = true\n");
         }
         out.push_str(&format!("commands = {}\n", list(&v.commands)));
+    }
+    if out.len() as u64 > MAX_FILE_BYTES {
+        return Err(format!("larger than {} KiB", MAX_FILE_BYTES / 1024));
     }
     // Checked as the reader takes it before anything is written.
     parse(&request.id, &out, &places.home, &places.system())?;

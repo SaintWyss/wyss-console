@@ -693,6 +693,17 @@ fn variants_are_saved_read_back_and_this_computers_one_stays() {
         ],
         vec![variant("cachyos", &["a\u{1b}[2J"], &[], false)],
         vec![variant("cachyos", &[], &[], false)],
+        (0..=MAX_VARIANTS)
+            .map(|i| variant(&format!("d{i}"), &["a"], &[], true))
+            .chain([variant("cachyos", &["a"], &[], false)])
+            .collect(),
+        vec![variant(
+            "cachyos",
+            &[&"x".repeat(MAX_COMMAND + 1)],
+            &[],
+            false,
+        )],
+        vec![variant("cachyos", &["a"], &["Bad Option"], false)],
         vec![
             variant("cachyos", &["a"], &[], false),
             variant("../x", &["a"], &[], false),

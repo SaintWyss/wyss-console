@@ -333,7 +333,9 @@
           <button
             type="button"
             class="action"
-            disabled={busy || !valid || (!launch.active && !dirty)}
+            disabled={busy ||
+              !valid ||
+              (launch.commands.length === 0 && !dirty)}
             onclick={() => void tryIt()}
             >{dirty ? t('Save and try') : t('Try')}</button
           >
