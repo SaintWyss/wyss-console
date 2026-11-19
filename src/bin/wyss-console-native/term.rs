@@ -18,6 +18,7 @@ use crate::host::{self, Host};
 use crate::palette;
 use crate::pty::Pty;
 use crate::keys;
+use crate::wheel;
 use crate::selection::{self, Mode, Pos, Selection};
 use crate::view::TermView;
 
@@ -279,6 +280,8 @@ struct State {
     found: RefCell<ghostty::Found>,
     /// A left-button press in progress: where it started and how it expands.
     drag: RefCell<Option<(Pos, Mode)>>,
+    /// Last pointer position over the area, for mouse wheel reports.
+    pointer: StdCell<(f64, f64)>,
 }
 
 impl State {
@@ -513,6 +516,7 @@ impl Terminal {
             pty,
             input,
             cell_w: StdCell::new(8.0),
+            pointer: StdCell::new((0.0, 0.0)),
             cell_h: StdCell::new(16.0),
             size: StdCell::new((cols, lines)),
             pango: RefCell::new(None),
@@ -664,12 +668,19 @@ impl Terminal {
         {
             let state = state.clone();
             let area_w = area.downgrade();
-            wheel.connect_scroll(move |_, _dx, dy| {
+            wheel.connect_scroll(move |c, _dx, dy| {
                 let mut rows = (dy * WHEEL_LINES).round() as isize;
                 if rows == 0 && dy != 0.0 {
                     rows = dy.signum() as isize;
                 }
-                state.shared.lock().scroll_delta(rows);
+                let shift = c.current_event_state().contains(gtk::gdk::ModifierType::SHIFT_MASK);
+                let (x, y) = state.pointer.get();
+                let pos = state.cell_at(x, y).unwrap_or(Pos { row: 0, col: 0 });
+                let modes = state.shared.lock().wheel_modes();
+                match wheel::action(modes, shift, rows, pos.col, pos.row) {
+                    wheel::Action::Scrollback(r) => state.shared.lock().scroll_delta(r),
+                    wheel::Action::Send(bytes) => state.input.send(&bytes),
+                }
                 state.clear_selection();
                 if let Some(a) = area_w.upgrade() {
                     a.queue_draw();
@@ -678,6 +689,12 @@ impl Terminal {
             });
         }
         area.add_controller(wheel);
+        let motion = gtk::EventControllerMotion::new();
+        {
+            let state = state.clone();
+            motion.connect_motion(move |_, x, y| state.pointer.set((x, y)));
+        }
+        area.add_controller(motion);
 
         // Ctrl+C copies, Ctrl+V and Ctrl+Shift+V paste, and Ctrl+Shift+C sends ETX (0x03).
         // Capture phase so they run before the key controller that feeds the PTY.

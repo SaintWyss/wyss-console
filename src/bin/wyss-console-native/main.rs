@@ -26,6 +26,7 @@ mod settings;
 mod term;
 mod theme;
 mod view;
+mod wheel;
 mod workspace;
 
 use wyss_console::settings::SettingsService;

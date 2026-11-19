@@ -302,6 +302,23 @@ impl Terminal {
         m.value
     }
 
+    /// True when DEC private mode `n` is set (e.g. 1000 mouse tracking, 1049 alternate screen).
+    pub fn dec_mode(&self, n: u16) -> bool {
+        let mut m = ModeConfig { mode: n, value: false };
+        unsafe { ghostty_terminal_get(self.raw, TDATA_MODE, &mut m as *mut ModeConfig as *mut c_void) };
+        m.value
+    }
+
+    /// What the wheel should do given the modes the application set.
+    pub fn wheel_modes(&self) -> crate::wheel::Modes {
+        crate::wheel::Modes {
+            mouse: [9, 1000, 1002, 1003].iter().any(|&n| self.dec_mode(n)),
+            sgr: self.dec_mode(1006),
+            alt: [47, 1047, 1049].iter().any(|&n| self.dec_mode(n)),
+            app_cursor: self.app_cursor(),
+        }
+    }
+
     /// DEC 2004: the application wants pastes wrapped in `ESC[200~ … ESC[201~`.
     pub fn bracketed_paste(&self) -> bool {
         let mut m = ModeConfig { mode: MODE_BRACKETED_PASTE, value: false };
@@ -720,6 +737,20 @@ impl Drop for RenderState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wheel_modes_follow_the_application() {
+        let mut t = Terminal::new(80, 24, 100, Box::new(|_| {}));
+        assert_eq!(t.wheel_modes(), crate::wheel::Modes::default());
+        t.write(b"\x1b[?1049h");
+        assert!(t.wheel_modes().alt);
+        t.write(b"\x1b[?1000h\x1b[?1006h");
+        let m = t.wheel_modes();
+        assert!(m.mouse && m.sgr);
+        t.write(b"\x1b[?1000l\x1b[?1049l");
+        let m = t.wheel_modes();
+        assert!(!m.mouse && !m.alt);
+    }
+
     use super::*;
     use std::sync::{Arc, Mutex};
 
