@@ -7,7 +7,7 @@ Wyss Console usa los colores de estas paletas para los temas de interfaz y termi
 | Catppuccin Mocha | Catppuccin | [Catppuccin](https://github.com/catppuccin/catppuccin) | MIT |
 | Dracula | Zeno Rocha y Dracula Theme | [Dracula Theme](https://github.com/dracula/dracula-theme) | MIT |
 | Gruvbox Dark | Pavel Pertsev (morhetz) | [Gruvbox](https://github.com/morhetz/gruvbox) | MIT |
-| Monokai | Wimer Hazenberg | [Monokai](https://monokai.pro/) · [port Classic de iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) | MIT (port) |
+| Monokai (clásico, 2006) | Wimer Hazenberg | [port Monokai Classic de iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes); no incluye Monokai Pro | MIT (port) |
 | Nord | Arctic Ice Studio y Sven Greb | [Nord](https://github.com/nordtheme/nord) | MIT |
 | Rosé Pine | Rosé Pine | [Rosé Pine](https://github.com/rose-pine/rose-pine) | MIT |
 | Solarized Light | Ethan Schoonover | [Solarized](https://github.com/altercation/solarized) | MIT |
