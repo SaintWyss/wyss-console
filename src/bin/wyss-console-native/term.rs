@@ -354,7 +354,11 @@ enum ClipboardPaste {
     Nothing,
 }
 
-fn clipboard_paste(has_text: bool, has_image: bool) -> ClipboardPaste {
+/// `mimes` are the clipboard's real MIME types. GTK reports `String` as readable for any clipboard
+/// (an image comes back as "\x89PNG"), so only an actual text type counts as text.
+fn clipboard_paste(mimes: &[&str]) -> ClipboardPaste {
+    let has_text = mimes.iter().any(|m| m.starts_with("text/plain") || matches!(*m, "UTF8_STRING" | "STRING" | "TEXT"));
+    let has_image = mimes.iter().any(|m| m.starts_with("image/"));
     match (has_text, has_image) {
         (true, _) => ClipboardPaste::Text,
         (false, true) => ClipboardPaste::ForwardImage,
@@ -364,11 +368,9 @@ fn clipboard_paste(has_text: bool, has_image: bool) -> ClipboardPaste {
 
 fn paste_clipboard(state: &Rc<State>, area: &gtk::Widget) {
     let clipboard = area.clipboard();
-    let formats = clipboard.formats();
-    let has_text = formats.contains_type(String::static_type());
-    let has_image = formats.contains_type(gtk::gdk::Texture::static_type())
-        || ["image/png", "image/jpeg", "image/bmp", "image/webp"].iter().any(|m| formats.contain_mime_type(m));
-    match clipboard_paste(has_text, has_image) {
+    let mimes = clipboard.formats().mime_types();
+    let mimes: Vec<&str> = mimes.iter().map(|m| m.as_str()).collect();
+    match clipboard_paste(&mimes) {
         ClipboardPaste::Text => {
             let state = state.clone();
             let area_w = area.downgrade();
@@ -1190,10 +1192,12 @@ mod tests {
 
     #[test]
     fn ctrl_v_pastes_text_or_forwards_an_image() {
-        assert_eq!(clipboard_paste(true, false), ClipboardPaste::Text);
-        assert_eq!(clipboard_paste(true, true), ClipboardPaste::Text, "text wins when both are there");
-        assert_eq!(clipboard_paste(false, true), ClipboardPaste::ForwardImage);
-        assert_eq!(clipboard_paste(false, false), ClipboardPaste::Nothing);
+        assert_eq!(clipboard_paste(&["text/plain;charset=utf-8", "text/plain"]), ClipboardPaste::Text);
+        assert_eq!(clipboard_paste(&["text/plain", "image/png"]), ClipboardPaste::Text, "text wins when both are there");
+        assert_eq!(clipboard_paste(&["image/png", "application/x-kde-suggestedfilename"]), ClipboardPaste::ForwardImage);
+        assert_eq!(clipboard_paste(&["UTF8_STRING"]), ClipboardPaste::Text);
+        assert_eq!(clipboard_paste(&["text/html", "image/png"]), ClipboardPaste::ForwardImage, "an image copied from a page");
+        assert_eq!(clipboard_paste(&[]), ClipboardPaste::Nothing);
     }
 
     #[test]
