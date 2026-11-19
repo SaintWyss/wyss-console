@@ -1,8 +1,10 @@
 //! The configuration one terminal would start with: what a saved selection becomes for one provider
 //! build, in one project, against the skills installed right now. It is computed, never assumed:
-//! a selected capability is `prepared` only when the provider already has exactly that revision
-//! installed, every other installed skill is named for exclusion, and the exclusion is applied only
-//! where the exact build has its own evidence. Nothing here writes a file or starts a process.
+//! a selected capability is `prepared` when the provider already has exactly that revision
+//! installed, and `from_arsenal` (copied into the session's own folder) when it is not installed or
+//! its installed copy differs. Every other installed skill is named for exclusion, and the exclusion
+//! is applied only where the exact build has its own evidence. Nothing here writes a file or starts
+//! a process.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -60,7 +62,8 @@ pub struct PlanItem {
     pub revision: Option<i64>,
     pub pinned: bool,
     pub tree_hash: Option<String>,
-    /// `prepared`, `rejected`, `unsupported` or `missing`.
+    /// `prepared`, `from_arsenal` (copied to the session from the library), `rejected`,
+    /// `unsupported` or `missing`.
     pub state: &'static str,
     pub reason: String,
     pub compatibility: Compatibility,
@@ -123,6 +126,9 @@ pub struct TerminalPlan {
     pub codex_environment: Option<crate::native::launch_home_codex::CodexHomeSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub launch_instructions: Option<super::role_instructions::Choice>,
+    /// Stored skills the session gets from the library, copied into its own folder.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub materialize: Vec<crate::native::arsenal::Materialize>,
 }
 
 fn version_text(version: Option<&str>) -> &str {
@@ -150,6 +156,7 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
     let mut kept: BTreeSet<String> = BTreeSet::new();
     let mut warnings = Vec::new();
     let mut items = Vec::with_capacity(input.items.len());
+    let mut materialize = Vec::new();
     for item in &input.items {
         let dependencies = analysis::dependencies(&item.files, Some(&input.installed.mcp_servers));
         let paths: Vec<&str> = item.files.iter().map(|(path, _)| path.as_str()).collect();
@@ -178,32 +185,34 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
                 ),
             )
         } else {
+            let revision = item.revision.unwrap_or(0);
+            let mut copy = |reason: String| {
+                materialize.push(crate::native::arsenal::Materialize {
+                    capability: item.capability.clone(),
+                    revision,
+                    name: item.name.clone(),
+                });
+                ("from_arsenal", reason)
+            };
             match installed_hash.get(item.name.as_str()) {
-                None => (
-                    "rejected",
-                    "Not installed for this provider. Adding stored content to one session needs a qualified session plugin, which is not available.".to_owned(),
-                ),
+                None => copy(format!(
+                    "Not installed for this provider: revision {revision} is copied to this session from Arsenal."
+                )),
                 Some(copies) if copies.iter().any(|hash| hash.as_deref() == Some(item.tree_hash.as_str())) => {
                     kept.insert(item.name.clone());
                     (
                         "prepared",
                         format!(
-                            "The installed copy is exactly revision {}. It stays exposed.",
-                            item.revision.unwrap_or(0)
+                            "The installed copy is exactly revision {revision}. It stays exposed."
                         ),
                     )
                 }
-                Some(copies) if copies.iter().all(Option::is_none) => (
-                    "rejected",
-                    "Installed as a link, so its content cannot be compared with this revision.".to_owned(),
-                ),
-                Some(_) => (
-                    "rejected",
-                    format!(
-                        "The installed copy differs from revision {}. Restore or import so they match; Arsenal does not expose a revision that is not installed.",
-                        item.revision.unwrap_or(0)
-                    ),
-                ),
+                Some(copies) if copies.iter().all(Option::is_none) => copy(format!(
+                    "Installed as a link, so its content cannot be compared: this session gets revision {revision} from Arsenal. Your installed copy is not changed."
+                )),
+                Some(_) => copy(format!(
+                    "The installed copy differs from revision {revision}: this session gets that revision from Arsenal. Your installed copy is not changed."
+                )),
             }
         };
         items.push(PlanItem {
@@ -219,6 +228,12 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
             compatibility,
             dependencies,
         });
+    }
+    // Claude Code switches skills off by name: the copied skill's name must stay on. Codex
+    // switches off by file, so the installed copy of another content is switched off and only
+    // the copy in the session's own folder loads.
+    if provider != "codex" {
+        kept.extend(materialize.iter().map(|m: &crate::native::arsenal::Materialize| m.name.clone()));
     }
     let mut composites = Vec::new();
     for composite in &input.installed.composites {
@@ -363,6 +378,7 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         environment: None,
         codex_environment: None,
         launch_instructions: None,
+        materialize,
     }
 }
 
@@ -707,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn different_missing_or_foreign_content_is_rejected_or_unsupported_never_prepared() {
+    fn different_or_missing_content_is_copied_from_arsenal_and_foreign_items_are_unsupported() {
         let installed = scan(vec![skill("design", "user", b"changed")], Vec::new());
         let sel = selection(&[]);
         let mut codex = item("other", b"x");
@@ -723,12 +739,62 @@ mod tests {
         let states: Vec<&str> = plan.items.iter().map(|i| i.state).collect();
         assert_eq!(
             states,
-            ["rejected", "rejected", "unsupported", "unsupported"]
+            ["from_arsenal", "from_arsenal", "unsupported", "unsupported"]
         );
-        assert_eq!(plan.status, "blocked");
-        assert!(!plan.can_apply);
-        // A rejected skill is not kept: the installed copy would be other content.
-        assert_eq!(plan.excluded, ["design"]);
+        assert_eq!(plan.status, "partial");
+        assert!(plan.can_apply);
+        // Claude Code switches off by name: the copied skill's name stays on.
+        assert!(plan.excluded.is_empty());
+        let copies: Vec<(&str, i64)> = plan
+            .materialize
+            .iter()
+            .map(|m| (m.name.as_str(), m.revision))
+            .collect();
+        assert_eq!(copies, [("design", 1), ("absent", 1)]);
+    }
+
+    #[test]
+    fn a_skill_not_installed_is_prepared_from_arsenal_with_the_current_revision() {
+        let installed = scan(Vec::new(), Vec::new());
+        let sel = selection(&[]);
+        let mut tutor = item("tutor", b"t");
+        tutor.revision = Some(3);
+        let plan = plan(input(&sel, vec![tutor], &installed, Some(EVIDENCE)));
+        assert_eq!(plan.items[0].state, "from_arsenal");
+        assert!(plan.items[0].reason.contains("revision 3 is copied"), "{}", plan.items[0].reason);
+        assert_eq!(plan.status, "ready");
+        assert!(plan.can_apply);
+        assert_eq!(plan.materialize.len(), 1);
+        assert_eq!(
+            (plan.materialize[0].capability.as_str(), plan.materialize[0].revision, plan.materialize[0].name.as_str()),
+            ("cap-tutor", 3, "tutor")
+        );
+    }
+
+    #[test]
+    fn an_installed_copy_that_differs_gives_way_to_the_preset_revision_and_codex_switches_it_off() {
+        let mut installed = scan(
+            vec![codex_skill("graphify", "codex_user_skills", b"installed")],
+            Vec::new(),
+        );
+        installed.skill_files = vec![Some("/h/.agents/skills/graphify/SKILL.md".into())];
+        installed.nested_files = vec![Vec::new()];
+        let mut sel = selection(&[]);
+        sel.provider = "codex".into();
+        let mut graphify = item("graphify", b"stored revision 2");
+        graphify.provider = "codex".into();
+        graphify.revision = Some(2);
+        graphify.pinned = true;
+        let mut inp = input(&sel, vec![graphify], &installed, Some(CODEX_EVIDENCE));
+        inp.provider = "codex";
+        inp.version = Some("codex-cli 0.159.0".into());
+        let plan = plan(inp);
+        assert_eq!(plan.items[0].state, "from_arsenal");
+        assert!(plan.items[0].reason.contains("differs from revision 2"), "{}", plan.items[0].reason);
+        assert_eq!(plan.materialize[0].revision, 2);
+        assert!(plan.can_apply);
+        // The installed copy, outside the session's folder, does not load beside the copy.
+        assert_eq!(plan.excluded_files, ["/h/.agents/skills/graphify/SKILL.md"]);
     }
 
     #[test]

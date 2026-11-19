@@ -1029,6 +1029,8 @@ pub fn mcp_counts(spec: &HomeSpec, options: &Options) -> (usize, usize) {
 pub struct Skills {
     pub library: Vec<arsenal::store::Summary>,
     pub reasons: BTreeMap<String, String>,
+    /// Stored skills a session gets from the library, copied into its own folder.
+    pub copied: std::collections::BTreeSet<String>,
 }
 
 type SkillEntry<'a> = (&'a str, &'a str, bool);
@@ -1163,10 +1165,16 @@ impl Skills {
                 &installed,
             )
         });
+        let copied = plan
+            .iter()
+            .flatten()
+            .filter(|item| item.state == "from_arsenal")
+            .map(|item| item.capability.clone())
+            .collect();
         let reasons = match plan {
             Some(items) => items
                 .into_iter()
-                .filter(|item| item.state != "prepared")
+                .filter(|item| !matches!(item.state, "prepared" | "from_arsenal"))
                 .map(|item| (item.capability, item.reason))
                 .collect(),
             None => library
@@ -1183,6 +1191,7 @@ impl Skills {
         Self {
             library: library.to_vec(),
             reasons,
+            copied,
         }
     }
 
@@ -1283,6 +1292,7 @@ mod estimate_tests {
         let skills = Skills {
             library,
             reasons: BTreeMap::new(),
+            copied: Default::default(),
         };
 
         let groups = skills.groups(CLAUDE, &[], "");

@@ -118,12 +118,39 @@ pub fn parse_sessions(v: &Value) -> Result<Vec<Session>, HostError> {
 pub struct Started {
     pub session: Session,
     pub terminal_id: String,
+    /// Stored skills of the preset the host could not prepare: (name, reason code).
+    pub skills_skipped: Vec<(String, String)>,
 }
 
 pub fn parse_started(v: &Value) -> Result<Started, HostError> {
     let session = parse_session(&v["session"]).ok_or_else(|| bad("reply has no session"))?;
     let terminal_id = v["terminal"]["terminal_id"].as_str().ok_or_else(|| bad("reply has no terminal"))?.to_owned();
-    Ok(Started { session, terminal_id })
+    let skills_skipped = v["skills_skipped"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| Some((item["name"].as_str()?.to_owned(), item["reason"].as_str()?.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Started { session, terminal_id, skills_skipped })
+}
+
+/// What the owner reads about a stored skill the host could not prepare for the session.
+pub fn skipped_skill_note(name: &str, reason: &str) -> String {
+    let why = match reason {
+        "digest_mismatch" => tr(t!("its stored files do not match their digest")),
+        "not_in_library" => tr(t!("the library no longer holds that revision")),
+        "not_this_skill" => tr(t!("the stored revision is not that skill")),
+        "unsafe_path" => tr(t!("a stored file has a path that is not allowed")),
+        "name_taken" => tr(t!("the session folder already has something with that name")),
+        "write_failed" => tr(t!("it could not be written to the session folder")),
+        "token_missing" => tr(t!("there is no stored sign-in token for a folder of the session's own")),
+        "cwd_is_home" => tr(t!("the project folder would load your own configuration again")),
+        _ => tr(t!("the Arsenal library could not be read")),
+    };
+    trf(t!("Could not prepare the skill {name}: {reason}. The agent started without it."), &[("name", name), ("reason", &why)])
 }
 
 /// Panel actions by session state: stop or restart a running agent, or start or forget a finished one.
@@ -250,7 +277,7 @@ pub fn restart(host: &Host, id: &str, checked: Option<&Preview>) -> Result<Start
 }
 
 pub enum Restart {
-    Started(Started),
+    Started(Box<Started>),
     Confirm(Preview),
 }
 
@@ -262,7 +289,7 @@ pub fn prepare_restart(host: &Host, id: &str) -> Result<Restart, HostError> {
     if !full_access(&session) {
         match restart(host, id, None) {
             Err(HostError::Remote { code, .. }) if code == "restart_needs_preview" => {}
-            result => return result.map(Restart::Started),
+            result => return result.map(|started| Restart::Started(Box::new(started))),
         }
     }
     let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
@@ -431,6 +458,8 @@ fn open_launch_with(
                 return Err(Refusal(trf(t!("The launch “{name}” cannot start with this permission. No commands were run."), &[("name", &launch.name)])));
             }
             let started = start(host, agent.id(), &directory, profile, arsenal, &pre)?;
+            let mut notes = notes;
+            notes.extend(started.skills_skipped.iter().map(|(name, reason)| skipped_skill_note(name, reason)));
             Ok(Opened::Agent { started, notes })
         }
     }
@@ -637,7 +666,7 @@ mod tests {
 
     #[test]
     fn a_launch_with_a_preset_sends_the_same_compiled_arsenal_to_every_preview_and_the_start() {
-        let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-9"}});
+        let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-9"}, "skills_skipped": [{"name": "tutor", "reason": "digest_mismatch"}]});
         let (path, h) = fake_host(vec![
             ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok-1", "through_shell": true, "with_cost": [], "provider_version": "codex-cli 0.159.0"}})),
             ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok-2", "through_shell": true, "with_cost": [], "provider_version": "codex-cli 0.159.0"}})),
@@ -656,11 +685,13 @@ mod tests {
                 home: None,
                 codex_home: None,
                 launch_instructions: None,
+                materialize: Vec::new(),
             })
         };
         let before = |_: &[String], _: &str, _: &str| vec![("true".to_owned(), "ok".to_owned())];
         let out = open_launch_with(&Host::new(&path), &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT, &home, &before, Some(&test_approvals()), &compile).unwrap();
-        assert!(matches!(out, Opened::Agent { .. }), "{out:?}");
+        let Opened::Agent { notes, .. } = out else { panic!("{out:?}") };
+        assert_eq!(notes, vec!["Could not prepare the skill tutor: its stored files do not match their digest. The agent started without it."]);
         assert_eq!(asked.borrow().as_slice(), &[("Reviewer".to_owned(), "codex".to_owned(), home.clone())]);
         let seen = h.join().unwrap();
         let arsenal = &seen[0]["params"]["arsenal"];

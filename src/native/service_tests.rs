@@ -763,6 +763,7 @@ fn arsenal_launch(off: &[&str]) -> super::arsenal::ArsenalLaunch {
         home: None,
         codex_home: None,
         launch_instructions: None,
+        materialize: Vec::new(),
     }
 }
 
@@ -1724,4 +1725,233 @@ fn a_preset_compiled_from_the_library_is_accepted_by_preview_and_start() {
     )
     .expect("the host starts the compiled preset");
     assert_eq!(reply.session.session.arsenal.as_ref(), Some(&launch));
+}
+
+// ---- stored skills copied into the session's own folder -------------------------------------
+
+type StoredFiles = Vec<(String, Vec<u8>)>;
+
+/// A library in the fixture `HOME` (`~/.local/share/wyss-console/arsenal`) holding `skills` for
+/// `provider`; the stored bytes `tamper` are changed afterwards, so their digest no longer
+/// matches. Returns what a launch names to copy them.
+fn stored_skills(
+    provider: &str,
+    skills: &[(&str, StoredFiles)],
+    tamper: Option<&[u8]>,
+) -> Vec<super::arsenal::Materialize> {
+    use crate::arsenal::store::{self, NewCapability};
+    let (mut library, folder) = crate::arsenal::open().unwrap();
+    let source = format!("{}_user_skills", provider.trim_end_matches("_code"));
+    let wanted = skills
+        .iter()
+        .map(|(name, files)| {
+            let imported = library
+                .import(&NewCapability {
+                    identity: store::identity(provider, "skill", &source, name),
+                    provider: provider.into(),
+                    source: source.clone(),
+                    kind: "skill".into(),
+                    name: (*name).into(),
+                    description: "test".into(),
+                    origin: format!("~/skills/{name}"),
+                    files: files.clone(),
+                })
+                .unwrap();
+            super::arsenal::Materialize {
+                capability: imported.capability,
+                revision: imported.revision,
+                name: (*name).into(),
+            }
+        })
+        .collect();
+    drop(library);
+    if let Some(bytes) = tamper {
+        let db = rusqlite::Connection::open(folder.join("arsenal.sqlite")).unwrap();
+        // The library refuses to change stored bytes; the fixture plays a damaged file.
+        db.execute_batch("DROP TRIGGER blob_fixed").unwrap();
+        let changed = db
+            .execute(
+                "UPDATE blob SET content = ?2 WHERE hash = ?1",
+                rusqlite::params![store::digest(bytes), b"altered".to_vec()],
+            )
+            .unwrap();
+        assert_eq!(changed, 1, "the fixture blob to alter was not found");
+    }
+    wanted
+}
+
+fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+fn files(list: &[(&str, &[u8])]) -> Vec<(String, Vec<u8>)> {
+    list.iter()
+        .map(|(path, bytes)| ((*path).to_owned(), bytes.to_vec()))
+        .collect()
+}
+
+#[test]
+fn a_claude_preset_copies_its_stored_skills_into_its_own_folder_and_skips_an_altered_one() {
+    let (world, _env, _ring) = claude_home_world();
+    let owner = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap()
+        .join(".claude");
+    fs::create_dir_all(owner.join("skills/design")).unwrap();
+    fs::create_dir_all(owner.join("skills/other")).unwrap();
+    fs::write(owner.join("skills/design/SKILL.md"), "owner design").unwrap();
+    fs::write(owner.join("skills/other/SKILL.md"), "owner other").unwrap();
+    let materialize = stored_skills(
+        "claude_code",
+        &[
+            (
+                "design",
+                files(&[
+                    ("SKILL.md", b"stored design"),
+                    ("scripts/run.sh", b"#!/bin/sh\necho hi\n"),
+                ]),
+            ),
+            ("tutor", files(&[("SKILL.md", b"stored tutor body")])),
+        ],
+        Some(b"stored tutor body"),
+    );
+    let version = super::capabilities::ARSENAL_TEST_VERSION;
+    script(
+        &world.bin.join("claude"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{version}'; exit 0; }}\n\
+             echo \"CFG=[$CLAUDE_CONFIG_DIR]\"; echo CLAUDE-READY; exec cat"
+        ),
+    );
+    // A preset that keeps the owner's environment: the folder of its own is only for the copies.
+    let launch = super::arsenal::ArsenalLaunch {
+        materialize,
+        ..arsenal_launch(&[])
+    };
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    assert!(preview.can_start, "{:?}", preview.not_applicable);
+    let reply = arsenal_start(&world, Some(launch), preview.plan_token, version).unwrap();
+    let dir = world
+        .base
+        .join("launch-homes")
+        .join(arsenal_launch(&[]).selection);
+    let out = world.output_until(&reply.terminal.terminal_id, "CLAUDE-READY");
+    assert!(out.contains(&format!("CFG=[{}]", dir.display())), "{out:?}");
+    // The altered one is skipped with its reason; the agent started anyway.
+    assert_eq!(
+        reply.skills_skipped,
+        vec![super::arsenal::SkippedSkill {
+            name: "tutor".into(),
+            reason: "digest_mismatch".into()
+        }]
+    );
+    let skills = dir.join("skills");
+    assert!(
+        fs::symlink_metadata(&skills).unwrap().is_dir(),
+        "the home's skills is a link"
+    );
+    assert_eq!(mode(&skills), 0o700);
+    assert_eq!(
+        fs::read(skills.join("design/SKILL.md")).unwrap(),
+        b"stored design"
+    );
+    assert_eq!(mode(&skills.join("design")), 0o700);
+    assert_eq!(mode(&skills.join("design/SKILL.md")), 0o600);
+    assert_eq!(mode(&skills.join("design/scripts")), 0o700);
+    assert_eq!(mode(&skills.join("design/scripts/run.sh")), 0o700);
+    assert!(!skills.join("tutor").exists());
+    // The owner's other skill is still there, as a link; the owner's own folder is unchanged.
+    assert_eq!(
+        fs::read_link(skills.join("other")).unwrap(),
+        owner.join("skills/other")
+    );
+    assert_eq!(
+        fs::read(owner.join("skills/design/SKILL.md")).unwrap(),
+        b"owner design"
+    );
+    let mut listed: Vec<String> = fs::read_dir(owner.join("skills"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    listed.sort();
+    assert_eq!(listed, ["design", "other"]);
+    // The next launch of the preset without copies: they go, and the link to the owner's is back.
+    let plain = claude_own_home();
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&plain))
+        .unwrap();
+    let reply = arsenal_start(&world, Some(plain), preview.plan_token, version).unwrap();
+    world.output_until(&reply.terminal.terminal_id, "CLAUDE-READY");
+    assert!(reply.skills_skipped.is_empty());
+    assert_eq!(fs::read_link(&skills).unwrap(), owner.join("skills"));
+    assert_eq!(
+        fs::read(owner.join("skills/design/SKILL.md")).unwrap(),
+        b"owner design"
+    );
+}
+
+#[test]
+fn a_codex_preset_copies_its_stored_skills_into_its_codex_home() {
+    let world = World::new();
+    script(
+        &world.bin.join("codex"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{CODEX_VERSION}'; exit 0; }}\n\
+             echo \"CODEXHOME=[$CODEX_HOME]\"; echo CODEX-READY; exec cat"
+        ),
+    );
+    let owner_home = world.home.parent().unwrap().join("owner-home");
+    let owner = owner_home.join(".codex");
+    fs::create_dir_all(owner.join("skills/design")).unwrap();
+    fs::write(owner.join("skills/design/SKILL.md"), "owner design").unwrap();
+    fs::write(owner.join("config.toml"), "model = \"x\"\n").unwrap();
+    fs::write(owner.join("auth.json"), "FAKE-TOKEN").unwrap();
+    let _env = FakeOwnerEnv::new(&owner_home);
+    let materialize = stored_skills(
+        "codex",
+        &[
+            ("design", files(&[("SKILL.md", b"stored codex design")])),
+            ("tutor", files(&[("SKILL.md", b"stored codex tutor")])),
+        ],
+        None,
+    );
+    let launch = super::arsenal::ArsenalLaunch {
+        materialize,
+        ..arsenal_launch(&[])
+    };
+    let reply = start_in(&world, AgentId::Codex, &world.home, &launch).unwrap();
+    let dir = world
+        .base
+        .join("launch-homes")
+        .join("codex")
+        .join(&launch.selection);
+    let out = world.output_until(&reply.terminal.terminal_id, "CODEX-READY");
+    assert!(
+        out.contains(&format!("CODEXHOME=[{}]", dir.display())),
+        "{out:?}"
+    );
+    assert!(reply.skills_skipped.is_empty(), "{:?}", reply.skills_skipped);
+    let skills = dir.join("skills");
+    assert!(fs::symlink_metadata(&skills).unwrap().is_dir());
+    assert_eq!(
+        fs::read(skills.join("design/SKILL.md")).unwrap(),
+        b"stored codex design"
+    );
+    assert_eq!(
+        fs::read(skills.join("tutor/SKILL.md")).unwrap(),
+        b"stored codex tutor"
+    );
+    assert_eq!(mode(&skills.join("tutor/SKILL.md")), 0o600);
+    assert_eq!(
+        fs::read(owner.join("skills/design/SKILL.md")).unwrap(),
+        b"owner design"
+    );
+    assert!(
+        !owner.join("skills/tutor").exists(),
+        "a copy reached the owner's folder"
+    );
 }

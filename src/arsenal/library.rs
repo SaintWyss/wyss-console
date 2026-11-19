@@ -268,6 +268,7 @@ pub fn launch_for(
         home,
         codex_home,
         launch_instructions,
+        materialize: plan.materialize,
     };
     launch
         .validate()
@@ -408,16 +409,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_missing_preset_or_one_whose_skill_cannot_load_is_refused_with_the_reason() {
+    fn a_missing_preset_or_another_providers_is_refused_with_the_reason() {
         let (store, scan) = fixture("claude_code", b"keep body");
         let data = data_dir();
         let error = launch_for(&store, &data, "Nope", "claude_code", Path::new("/w"), &scan).unwrap_err();
         assert!(error.contains("no Arsenal preset \"Nope\""), "{error}");
         let error = launch_for(&store, &data, "Front", "codex", Path::new("/w"), &scan).unwrap_err();
         assert!(error.contains("no Arsenal preset"), "another provider's preset is not this one: {error}");
+    }
+
+    #[test]
+    fn a_preset_whose_installed_copy_differs_launches_with_the_stored_revision_copied() {
         let (store, scan) = fixture("claude_code", b"edited since");
-        let error = launch_for(&store, &data, "Front", "claude_code", Path::new("/w"), &scan).unwrap_err();
-        assert!(error.starts_with("keep: The installed copy differs"), "{error}");
+        let data = data_dir();
+        let launch = launch_for(&store, &data, "Front", "claude_code", Path::new("/w"), &scan).unwrap();
+        assert_eq!(launch.materialize.len(), 1);
+        assert_eq!((launch.materialize[0].name.as_str(), launch.materialize[0].revision), ("keep", 1));
+        // Its name stays on: the copy in the session's folder is the one that loads.
+        assert_eq!(launch.skills_off, vec!["design", "gsd-help"]);
+        assert!(launch.validate().is_ok());
     }
 
     #[test]

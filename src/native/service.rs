@@ -381,6 +381,56 @@ pub struct NativeTag {
 pub struct StartReply {
     pub session: SessionView,
     pub terminal: wyss_console::terminal::contracts::TerminalInfo,
+    /// Stored skills of the preset that were not prepared, each with its reason. The agent
+    /// started without them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skills_skipped: Vec<arsenal::SkippedSkill>,
+}
+
+/// Whether a launch has a folder of its own only to hold copied skills: no environment and no
+/// role of the preset's own need it.
+fn home_only_for_copies(launch: &ArsenalLaunch, agent: AgentId) -> bool {
+    !launch.materialize.is_empty()
+        && !matches!(
+            launch.launch_instructions,
+            Some(crate::arsenal::role_instructions::Choice::Role { .. })
+        )
+        && match agent {
+            AgentId::ClaudeCode => launch.home.as_ref().is_none_or(|home| home.is_default()),
+            AgentId::Codex => launch
+                .codex_home
+                .as_ref()
+                .is_none_or(|home| home.is_default()),
+            _ => false,
+        }
+}
+
+fn skip_all(skipped: &mut Vec<arsenal::SkippedSkill>, launch: &ArsenalLaunch, reason: &str) {
+    skipped.extend(launch.materialize.iter().map(|item| arsenal::SkippedSkill {
+        name: item.name.clone(),
+        reason: reason.to_owned(),
+    }));
+}
+
+/// The stored skills of a launch, read from the Arsenal library by the host itself.
+fn read_copies(
+    launch: &ArsenalLaunch,
+    skipped: &mut Vec<arsenal::SkippedSkill>,
+) -> Vec<arsenal::ReadySkill> {
+    if launch.materialize.is_empty() {
+        return Vec::new();
+    }
+    match crate::arsenal::open_read_only() {
+        Ok(store) => {
+            let (ready, unread) = arsenal::read_skills(&store, &launch.materialize);
+            skipped.extend(unread);
+            ready
+        }
+        Err(_) => {
+            skip_all(skipped, launch, "library_unreadable");
+            Vec::new()
+        }
+    }
 }
 
 struct Live {
@@ -985,11 +1035,13 @@ impl NativeService {
         let direct = self
             .agent_path(agent)
             .ok_or_else(|| NativeError::new("agent_not_installed"))?;
-        let (plan, profile_ref, digest, profile_effective) = self.plan_for(
+        let (mut plan, profile_ref, digest, profile_effective) = self.plan_for(
             request.agent_id,
             request.profile_id.as_deref(),
             request.arsenal.as_ref(),
         )?;
+        // Stored skills of the preset that could not be prepared. They never stop the start.
+        let mut skills_skipped: Vec<arsenal::SkippedSkill> = Vec::new();
         if request.profile_id.is_some() || request.arsenal.is_some() {
             match (request.plan_token.as_deref(), digest.as_deref()) {
                 (None, _) => return Err(NativeError::new("profile_preview_required")),
@@ -1047,7 +1099,16 @@ impl NativeService {
                 &owner_home,
                 &[&claude_owner, &codex_owner],
             ) {
-                return Err(NativeError::new("arsenal_home_cwd_is_home"));
+                // A folder of its own only for the copied skills is left out: the agent starts
+                // as the owner's own, and the copies are reported as not prepared.
+                match request.arsenal.as_ref() {
+                    Some(launch) if home_only_for_copies(launch, request.agent_id) => {
+                        plan.home = None;
+                        plan.codex_home = None;
+                        skip_all(&mut skills_skipped, launch, "cwd_is_home");
+                    }
+                    _ => return Err(NativeError::new("arsenal_home_cwd_is_home")),
+                }
             }
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
@@ -1077,6 +1138,15 @@ impl NativeService {
         // the user's shell between (and its start-up files), the agent and every process the agent
         // starts can read it. It is never an argv word, which any process of the user could read.
         let mut oauth_token: Option<zeroize::Zeroizing<String>> = None;
+        if let (Some(_), Some(launch)) = (&plan.home, request.arsenal.as_ref())
+            && home_only_for_copies(launch, request.agent_id)
+            && launch_home::token().is_none()
+        {
+            // Without the stored token there is no folder of its own to copy into: the agent
+            // starts as the owner's own instead, and the copies are reported.
+            plan.home = None;
+            skip_all(&mut skills_skipped, launch, "token_missing");
+        }
         if let (Some(spec), Some(launch)) = (&plan.home, request.arsenal.as_ref()) {
             let token =
                 launch_home::token().ok_or_else(|| NativeError::new("arsenal_token_missing"))?;
@@ -1085,8 +1155,11 @@ impl NativeService {
                 .ok_or_else(|| NativeError::new("store_unavailable"))?;
             let home_dir = self.inner.base.join("launch-homes").join(&launch.selection);
             let owner = launch_home::Owner::from_home(&owner_home);
-            let built = launch_home::build(&owner, &home_dir, spec)
-                .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+            let ready = read_copies(launch, &mut skills_skipped);
+            let (built, unwritten) =
+                launch_home::build_with_skills(&owner, &home_dir, spec, &ready)
+                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+            skills_skipped.extend(unwritten);
             if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
                 &launch.launch_instructions
             {
@@ -1120,8 +1193,11 @@ impl NativeService {
                 .join("codex")
                 .join(&launch.selection);
             let owner = launch_home_codex::CodexOwner::from_process(&owner_home);
-            let built = launch_home_codex::build(&owner, &home_dir, spec)
-                .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+            let ready = read_copies(launch, &mut skills_skipped);
+            let (built, unwritten) =
+                launch_home_codex::build_with_skills(&owner, &home_dir, spec, &ready)
+                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+            skills_skipped.extend(unwritten);
             if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
                 &launch.launch_instructions
             {
@@ -1400,6 +1476,7 @@ impl NativeService {
         Ok(StartReply {
             session: view,
             terminal: info,
+            skills_skipped,
         })
     }
 

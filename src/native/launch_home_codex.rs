@@ -342,8 +342,19 @@ fn owner_lock(path: &Path) -> io::Result<bool> {
 /// unreadable or malformed; a home `auth.json` or `auth.lock` that is not the expected link. A
 /// folder where a link or a file goes is an error too, and is never removed: that includes a
 /// folder of the home's own under a [`LINKED`] name once the owner has one of that name
-/// (`codex_home_own_folder`).
+/// (`codex_home_own_folder`). `skills` is the exception: [`launch_home::place_skills`] keeps it.
 pub fn build(owner: &CodexOwner, dir: &Path, spec: &CodexHomeSpec) -> io::Result<PathBuf> {
+    build_with_skills(owner, dir, spec, &[]).map(|(dir, _)| dir)
+}
+
+/// [`build`], with stored skills of the preset written into `<CODEX_HOME>/skills`, where Codex
+/// reads its user skills. Returns the skills that could not be written, with the reason.
+pub fn build_with_skills(
+    owner: &CodexOwner,
+    dir: &Path,
+    spec: &CodexHomeSpec,
+    skills: &[super::arsenal::ReadySkill],
+) -> io::Result<(PathBuf, Vec<super::arsenal::SkippedSkill>)> {
     spec.validate().map_err(io::Error::other)?;
     if !dir.is_absolute() || !owner.dir.is_absolute() {
         return Err(fail("codex_home_path"));
@@ -410,7 +421,7 @@ pub fn build(owner: &CodexOwner, dir: &Path, spec: &CodexHomeSpec) -> io::Result
         let source = owner.dir.join(name);
         let target = present(&source)?.then_some(source);
         let own = fs::symlink_metadata(dir.join(name)).is_ok_and(|meta| meta.is_dir());
-        if own && target.is_some() {
+        if own && target.is_some() && name != "skills" {
             return Err(fail("codex_home_own_folder"));
         }
         linked.push((name, target, own));
@@ -448,12 +459,15 @@ pub fn build(owner: &CodexOwner, dir: &Path, spec: &CodexHomeSpec) -> io::Result
     if !own_sessions {
         place(&dir.join(SESSIONS), sessions.as_deref())?;
     }
+    let mut skipped = Vec::new();
     for (name, target, own) in linked {
-        if !own {
+        if name == "skills" {
+            skipped = launch_home::place_skills(&dir.join(name), target.as_deref(), skills)?;
+        } else if !own {
             place(&dir.join(name), target.as_deref())?;
         }
     }
-    Ok(dir.to_path_buf())
+    Ok((dir.to_path_buf(), skipped))
 }
 
 pub fn write_role(

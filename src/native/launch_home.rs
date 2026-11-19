@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use super::arsenal::{ReadySkill, SkippedSkill};
 use super::store;
 
 /// Entries of `~/.claude` a launch home links as they are. Everything else stays out: the owner's
@@ -367,6 +368,17 @@ pub(super) fn place(link: &Path, target: Option<&Path>) -> io::Result<()> {
 /// Builds (or brings up to date) the launch home at `dir`. Safe to run again for the next launch
 /// of the same preset: it keeps that home's sessions and history, so they can be resumed.
 pub fn build(owner: &Owner, dir: &Path, spec: &HomeSpec) -> io::Result<Built> {
+    build_with_skills(owner, dir, spec, &[]).map(|(built, _)| built)
+}
+
+/// [`build`], with stored skills of the preset written into the home's own `skills` folder
+/// ([`place_skills`]). Returns the skills that could not be written, with the reason.
+pub fn build_with_skills(
+    owner: &Owner,
+    dir: &Path,
+    spec: &HomeSpec,
+    skills: &[ReadySkill],
+) -> io::Result<(Built, Vec<SkippedSkill>)> {
     spec.validate().map_err(io::Error::other)?;
     store::private_dir(dir)?;
     // The sign-in never lives here, not even a link to it.
@@ -378,8 +390,19 @@ pub fn build(owner: &Owner, dir: &Path, spec: &HomeSpec) -> io::Result<Built> {
     for name in LINKED {
         let source = owner.dir.join(name);
         let target = fs::symlink_metadata(&source).is_ok().then_some(source);
+        if name == "skills" {
+            continue;
+        }
         place(&dir.join(name), target.as_deref())?;
     }
+    let owner_skills = owner.dir.join("skills");
+    let skipped = place_skills(
+        &dir.join("skills"),
+        fs::symlink_metadata(&owner_skills)
+            .is_ok()
+            .then_some(owner_skills.as_path()),
+        skills,
+    )?;
     let agents = owner.dir.join("agents");
     let target = (spec.agents && fs::symlink_metadata(&agents).is_ok()).then_some(agents);
     place(&dir.join("agents"), target.as_deref())?;
@@ -460,9 +483,130 @@ pub fn build(owner: &Owner, dir: &Path, spec: &HomeSpec) -> io::Result<Built> {
             Some(path)
         }
     };
-    Ok(Built {
-        dir: dir.to_path_buf(),
-        mcp_config,
+    Ok((
+        Built {
+            dir: dir.to_path_buf(),
+            mcp_config,
+        },
+        skipped,
+    ))
+}
+
+/// Marks a skill folder of a launch home as a copy Arsenal wrote, so a later build may remove it.
+const COPY_MARK: &str = ".wyss-arsenal-copy";
+
+/// The `skills` entry of a launch home at `link`. With no stored skills it is a link to the
+/// owner's folder (`owner`), as before. With some, it is a folder of the home's own (0700): one
+/// link per owner skill, except the names a stored skill replaces, and each stored skill written
+/// as a private copy (folders 0700, files 0600, or 0700 for a file that starts with `#!`). The
+/// owner's folder is only read. Copies a previous build wrote and links are removed first; no link
+/// is followed and nothing else of the home's own is removed. A skill that cannot be written is
+/// returned with the reason; the others still are.
+pub fn place_skills(
+    link: &Path,
+    owner: Option<&Path>,
+    skills: &[ReadySkill],
+) -> io::Result<Vec<SkippedSkill>> {
+    let own = fs::symlink_metadata(link).is_ok_and(|meta| meta.is_dir());
+    if own {
+        for entry in fs::read_dir(link)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let path = entry.path();
+            let ours = entry.file_name().to_string_lossy().starts_with(".tmp-")
+                || fs::symlink_metadata(path.join(COPY_MARK)).is_ok_and(|meta| meta.is_file());
+            if !kind.is_dir() {
+                fs::remove_file(&path)?;
+            } else if ours {
+                // `remove_dir_all` removes links themselves, never what they point at.
+                fs::remove_dir_all(&path)?;
+            }
+        }
+        if skills.is_empty() && fs::remove_dir(link).is_ok() {
+            return place(link, owner).map(|()| Vec::new());
+        }
+    } else if skills.is_empty() {
+        return place(link, owner).map(|()| Vec::new());
+    } else {
+        place(link, None)?;
+    }
+    store::private_dir(link)?;
+    let replaced: BTreeSet<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
+    if let Some(owner) = owner
+        && let Ok(entries) = fs::read_dir(owner)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let text = name.to_string_lossy();
+            if !replaced.contains(text.as_ref())
+                && fs::symlink_metadata(link.join(&name)).is_err()
+            {
+                symlink(entry.path(), link.join(&name))?;
+            }
+        }
+    }
+    let mut skipped = Vec::new();
+    for skill in skills {
+        if let Err(reason) = write_copy(link, skill) {
+            skipped.push(SkippedSkill {
+                name: skill.name.clone(),
+                reason: reason.to_owned(),
+            });
+        }
+    }
+    Ok(skipped)
+}
+
+/// Writes one stored skill under `skills/<name>`: first into a fresh private folder beside it,
+/// then renamed into place.
+fn write_copy(skills: &Path, skill: &ReadySkill) -> Result<(), &'static str> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    if !super::arsenal::materialize_name_ok(&skill.name)
+        || !skill
+            .files
+            .iter()
+            .all(|(path, _)| super::arsenal::relpath_ok(path))
+    {
+        return Err("unsafe_path");
+    }
+    let target = skills.join(&skill.name);
+    if fs::symlink_metadata(&target).is_ok() {
+        return Err("name_taken");
+    }
+    let tmp = skills.join(format!(".tmp-{}", uuid::Uuid::new_v4().simple()));
+    let write = || -> io::Result<()> {
+        fs::DirBuilder::new().mode(0o700).create(&tmp)?;
+        let mut files: Vec<(&str, &[u8])> = vec![(COPY_MARK, b"")];
+        files.extend(
+            skill
+                .files
+                .iter()
+                .map(|(path, bytes)| (path.as_str(), bytes.as_slice())),
+        );
+        for (path, bytes) in files {
+            let file_path = tmp.join(path);
+            if let Some(parent) = file_path.parent() {
+                fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(parent)?;
+            }
+            let mode = if bytes.starts_with(b"#!") { 0o700 } else { 0o600 };
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(mode)
+                .custom_flags(nix::libc::O_NOFOLLOW)
+                .open(&file_path)?;
+            file.write_all(bytes)?;
+            file.set_permissions(fs::Permissions::from_mode(mode))?;
+        }
+        fs::rename(&tmp, &target)
+    };
+    write().map_err(|_| {
+        let _ = fs::remove_dir_all(&tmp);
+        "write_failed"
     })
 }
 

@@ -2556,7 +2556,12 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
                                 update();
                             }
                         });
-                        toggle_row(&children, name, "", "value", Some(&control));
+                        let hint = if !account && data.copied.contains(id) {
+                            tr(crate::t!("Copied to the session from Arsenal"))
+                        } else {
+                            String::new()
+                        };
+                        toggle_row(&children, name, &hint, "value", Some(&control));
                         available.push(control);
                     }
                     let category = category_switch(&tr(category.label), &available);

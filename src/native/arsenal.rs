@@ -39,6 +39,97 @@ pub struct ArsenalLaunch {
     pub codex_home: Option<super::launch_home_codex::CodexHomeSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_instructions: Option<crate::arsenal::role_instructions::Choice>,
+    /// Stored skills copied into this session's own folder from the Arsenal library: the host
+    /// reads each from the library itself and checks every file's digest. Absent from launches
+    /// and sessions saved before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materialize: Vec<Materialize>,
+}
+
+/// One stored skill a session gets from the library: its capability, the revision the preset
+/// chose (or the current one) and the folder name it is written under.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Materialize {
+    pub capability: String,
+    pub revision: i64,
+    pub name: String,
+}
+
+/// A stored skill that could not be prepared for the session, and why (a stable code).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedSkill {
+    pub name: String,
+    pub reason: String,
+}
+
+/// A stored skill read from the library and checked, ready to be written into a launch home.
+pub struct ReadySkill {
+    pub name: String,
+    pub files: Vec<(String, Vec<u8>)>,
+}
+
+/// A relative path of a stored file: plain components only, never absolute, `..`, `.`, empty or
+/// with a control character.
+pub fn relpath_ok(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= MAX_FILE_PATH
+        && !path.starts_with('/')
+        && !path.chars().any(char::is_control)
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// Reads each skill of `wanted` from `store`: the revision must hold a skill of that name, and
+/// every file's bytes must match the digest they were stored under (`Store::revision_content`).
+/// An item that fails is skipped with its reason; the others are returned.
+pub fn read_skills(
+    store: &crate::arsenal::store::Store,
+    wanted: &[Materialize],
+) -> (Vec<ReadySkill>, Vec<SkippedSkill>) {
+    use crate::arsenal::store::Error;
+    let mut ready = Vec::new();
+    let mut skipped = Vec::new();
+    for item in wanted {
+        let skip = |reason: &str| SkippedSkill {
+            name: item.name.clone(),
+            reason: reason.to_owned(),
+        };
+        let detail = match store.detail(&item.capability, Some(item.revision)) {
+            Ok(detail) => detail,
+            Err(Error::NotFound) => {
+                skipped.push(skip("not_in_library"));
+                continue;
+            }
+            Err(_) => {
+                skipped.push(skip("library_unreadable"));
+                continue;
+            }
+        };
+        if detail.summary.kind != "skill" || detail.summary.name != item.name {
+            skipped.push(skip("not_this_skill"));
+            continue;
+        }
+        match store.revision_content(&item.capability, item.revision) {
+            Ok(files) if files.iter().all(|(path, _)| relpath_ok(path)) => {
+                ready.push(ReadySkill {
+                    name: item.name.clone(),
+                    files,
+                })
+            }
+            Ok(_) => skipped.push(skip("unsafe_path")),
+            Err(Error::Corrupt) => skipped.push(skip("digest_mismatch")),
+            Err(Error::NotFound) => skipped.push(skip("not_in_library")),
+            Err(_) => skipped.push(skip("library_unreadable")),
+        }
+    }
+    (ready, skipped)
+}
+
+/// A folder name a stored skill may be written under: a provider skill name without `:`.
+pub fn materialize_name_ok(name: &str) -> bool {
+    skill_ok(name) && !name.contains(':')
 }
 
 fn codex_home_absent(spec: &Option<super::launch_home_codex::CodexHomeSpec>) -> bool {
@@ -138,6 +229,21 @@ impl ArsenalLaunch {
         {
             return Err("arsenal_invalid");
         }
+        let mut names = BTreeSet::new();
+        if self.materialize.len() > MAX_SKILLS_OFF
+            || self.materialize.iter().any(|item| {
+                !materialize_name_ok(&item.name)
+                    || !names.insert(item.name.as_str())
+                    || item.revision < 1
+                    || !(1..=64).contains(&item.capability.len())
+                    || !item
+                        .capability
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
+        {
+            return Err("arsenal_invalid");
+        }
         if let Some(home) = &self.home {
             home.validate().map_err(|_| "arsenal_invalid")?;
         }
@@ -166,16 +272,23 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
         launch.launch_instructions,
         Some(crate::arsenal::role_instructions::Choice::Role { .. })
     );
+    // Stored skills are written into a launch folder of the session's own, so one is built even
+    // when the preset keeps the owner's environment otherwise.
+    let copies = !launch.materialize.is_empty();
+    let default_home = super::launch_home::HomeSpec::default();
     let home = launch
         .home
         .as_ref()
-        .filter(|home| own_role || !home.is_default());
+        .filter(|home| own_role || (copies && agent == AgentId::ClaudeCode) || !home.is_default())
+        .or_else(|| (copies && agent == AgentId::ClaudeCode).then_some(&default_home));
     let default_codex_home = super::launch_home_codex::CodexHomeSpec::default();
     let codex_home = launch
         .codex_home
         .as_ref()
-        .filter(|home| own_role || !home.is_default())
-        .or_else(|| (own_role && agent == AgentId::Codex).then_some(&default_codex_home));
+        .filter(|home| own_role || (copies && agent == AgentId::Codex) || !home.is_default())
+        .or_else(|| {
+            ((own_role || copies) && agent == AgentId::Codex).then_some(&default_codex_home)
+        });
     match agent {
         AgentId::ClaudeCode if launch.skill_files_off.is_empty() && codex_home.is_none() => {}
         AgentId::Codex if home.is_some() => {
@@ -193,6 +306,7 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             {
                 plan.applied.push(codex_home_summary(spec));
                 plan.codex_home = Some(spec.clone());
+                copies_summary(plan, launch);
             }
             return;
         }
@@ -246,6 +360,7 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
     if let Some(home) = home {
         plan.applied.push(home_summary(home));
         plan.home = Some(home.clone());
+        copies_summary(plan, launch);
     }
     if plan.overlay.is_none() {
         plan.words
@@ -256,6 +371,17 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
 }
 
 /// What the launch home changes, in one line the owner reads before starting.
+fn copies_summary(plan: &mut LaunchPlan, launch: &ArsenalLaunch) {
+    if !launch.materialize.is_empty() {
+        let names: Vec<&str> = launch.materialize.iter().map(|m| m.name.as_str()).collect();
+        plan.applied.push(format!(
+            "{} stored skill(s) copied to this session from Arsenal: {}.",
+            names.len(),
+            names.join(", ")
+        ));
+    }
+}
+
 fn home_summary(home: &super::launch_home::HomeSpec) -> String {
     let mut parts = Vec::new();
     if !home.instructions {
@@ -363,6 +489,7 @@ mod tests {
             home: None,
             codex_home: None,
             launch_instructions: None,
+            materialize: Vec::new(),
         }
     }
 
@@ -399,6 +526,52 @@ mod tests {
         Resolved {
             body,
             from: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_launch_saved_without_copies_still_reads_and_copies_are_named_safely() {
+        let saved = serde_json::json!({
+            "selection": "0b1c4e1a-0000-4000-8000-000000000001",
+            "selection_name": "Frontend",
+            "config_hash": "a".repeat(64),
+            "skills_off": ["design"],
+        });
+        let old: ArsenalLaunch = serde_json::from_value(saved).unwrap();
+        assert!(old.materialize.is_empty());
+        assert!(old.validate().is_ok());
+        // Without copies the key is not written, so an older host still reads the launch.
+        assert!(!serde_json::to_string(&old).unwrap().contains("materialize"));
+        let with = |name: &str| ArsenalLaunch {
+            materialize: vec![Materialize {
+                capability: "0b1c4e1a-0000-4000-8000-0000000000aa".into(),
+                revision: 1,
+                name: name.into(),
+            }],
+            ..launch(&[])
+        };
+        assert!(with("tutor").validate().is_ok());
+        for bad in ["..", "../x", "a/b", ".hidden", "plugin:skill", "a\nb", ""] {
+            assert_eq!(with(bad).validate(), Err("arsenal_invalid"), "{bad:?}");
+        }
+        let round: ArsenalLaunch =
+            serde_json::from_str(&serde_json::to_string(&with("tutor")).unwrap()).unwrap();
+        assert_eq!(round, with("tutor"));
+        // A copy makes a folder of the session's own even when the preset keeps the environment.
+        let mut plan = LaunchPlan::default();
+        apply(&mut plan, AgentId::ClaudeCode, &with("tutor"));
+        assert_eq!(plan.home, Some(super::super::launch_home::HomeSpec::default()));
+        let mut plan = LaunchPlan::default();
+        apply(&mut plan, AgentId::Codex, &with("tutor"));
+        assert!(plan.not_applicable.is_empty(), "{:?}", plan.not_applicable);
+        assert!(plan.codex_home.is_some());
+    }
+
+    #[test]
+    fn relative_paths_of_stored_files_are_plain() {
+        assert!(relpath_ok("SKILL.md") && relpath_ok("scripts/run.sh"));
+        for bad in ["", "/etc/x", "../x", "a/../b", "a//b", "./a", "a\0b"] {
+            assert!(!relpath_ok(bad), "{bad:?}");
         }
     }
 

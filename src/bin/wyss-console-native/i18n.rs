@@ -186,8 +186,8 @@ mod incoming_tests {
 
     #[test]
     fn translates_dynamic_skill_blockers_like_workspace() {
-        let reason = "The installed copy differs from revision 12. Restore or import so they match; Arsenal does not expose a revision that is not installed.";
-        assert!(translate_incoming(Lang::Es, reason).starts_with("La copia instalada no coincide con la revisión 12."));
+        let reason = "The installed copy differs from revision 12: this session gets that revision from Arsenal. Your installed copy is not changed.";
+        assert!(translate_incoming(Lang::Es, reason).starts_with("La copia instalada no coincide con la revisión 12: esta sesión usa esa revisión desde Arsenal."));
         let reason = "Claude Code reads this skill format, but it holds scripts whose own requirements are not checked. Wyss never runs them.";
         assert!(translate_incoming(Lang::Es, reason).starts_with("Claude Code lee este formato de skill"));
         assert_eq!(translate_incoming(Lang::En, reason), reason);

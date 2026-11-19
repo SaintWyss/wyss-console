@@ -1201,7 +1201,7 @@ impl Ui {
                 PaneAct::Stop => native::stop(&host, &tag.session_id).map(|_| None),
                 PaneAct::Forget => native::forget(&host, &tag.session_id).map(|_| None),
                 PaneAct::Restart => match native::prepare_restart(&host, &tag.session_id) {
-                    Ok(native::Restart::Started(started)) => Ok(Some(started)),
+                    Ok(native::Restart::Started(started)) => Ok(Some(*started)),
                     Ok(native::Restart::Confirm(preview)) => {
                         glib::MainContext::default().invoke(move || {
                             UI.with(|u| {
