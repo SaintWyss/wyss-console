@@ -46,6 +46,31 @@ pub fn ppid_of(stat: &str) -> Option<i32> {
     stat[close + 1..].split_whitespace().nth(1)?.parse().ok()
 }
 
+pub fn in_foreground(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| foreground_stat(&stat))
+        .unwrap_or(false)
+}
+
+fn foreground_stat(stat: &str) -> Option<bool> {
+    let close = stat.rfind(')')?;
+    let mut fields = stat[close + 1..].split_whitespace();
+    let state = fields.next()?;
+    let group: i32 = fields.nth(1)?.parse().ok()?;
+    let tty: i32 = fields.nth(1)?.parse().ok()?;
+    let foreground: i32 = fields.next()?.parse().ok()?;
+    Some(!matches!(state, "Z" | "X" | "T" | "t") && tty != 0 && group > 0 && group == foreground)
+}
+
+#[test]
+fn panel_security_ask_checks_process_group_in_foreground() {
+    assert_eq!(foreground_stat("123 (odd ) name) S 1 123 123 34816 123"), Some(true));
+    assert_eq!(foreground_stat("123 (agent) S 1 123 123 34816 456"), Some(false));
+    assert_eq!(foreground_stat("123 (agent) Z 1 123 123 34816 123"), Some(false));
+    assert_eq!(foreground_stat("123 (agent) S 1 123 123 0 -1"), Some(false));
+}
+
 /// `root` and all its descendants, `None` when `root` is gone.
 pub fn tree(root: i32) -> Option<Vec<i32>> {
     if !Path::new(&format!("/proc/{root}")).exists() {

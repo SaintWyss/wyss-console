@@ -9,10 +9,10 @@ pub use git::{Branch, Commit, Error as GitError, Git, clean_origin, git, head_re
 pub use markdown::{Block, Inline, markdown};
 pub use store::{AgentSection, cache_path, command, sections, watch_path};
 
-use git::run;
 use manifests::parse;
 use nix::fcntl::{OFlag, openat};
 use nix::sys::stat::Mode;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -20,6 +20,7 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const FILE_LIMIT: usize = 1 << 20;
 const READ_LIMIT: usize = 32 << 20;
@@ -69,7 +70,7 @@ fn detect_from(cwd: &Path, home: Option<&Path>) -> Option<Project> {
 fn has_git_marker(root: &Path) -> bool {
     root.join(".git")
         .symlink_metadata()
-        .is_ok_and(|m| m.is_dir() || m.is_file())
+        .is_ok_and(|m| m.is_dir() || m.is_file() || m.is_symlink())
 }
 
 fn detect_among<'a>(
@@ -158,11 +159,44 @@ fn bounded(file: &mut impl Read, limit: usize) -> io::Result<(Vec<u8>, bool)> {
     Ok((bytes, truncated))
 }
 
-fn read_small(root: &Path, path: &Path, limit: usize) -> Option<String> {
-    let file = open_relative(root, path).ok()?;
-    let mut text = String::new();
-    file.take(limit as u64).read_to_string(&mut text).ok()?;
-    Some(text)
+pub struct Scan<'a> {
+    deadline: Instant,
+    cancelled: &'a dyn Fn() -> bool,
+    hashes: Cell<usize>,
+    workflows: Cell<usize>,
+    limited: Cell<bool>,
+}
+
+impl<'a> Scan<'a> {
+    pub fn new(cancelled: &'a dyn Fn() -> bool) -> Self {
+        Self {
+            deadline: Instant::now() + Duration::from_millis(1500),
+            cancelled,
+            hashes: Cell::new(2000),
+            workflows: Cell::new(200),
+            limited: Cell::new(false),
+        }
+    }
+
+    fn check(&self) -> Result<(), GitError> {
+        if (self.cancelled)() || Instant::now() >= self.deadline {
+            self.limited.set(true);
+            Err(GitError::Timeout)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn take(&self, remaining: &Cell<usize>) -> Option<()> {
+        self.check().ok()?;
+        if let Some(next) = remaining.get().checked_sub(1) {
+            remaining.set(next);
+            Some(())
+        } else {
+            self.limited.set(true);
+            None
+        }
+    }
 }
 
 struct Files<'a> {
@@ -244,19 +278,36 @@ fn license(text: &str) -> Option<String> {
 }
 
 pub fn overview(project: &Project) -> (Summary, Option<Result<Git, GitError>>, usize) {
-    let has_git = project.has_git && has_git_marker(&project.root);
-    let (summary, mut remaining) = summary(project, has_git);
-    let git = has_git.then(|| git::git_with_budget(&project.root, &mut remaining));
+    overview_with_scan(project, &Scan::new(&|| false))
+}
+
+pub fn overview_with_scan(
+    project: &Project,
+    scan: &Scan<'_>,
+) -> (Summary, Option<Result<Git, GitError>>, usize) {
+    let (mut summary, mut remaining) = summary(project, scan);
+    let git = (project.has_git && has_git_marker(&project.root)).then(|| {
+        let (origin, result) = git::snapshot(&project.root, &mut remaining, scan);
+        summary.origin = origin;
+        result
+    });
     (summary, git, remaining)
 }
 
 impl Project {
     pub fn read_git(&self) -> Option<Result<Git, GitError>> {
-        (self.has_git && has_git_marker(&self.root)).then(|| git(&self.root))
+        self.read_git_with_scan(&Scan::new(&|| false))
+    }
+
+    pub fn read_git_with_scan(&self, scan: &Scan<'_>) -> Option<Result<Git, GitError>> {
+        (self.has_git && has_git_marker(&self.root)).then(|| {
+            let mut remaining = READ_LIMIT;
+            git::snapshot(&self.root, &mut remaining, scan).1
+        })
     }
 }
 
-fn summary(project: &Project, has_git: bool) -> (Summary, usize) {
+fn summary(project: &Project, scan: &Scan<'_>) -> (Summary, usize) {
     let mut files = Files::new(&project.root);
     let readme = [
         "README.md",
@@ -266,14 +317,32 @@ fn summary(project: &Project, has_git: bool) -> (Summary, usize) {
         "readme.md",
     ]
     .into_iter()
-    .find_map(|p| files.text(Path::new(p)))
-    .and_then(|text| markdown::readme_excerpt(&text));
+    .take_while(|_| scan.check().is_ok())
+    .find_map(|p| {
+        let file = open_relative(&project.root, Path::new(p)).ok()?;
+        let mut prefix = Vec::new();
+        file.take(markdown::README_LIMIT as u64)
+            .read_to_end(&mut prefix)
+            .ok()?;
+        files.remaining -= prefix.len();
+        let text = match std::str::from_utf8(&prefix) {
+            Ok(text) => text,
+            Err(e) if e.error_len().is_none() && prefix.len() == markdown::README_LIMIT => {
+                std::str::from_utf8(&prefix[..e.valid_up_to()]).ok()?
+            }
+            Err(_) => return None,
+        };
+        Some(markdown::readme_excerpt(text))
+    })
+    .flatten();
     let license = ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"]
         .into_iter()
+        .take_while(|_| scan.check().is_ok())
         .find_map(|p| license(&files.text(Path::new(p))?))
         .or_else(|| {
             MANIFESTS
                 .iter()
+                .take_while(|_| scan.check().is_ok())
                 .find_map(|p| parse(p, &files.text(Path::new(p))?).license)
         });
     let overview = Summary {
@@ -285,7 +354,7 @@ fn summary(project: &Project, has_git: bool) -> (Summary, usize) {
             .into_owned(),
         readme,
         license,
-        origin: has_git.then(|| git::origin(&project.root)).flatten(),
+        origin: None,
     };
     (overview, files.remaining)
 }
@@ -342,8 +411,15 @@ fn language(path: &Path) -> Option<&'static str> {
     })
 }
 
-fn walk(dir: &Path, prefix: &Path, depth: usize, budget: &mut usize, out: &mut Vec<PathBuf>) {
-    if depth >= 32 || *budget == 0 {
+fn walk(
+    dir: &Path,
+    prefix: &Path,
+    depth: usize,
+    budget: &mut usize,
+    out: &mut Vec<PathBuf>,
+    scan: &Scan<'_>,
+) {
+    if depth >= 32 || *budget == 0 || scan.check().is_err() {
         return;
     }
     for entry in read_dir(dir, prefix)
@@ -351,7 +427,7 @@ fn walk(dir: &Path, prefix: &Path, depth: usize, budget: &mut usize, out: &mut V
         .flatten()
         .filter_map(Result::ok)
     {
-        if *budget == 0 {
+        if *budget == 0 || scan.check().is_err() {
             break;
         }
         *budget -= 1;
@@ -365,19 +441,23 @@ fn walk(dir: &Path, prefix: &Path, depth: usize, budget: &mut usize, out: &mut V
             if ty.is_file() {
                 out.push(path);
             } else if ty.is_dir() {
-                walk(dir, &path, depth + 1, budget, out);
+                walk(dir, &path, depth + 1, budget, out, scan);
             }
         }
     }
 }
 
 pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bool) -> Inventory {
+    inventory_with_scan(project, remaining, &Scan::new(&cancelled))
+}
+
+pub fn inventory_with_scan(project: &Project, remaining: usize, scan: &Scan<'_>) -> Inventory {
     let mut inv = Inventory::default();
     let mut files = Files {
         remaining: remaining.min(READ_LIMIT),
         ..Files::new(&project.root)
     };
-    for name in MANIFESTS {
+    for name in MANIFESTS.iter().take_while(|_| scan.check().is_ok()) {
         if let Some(text) = files.text(Path::new(name)) {
             let manifest = parse(name, &text);
             inv.quality.extend(manifest.quality.iter().cloned());
@@ -385,7 +465,10 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
             inv.manifests.push(manifest);
         }
     }
-    for name in ["AGENTS.md", "README.md", "README", "README.markdown"] {
+    for name in ["AGENTS.md", "README.md", "README", "README.markdown"]
+        .into_iter()
+        .take_while(|_| scan.check().is_ok())
+    {
         if let Some(text) = files.text(Path::new(name)) {
             inv.runs.extend(
                 markdown::commands(&text)
@@ -405,9 +488,14 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
     for entry in fs::read_dir(&project.root)
         .into_iter()
         .flatten()
-        .take(entries)
-        .filter_map(Result::ok)
+        .take_while(|_| scan.check().is_ok())
     {
+        if entries == 0 {
+            inv.limited = true;
+            break;
+        }
+        entries -= 1;
+        let Ok(entry) = entry else { continue };
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if quality(&name) && entry.file_type().is_ok_and(|ty| ty.is_file()) {
@@ -426,8 +514,11 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
     for entry in read_dir(&project.root, Path::new(".github/workflows"))
         .into_iter()
         .flatten()
-        .filter_map(Result::ok)
     {
+        if scan.take(&scan.workflows).is_none() {
+            break;
+        }
+        let Ok(entry) = entry else { continue };
         let path = Path::new(".github/workflows").join(entry.file_name());
         if matches!(
             path.extension().and_then(|e| e.to_str()),
@@ -447,25 +538,33 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
 
     let mut paths = Vec::new();
     if project.has_git && has_git_marker(&project.root) {
-        match run(&project.root, &["ls-files", "-z", "--cached"]) {
+        match git::tracked(&project.root, scan) {
             Ok(bytes) => paths.extend(
                 bytes
                     .split(|b| *b == 0)
                     .filter(|p| !p.is_empty())
                     .map(|p| PathBuf::from(std::ffi::OsStr::from_bytes(p))),
             ),
+            Err(git::Error::Timeout | git::Error::OutputLimit) => {}
             Err(error) => inv.listing_error = Some(error),
         }
     } else {
-        walk(&project.root, Path::new(""), 0, &mut entries, &mut paths);
-        inv.limited = entries == 0;
+        walk(
+            &project.root,
+            Path::new(""),
+            0,
+            &mut entries,
+            &mut paths,
+            scan,
+        );
+        inv.limited |= entries == 0;
     }
     paths.sort_unstable();
     paths.dedup();
     let mut langs = BTreeMap::new();
     let mut dirs = BTreeMap::<String, (usize, usize)>::new();
     for path in paths {
-        if cancelled() {
+        if scan.check().is_err() {
             break;
         }
         if files.remaining == 0 {
@@ -502,7 +601,7 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
     for manifest in &mut inv.manifests {
         manifest.dependencies.truncate(10);
     }
-    inv.limited |= files.limited;
+    inv.limited |= files.limited || scan.limited.get();
     inv
 }
 

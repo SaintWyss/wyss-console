@@ -17,10 +17,18 @@ pub enum Block {
     Table(Vec<Vec<Vec<Inline>>>),
 }
 
+pub(super) const README_LIMIT: usize = 16 << 10;
+
 fn inline(mut s: &str, summary: bool) -> Vec<Inline> {
     let mut result = Vec::new();
+    // Successful HTML tokens consume their closing delimiter. After the final one,
+    // a run of unmatched '<' has no reason to scan the remaining text again.
+    let mut last_html_end = s.rfind('>');
     let mut start = 0;
-    while let Some(at) = s[start..].find(['`', '[', '<', '!', '*']).map(|at| at + start) {
+    while let Some(at) = s[start..]
+        .find(['`', '[', '<', '!', '*'])
+        .map(|at| at + start)
+    {
         let rest = &s[at..];
         let span = if summary && let Some(tail) = image_tail(rest) {
             Some((Inline::Text(String::new()), tail))
@@ -41,14 +49,17 @@ fn inline(mut s: &str, summary: bool) -> Vec<Inline> {
                 .map(|(code, tail)| (Inline::Code(code.into()), tail))
         } else if let Some(html) = rest.strip_prefix('<') {
             // Leave the whole HTML token literal, including link syntax in attributes.
-            html.split_once('>').map(|(_, tail)| {
-                let literal = if summary {
-                    ""
-                } else {
-                    &rest[..rest.len() - tail.len()]
-                };
-                (Inline::Text(literal.into()), tail)
-            })
+            last_html_end
+                .filter(|end| *end > at)
+                .and_then(|_| html.split_once('>'))
+                .map(|(_, tail)| {
+                    let literal = if summary {
+                        ""
+                    } else {
+                        &rest[..rest.len() - tail.len()]
+                    };
+                    (Inline::Text(literal.into()), tail)
+                })
         } else {
             let image = rest.starts_with("![");
             rest.strip_prefix("![")
@@ -77,6 +88,8 @@ fn inline(mut s: &str, summary: bool) -> Vec<Inline> {
                 result.push(Inline::Text(s[..at].into()));
             }
             result.push(part);
+            let consumed = s.len() - tail.len();
+            last_html_end = last_html_end.and_then(|end| end.checked_sub(consumed));
             s = tail;
             start = 0;
         } else {
@@ -228,6 +241,7 @@ fn cells(line: &str) -> Vec<Vec<Inline>> {
 }
 
 pub(super) fn readme_excerpt(text: &str) -> Option<String> {
+    let text = &text[..text.floor_char_boundary(README_LIMIT)];
     let paragraph = parse(markdown_blocks::body(text), true)
         .into_iter()
         .find_map(|block| {

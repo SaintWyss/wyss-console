@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 use std::process::Command;
 
 pub(super) struct Fixture(pub PathBuf);
@@ -103,8 +104,11 @@ fn panel_qa_git_uses_no_repository_state_without_a_marker() {
     let marker = root.join(".git");
     fs::write(&marker, "gitdir: missing").unwrap();
     let project = detect_from(&root, Some(&dir.0)).unwrap();
-    assert!(matches!(overview(&project).1, Some(Err(GitError::Command))));
-    assert!(matches!(project.read_git(), Some(Err(GitError::Command))));
+    assert!(matches!(
+        overview(&project).1,
+        Some(Err(GitError::Untrusted))
+    ));
+    assert!(matches!(project.read_git(), Some(Err(GitError::Untrusted))));
     fs::remove_file(marker).unwrap();
     assert!(
         overview(&project).1.is_none(),
@@ -394,7 +398,7 @@ fn git_reader_never_runs_fsmonitor_or_filters_and_counts_changes() {
 }
 
 #[test]
-fn git_read_limits_output_and_kills_a_blocked_command() {
+fn git_read_limits_config_and_rejects_nonregular_files() {
     let dir = Fixture::new();
     fixture_git(&dir.0, &["init", "-q", "-b", "main"]);
     let config = dir.0.join(".git/config");
@@ -403,16 +407,10 @@ fn git_read_limits_output_and_kills_a_blocked_command() {
     initial.push_str(&"x".repeat(256 * 1024 + 1));
     initial.push('\n');
     fs::write(&config, initial).unwrap();
-    assert_eq!(
-        run(&dir.0, &["config", "--local", "--get", "paneltest.payload"]),
-        Err(GitError::OutputLimit)
-    );
+    assert!(matches!(git(&dir.0), Err(GitError::OutputLimit)));
     fs::remove_file(&config).unwrap();
     nix::unistd::mkfifo(&config, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
-    assert_eq!(
-        run(&dir.0, &["config", "--local", "--get", "paneltest.payload"]),
-        Err(GitError::Timeout)
-    );
+    assert!(matches!(git(&dir.0), Err(GitError::Untrusted)));
 }
 
 #[test]
@@ -426,4 +424,210 @@ fn bold_text_is_shown_bold_and_stars_that_open_nothing_stay_literal() {
             Inline::Text(" habla con *uno* y 2 ** 3.".into()),
         ])]
     );
+}
+
+#[test]
+fn panel_security_rejects_unbound_external_gitdirs() {
+    let dir = Fixture::new();
+    let main = dir.0.join("main");
+    let checkout = dir.0.join("checkout");
+    fs::create_dir(&main).unwrap();
+    fs::create_dir(&checkout).unwrap();
+    fixture_git(&main, &["init", "-q", "-b", "main"]);
+    for pointer in [main.join(".git"), PathBuf::from("../main/.git")] {
+        fs::write(
+            checkout.join(".git"),
+            format!("gitdir: {}\n", pointer.display()),
+        )
+        .unwrap();
+        assert_eq!(head_ref(&checkout), None);
+        assert!(git(&checkout).is_err());
+    }
+
+    fixture_git(&main, &["commit", "--allow-empty", "-qm", "initial"]);
+    fs::remove_file(checkout.join(".git")).unwrap();
+    fixture_git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "linked",
+            checkout.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        git(&checkout).unwrap().branch,
+        Branch::Named("linked".into())
+    );
+    let admin = main.join(".git/worktrees/checkout");
+    fs::write(
+        admin.join("gitdir"),
+        main.join(".git").as_os_str().as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(head_ref(&checkout), None);
+    assert!(git(&checkout).is_err());
+    fs::write(
+        admin.join("gitdir"),
+        checkout.join(".git").as_os_str().as_bytes(),
+    )
+    .unwrap();
+    fs::write(admin.join("commondir"), "../../..\n").unwrap();
+    assert_eq!(head_ref(&checkout), None);
+}
+
+#[test]
+fn panel_security_ignores_includes_and_external_excludes() {
+    let dir = Fixture::new();
+    let root = dir.0.join("checkout");
+    fs::create_dir(&root).unwrap();
+    fixture_git(&root, &["init", "-q", "-b", "main"]);
+    fixture_git(&root, &["commit", "--allow-empty", "-qm", "initial"]);
+    fs::write(root.join("visible.txt"), "untracked").unwrap();
+    let exclude = dir.0.join("external-ignore");
+    fs::write(&exclude, "visible.txt\n").unwrap();
+    fixture_git(
+        &root,
+        &["config", "core.excludesFile", exclude.to_str().unwrap()],
+    );
+    assert_eq!(git(&root).unwrap().new, 1);
+
+    let invalid_config = dir.0.join("external-config");
+    fs::write(&invalid_config, "not a git config!\n").unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(root.join(".git/config"))
+        .unwrap()
+        .write_all(
+            format!(
+                "[include]\n path = {}\n[includeIf \"onbranch:main\"]\n path = {}\n",
+                invalid_config.display(),
+                invalid_config.display()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let result = git(&root).unwrap();
+    assert_eq!(result.new, 1);
+    assert_eq!(result.commits[0].title, "initial");
+}
+
+#[test]
+fn panel_security_markdown_is_linear_and_readme_input_is_capped() {
+    let input = "<".repeat(1 << 20);
+    let start = std::time::Instant::now();
+    assert_eq!(
+        markdown(&input),
+        [Block::Paragraph(vec![Inline::Text(input.clone())])]
+    );
+    let elapsed = start.elapsed();
+    eprintln!("1 MiB Markdown: {elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_millis(200));
+    let readme = format!(
+        "# {}\n\nThis text is beyond the README budget.",
+        "x".repeat(16 << 10)
+    );
+    assert_eq!(markdown::readme_excerpt(&readme), None);
+}
+
+#[test]
+fn panel_security_workflows_stop_at_the_quota_or_on_cancellation() {
+    let dir = Fixture::new();
+    fs::create_dir_all(dir.0.join(".github/workflows")).unwrap();
+    for i in 0..201 {
+        fs::write(dir.0.join(format!(".github/workflows/{i}.yml")), "on: push").unwrap();
+    }
+    let project = Project {
+        root: dir.0.clone(),
+        has_git: false,
+    };
+    let result = inventory(&project, READ_LIMIT, || false);
+    assert_eq!(result.workflows.len(), 200);
+    assert!(result.limited);
+    let result = inventory(&project, READ_LIMIT, || true);
+    assert!(result.workflows.is_empty());
+    assert!(result.limited);
+}
+
+#[test]
+fn panel_security_remote_displays_only_host_for_opaque_paths() {
+    for url in [
+        "https://host/owner/repo/token",
+        "git@host:owner/repo%2ftoken",
+        "https://host/owner//repo",
+        "https://host/owner/repo/",
+        "ssh://host/token",
+        "https://host",
+        "https://host?token=user@hidden",
+        "git@host:owner/token@hidden:owner/repo",
+    ] {
+        assert_eq!(clean_origin(url).as_deref(), Some("host"), "{url}");
+    }
+}
+
+#[test]
+fn panel_security_git_and_inventory_share_the_deadline_and_hash_quota() {
+    let dir = Fixture::new();
+    fixture_git(&dir.0, &["init", "-q", "-b", "main"]);
+    for name in ["a", "b"] {
+        fs::write(dir.0.join(name), "initial").unwrap();
+    }
+    fixture_git(&dir.0, &["add", "."]);
+    fixture_git(&dir.0, &["commit", "-qm", "initial"]);
+    for name in ["a", "b"] {
+        fs::write(dir.0.join(name), "modified and longer").unwrap();
+    }
+    let project = detect(&dir.0).unwrap();
+    let cancel = Cell::new(false);
+    let cancelled = || cancel.get();
+    let mut scan = Scan::new(&cancelled);
+    scan.hashes.set(1);
+    let (_, git, remaining) = overview_with_scan(&project, &scan);
+    let git = git.unwrap().unwrap();
+    assert_eq!(git.modified, 1);
+    assert!(git.limited);
+    assert_eq!(scan.hashes.get(), 0);
+
+    scan.deadline = Instant::now();
+    let inv = inventory_with_scan(&project, remaining, &scan);
+    assert!(inv.limited);
+    assert!(inv.languages.is_empty());
+
+    let scan = Scan::new(&cancelled);
+    cancel.set(true);
+    assert!(matches!(
+        project.read_git_with_scan(&scan),
+        Some(Err(GitError::Timeout))
+    ));
+}
+
+#[test]
+fn panel_split_index_remains_readable_without_writing_shared_metadata() {
+    let dir = Fixture::new();
+    fixture_git(&dir.0, &["init", "-q", "-b", "main"]);
+    let path = dir.0.join("file");
+    fs::write(&path, "initial").unwrap();
+    fixture_git(&dir.0, &["add", "."]);
+    fixture_git(&dir.0, &["commit", "-qm", "initial"]);
+    fixture_git(&dir.0, &["update-index", "--split-index"]);
+    let shared = fs::read_dir(dir.0.join(".git"))
+        .unwrap()
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sharedindex.")
+        })
+        .unwrap()
+        .path();
+    let then = std::time::UNIX_EPOCH + Duration::from_secs(1000);
+    File::open(&shared)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(then))
+        .unwrap();
+    fs::write(path, "modified and longer").unwrap();
+    assert_eq!(git(&dir.0).unwrap().modified, 1);
+    assert_eq!(fs::metadata(shared).unwrap().modified().unwrap(), then);
 }

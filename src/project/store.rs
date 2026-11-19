@@ -1,11 +1,15 @@
-use super::{Project, bounded, detect, git, open_relative, short};
+use super::{OPEN_FLAGS, Project, bounded, detect, git, short};
+use nix::fcntl::{OFlag, openat, renameat};
+use nix::sys::stat::{Mode, mkdirat};
+use nix::unistd::{UnlinkatFlags, geteuid, unlinkat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SECTION_LIMIT: usize = 64 << 10;
@@ -29,9 +33,15 @@ pub fn cache_path(project: &Project) -> Option<PathBuf> {
 }
 
 pub fn watch_path(path: &Path) -> Option<PathBuf> {
-    path.ancestors()
-        .find(|p| p.symlink_metadata().is_ok_and(|m| m.is_dir()))
-        .map(Path::to_path_buf)
+    for (distance, candidate) in path.ancestors().enumerate() {
+        let private = 3usize.saturating_sub(distance);
+        match open_cache(candidate, private, false) {
+            Ok(_) => return Some(candidate.to_path_buf()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    None
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -79,8 +89,70 @@ fn valid(name: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn read_meta(dir: &Path) -> BTreeMap<String, Versioned> {
-    open_relative(dir, Path::new("meta.json"))
+fn owned_open(dir: &File, name: &std::ffi::OsStr, flags: OFlag, mode: Mode) -> io::Result<File> {
+    let fd = openat(
+        Some(dir.as_raw_fd()),
+        name,
+        OPEN_FLAGS | OFlag::O_NOCTTY | flags,
+        mode,
+    )?;
+    // SAFETY: openat returned a fresh descriptor.
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+fn open_cache(path: &Path, private: usize, create: bool) -> io::Result<File> {
+    let relative = path
+        .strip_prefix("/")
+        .map_err(|_| invalid("invalid panel cache path"))?;
+    let mut parts = relative.components();
+    let mut left = parts.clone().count();
+    let mut dir = File::open("/")?;
+    for part in &mut parts {
+        let Component::Normal(name) = part else {
+            return Err(invalid("invalid panel cache path"));
+        };
+        let open = || owned_open(&dir, name, OFlag::O_DIRECTORY, Mode::empty());
+        let next = match open() {
+            Err(e) if e.kind() == io::ErrorKind::NotFound && create => {
+                match mkdirat(Some(dir.as_raw_fd()), name, Mode::S_IRWXU) {
+                    Ok(()) | Err(nix::errno::Errno::EEXIST) => {}
+                    Err(e) => return Err(e.into()),
+                }
+                open()?
+            }
+            result => result?,
+        };
+        if left <= private {
+            let meta = next.metadata()?;
+            if meta.uid() != geteuid().as_raw() || meta.mode() & 0o7777 != 0o700 {
+                return Err(invalid(
+                    "panel cache directories must be private and owned by this user",
+                ));
+            }
+        }
+        dir = next;
+        left -= 1;
+    }
+    Ok(dir)
+}
+
+fn private_file(dir: &File, name: &str, flags: OFlag) -> io::Result<File> {
+    let file = owned_open(dir, name.as_ref(), flags, Mode::S_IRUSR | Mode::S_IWUSR)?;
+    let meta = file.metadata()?;
+    if !meta.is_file()
+        || meta.uid() != geteuid().as_raw()
+        || meta.mode() & 0o7777 != 0o600
+        || meta.nlink() != 1
+    {
+        return Err(invalid(
+            "panel cache file must be private and owned by this user",
+        ));
+    }
+    Ok(file)
+}
+
+fn read_meta(dir: &File) -> BTreeMap<String, Versioned> {
+    private_file(dir, "meta.json", OFlag::empty())
         .ok()
         .and_then(|mut f| bounded(&mut f, META_LIMIT).ok())
         .and_then(|(b, truncated)| {
@@ -92,7 +164,10 @@ fn read_meta(dir: &Path) -> BTreeMap<String, Versioned> {
 }
 
 pub fn sections(project: &Project, dir: &Path) -> Vec<AgentSection> {
-    let Ok(lock) = open_relative(dir, Path::new(".lock")) else {
+    let Ok(dir) = open_cache(dir, 3, false) else {
+        return Vec::new();
+    };
+    let Ok(lock) = private_file(&dir, ".lock", OFlag::empty()) else {
         return Vec::new();
     };
     // The writer reads stdin before acquiring the lock; wait briefly for the atomic renames.
@@ -107,7 +182,7 @@ pub fn sections(project: &Project, dir: &Path) -> Vec<AgentSection> {
     if !acquired {
         return Vec::new();
     }
-    let mut entries: Vec<_> = read_meta(dir).into_iter().collect();
+    let mut entries: Vec<_> = read_meta(&dir).into_iter().collect();
     entries.sort_by_key(|(name, entry)| (name != "flujo", entry.current.written_at, name.clone()));
     let mut extra = 0;
     entries
@@ -116,7 +191,7 @@ pub fn sections(project: &Project, dir: &Path) -> Vec<AgentSection> {
             if !valid(&name) || (name != "flujo" && extra >= EXTRA_LIMIT) {
                 return None;
             }
-            let mut file = open_relative(dir, Path::new(&format!("{name}.md"))).ok()?;
+            let mut file = private_file(&dir, &format!("{name}.md"), OFlag::empty()).ok()?;
             let (data, over) = bounded(&mut file, SECTION_LIMIT).ok()?;
             let entry = entry.matching(&hash(&data))?;
             if entry.root != project.root {
@@ -135,21 +210,23 @@ pub fn sections(project: &Project, dir: &Path) -> Vec<AgentSection> {
         .collect()
 }
 
-fn atomic(dir: &Path, name: &str, data: &[u8]) -> io::Result<()> {
-    let temp = dir.join(format!(".{}.new", uuid::Uuid::new_v4()));
+fn atomic(dir: &File, name: &str, data: &[u8]) -> io::Result<()> {
+    let temp = format!(".{}.new", uuid::Uuid::new_v4());
+    let fd = Some(dir.as_raw_fd());
+    let mut file = owned_open(
+        dir,
+        temp.as_ref(),
+        OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_WRONLY,
+        Mode::S_IRUSR | Mode::S_IWUSR,
+    )?;
     let result = (|| {
-        let mut f = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temp)?;
-        f.write_all(data)?;
-        f.sync_all()?;
-        fs::rename(&temp, dir.join(name))?;
-        File::open(dir)?.sync_all()
+        file.write_all(data)?;
+        file.sync_all()?;
+        renameat(fd, temp.as_str(), fd, name)?;
+        dir.sync_all()
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temp);
+        let _ = unlinkat(fd, temp.as_str(), UnlinkatFlags::NoRemoveDir);
     }
     result
 }
@@ -183,8 +260,9 @@ fn save(
         digest: hash(bytes),
         truncated: truncated || bytes.len() < available.len(),
     };
-    let _guard = lock(dir)?;
-    let mut entries = read_meta(dir);
+    let dir = open_cache(dir, 3, true)?;
+    let _guard = lock(&dir)?;
+    let mut entries = read_meta(&dir);
     if name != "flujo"
         && !entries.contains_key(name)
         && entries.keys().filter(|n| *n != "flujo").count() >= EXTRA_LIMIT
@@ -193,7 +271,7 @@ fn save(
     }
     let filename = format!("{name}.md");
     let previous = entries.remove(name).and_then(|old| {
-        let mut f = open_relative(dir, Path::new(&filename)).ok()?;
+        let mut f = private_file(&dir, &filename, OFlag::empty()).ok()?;
         let (data, _) = bounded(&mut f, SECTION_LIMIT).ok()?;
         old.matching(&hash(&data))
     });
@@ -206,41 +284,33 @@ fn save(
     );
     // Commit the two files in this order. A reader after an interrupted replacement
     // can still match the old file to its metadata until the new file is renamed.
-    atomic(dir, "meta.json", &serde_json::to_vec(&entries)?)?;
-    atomic(dir, &filename, bytes)
+    atomic(&dir, "meta.json", &serde_json::to_vec(&entries)?)?;
+    atomic(&dir, &filename, bytes)
 }
 
-fn lock(dir: &Path) -> io::Result<File> {
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .recursive(true)
-        .create(dir)?;
-    if !dir.symlink_metadata()?.is_dir() {
-        return Err(invalid("invalid panel cache directory"));
-    }
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .mode(0o600)
-        .open(dir.join(".lock"))?;
+fn lock(dir: &File) -> io::Result<File> {
+    let lock = private_file(dir, ".lock", OFlag::O_RDWR | OFlag::O_CREAT)?;
     lock.lock()?;
     Ok(lock)
 }
 
 fn clear(dir: &Path, name: &str) -> io::Result<()> {
-    if !dir.try_exists()? {
-        return Ok(());
-    }
-    let _guard = lock(dir)?;
-    let mut entries = read_meta(dir);
+    let dir = match open_cache(dir, 3, false) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        result => result?,
+    };
+    let _guard = lock(&dir)?;
+    let mut entries = read_meta(&dir);
     entries.remove(name);
-    atomic(dir, "meta.json", &serde_json::to_vec(&entries)?)?;
-    match fs::remove_file(dir.join(format!("{name}.md"))) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        result => result,
+    atomic(&dir, "meta.json", &serde_json::to_vec(&entries)?)?;
+    match unlinkat(
+        Some(dir.as_raw_fd()),
+        format!("{name}.md").as_str(),
+        UnlinkatFlags::NoRemoveDir,
+    ) {
+        Ok(()) => dir.sync_all(),
+        Err(nix::errno::Errno::ENOENT) => Ok(()),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -278,7 +348,61 @@ pub fn command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn panel_security_cache_rejects_symlink_ancestors_and_open_modes() {
+        use std::os::unix::fs::symlink;
+        let fixture = crate::project::tests::Fixture::new();
+        let outside = fixture.0.join("outside");
+        fs::create_dir(&outside).unwrap();
+        let link = fixture.0.join("cache");
+        symlink(&outside, &link).unwrap();
+        let project = Project {
+            root: fixture.0.clone(),
+            has_git: false,
+        };
+        let set = |dir: &Path| save(dir, &project, "flujo", None, &mut &b"note"[..]);
+        let redirected = set(&link.join("wyss-console/panels/id"));
+        let broad = fixture.0.join("wyss-console");
+        fs::create_dir(&broad).unwrap();
+        fs::set_permissions(&broad, fs::Permissions::from_mode(0o755)).unwrap();
+        let open_mode = set(&broad.join("panels/id"));
+        assert!(redirected.is_err(), "followed a cache ancestor symlink");
+        assert!(
+            open_mode.is_err(),
+            "accepted a public panel cache directory"
+        );
+        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn panel_security_cache_writes_and_unlinks_through_the_open_directory() {
+        let fixture = crate::project::tests::Fixture::new();
+        let original = fixture.0.join("wyss-console/panels/id");
+        let moved = original.with_file_name("moved");
+        let dir = open_cache(&original, 3, true).unwrap();
+        fs::rename(&original, &moved).unwrap();
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("flujo.md"), "replacement").unwrap();
+        atomic(&dir, "flujo.md", b"pinned").unwrap();
+        assert_eq!(
+            fs::read_to_string(moved.join("flujo.md")).unwrap(),
+            "pinned"
+        );
+        unlinkat(
+            Some(dir.as_raw_fd()),
+            "flujo.md",
+            UnlinkatFlags::NoRemoveDir,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(original.join("flujo.md")).unwrap(),
+            "replacement"
+        );
+        assert!(!moved.join("flujo.md").exists());
+    }
 
     #[test]
     fn writes_private_atomic_sections_and_clears_them() {
@@ -287,7 +411,7 @@ mod tests {
         fs::create_dir(&root).unwrap();
         fs::write(root.join("Makefile"), "test:\n").unwrap();
         let project = detect(&root).unwrap();
-        let dir = fixture.0.join("panels").join("id");
+        let dir = fixture.0.join("wyss-console/panels/id");
         save(&dir, &project, "flujo", None, &mut &b"first"[..]).unwrap();
         let old = File::open(dir.join("flujo.md")).unwrap();
         let long = "á".repeat(SECTION_LIMIT);

@@ -107,6 +107,7 @@ pub struct Panel {
     notes_dirty: Cell<bool>,
     notes_pending: Cell<bool>,
     agent: Cell<bool>,
+    ask_pending: Cell<bool>,
     rx: mpsc::Receiver<(u64, Update)>,
     tx: mpsc::Sender<(u64, Update)>,
     monitor: RefCell<Option<(PathBuf, gio::FileMonitor)>>,
@@ -189,6 +190,7 @@ impl Panel {
             notes_dirty: Cell::new(false),
             notes_pending: Cell::new(false),
             agent: Cell::new(false),
+            ask_pending: Cell::new(false),
             rx,
             tx,
             monitor: RefCell::default(),
@@ -404,7 +406,7 @@ impl Panel {
         }
     }
 
-    pub fn can_ask(&self) -> bool {
+    fn can_ask(&self) -> bool {
         self.is_open()
             && self.ready.get()
             && !self.overview_pending.get()
@@ -412,9 +414,26 @@ impl Panel {
             && self.agent.get()
     }
 
+    pub fn begin_ask(&self) -> Option<u64> {
+        if !self.can_ask() || self.ask_pending.replace(true) {
+            return None;
+        }
+        self.update_ask();
+        Some(self.generation.load(Ordering::Relaxed))
+    }
+
+    pub fn finish_ask(&self, generation: u64) -> bool {
+        if self.generation.load(Ordering::Relaxed) != generation {
+            return false;
+        }
+        self.ask_pending.set(false);
+        self.update_ask();
+        true
+    }
+
     fn update_ask(&self) {
         let enabled = self.can_ask();
-        self.ask.set_sensitive(enabled);
+        self.ask.set_sensitive(enabled && !self.ask_pending.get());
         self.ask_label.set_label(&tr(if enabled {
             t!("Ask the agent")
         } else {
@@ -424,6 +443,8 @@ impl Panel {
 
     fn invalidate(&self) {
         self.generation.fetch_add(1, Ordering::Relaxed);
+        self.ask_pending.set(false);
+        self.update_ask();
         self.ready.set(false);
         self.overview_pending.set(true);
         self.git_pending.set(false);
@@ -442,6 +463,7 @@ impl Panel {
         let id = generation.load(Ordering::Relaxed);
         std::thread::spawn(move || {
             let cancelled = || generation.load(Ordering::Relaxed) != id;
+            let scan = project::Scan::new(&cancelled);
             let send = |update| {
                 if !cancelled() {
                     let _ = tx.send((id, update));
@@ -473,21 +495,23 @@ impl Panel {
                         && !cancelled()
                     {
                         if reload {
-                            let (overview, git, remaining) = project::overview(&p);
+                            let (overview, git, remaining) = project::overview_with_scan(&p, &scan);
                             timing("panel:overview-worker", start);
                             send(Update::Overview(overview, git));
-                            send(notes(&p));
                             if !cancelled() {
-                                let inventory = project::inventory(&p, remaining, cancelled);
+                                let inventory = project::inventory_with_scan(&p, remaining, &scan);
                                 timing("panel:inventory-worker", start);
                                 send(Update::Inventory(inventory_rows(inventory)));
+                            }
+                            if !cancelled() {
+                                send(notes(&p));
                             }
                         } else {
                             send(notes(&p));
                         }
                     }
                 }
-                Job::Git(p) => send(Update::Git(p.read_git())),
+                Job::Git(p) => send(Update::Git(p.read_git_with_scan(&scan))),
                 Job::Notes(p) => send(notes(&p)),
             }
         });
@@ -626,10 +650,16 @@ impl Panel {
             Some(Err(e)) => {
                 self.branch.set_label("");
                 git_error(body, *e);
+                if matches!(e, GitError::Timeout | GitError::OutputLimit) {
+                    line(body, &tr(t!("Partial result")), "hint");
+                }
                 return;
             }
             Some(Ok(git)) => git,
         };
+        if value.limited {
+            line(body, &tr(t!("Partial result")), "hint");
+        }
         let branch = match &value.branch {
             Branch::Named(name) => name.clone(),
             Branch::Detached(sha) => trf("Detached HEAD at {sha}", &[("sha", abbrev(sha))]),
@@ -901,6 +931,7 @@ fn git_error(parent: &gtk::Box, error: GitError) {
 fn git_error_message(error: GitError) -> String {
     let reason = tr(match error {
         GitError::Command => t!("git query failed"),
+        GitError::Untrusted => t!("untrusted repository"),
         GitError::Timeout => t!("time limit reached"),
         GitError::OutputLimit => t!("output limit reached"),
     });
@@ -995,15 +1026,6 @@ fn inventory_rows(inv: Inventory) -> [Rows; 4] {
         tech.push(notice.clone());
         dirs.push(notice);
     }
-    if inv.limited {
-        let notice = (
-            tr("Partial counts · file reading limit reached"),
-            String::new(),
-            false,
-        );
-        tech.push(notice.clone());
-        dirs.push(notice);
-    }
     let mut ci: Rows = inv
         .workflows
         .into_iter()
@@ -1016,6 +1038,9 @@ fn inventory_rows(inv: Inventory) -> [Rows; 4] {
     );
     let mut all = [tech, runs, dirs, ci];
     for rows in &mut all {
+        if inv.limited {
+            rows.push((tr(t!("Partial result")), String::new(), false));
+        }
         if rows.is_empty() {
             rows.push((tr("Nothing detected"), String::new(), false));
         }

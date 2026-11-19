@@ -26,6 +26,21 @@ const THEME: &str = include_str!("theme.css");
 const DEMO_VAR: &str = "WYSS_CONSOLE_DEMO";
 const REFRESH_SECS: u32 = 2;
 
+fn can_send_panel_request(cached_running: bool, verify: impl FnOnce() -> bool) -> bool {
+    cached_running && verify()
+}
+
+#[test]
+fn panel_security_ask_rechecks_cached_running_state() {
+    let queried = Cell::new(false);
+    assert!(!can_send_panel_request(true, || {
+        queried.set(true);
+        false
+    }), "a stale Running state would send terminal input");
+    assert!(queried.get());
+    assert!(can_send_panel_request(true, || true));
+}
+
 pub struct Config {
     pub host: Option<Host>,
     /// Tabs to open when there is nothing to restore.
@@ -803,6 +818,47 @@ impl Ui {
 
     // ---- status bar and /proc -------------------------------------------------------------
 
+    fn ask_project_agent(self: &Rc<Self>) {
+        let Some(pane) = self.focused() else { return };
+        let tag = pane.native.borrow().clone();
+        let (Some(host), Some(terminal), Some(tag)) = (self.host.clone(), pane.tid.clone(), tag) else {
+            self.project_agent_unavailable(&pane);
+            return;
+        };
+        let Some(generation) = self.project.begin_ask() else { return };
+        let key = pane.key.clone();
+        std::thread::spawn(move || {
+            let pid = native::running_panel_pid(&host, &tag.session_id, &terminal);
+            glib::MainContext::default().invoke(move || {
+                UI.with(|u| {
+                    let Some(ui) = u.borrow().clone() else { return };
+                    if !ui.project.finish_ask(generation) {
+                        return;
+                    }
+                    let Some(pane) = ui.focused().filter(|pane| {
+                        pane.key == key
+                            && pane.tid.as_ref() == Some(&terminal)
+                            && pane.native.borrow().as_ref().is_some_and(|t| t.session_id == tag.session_id)
+                    }) else { return };
+                    if can_send_panel_request(pane.life.get() == Some(native::Lifecycle::Running), || {
+                        pid.is_some_and(procinfo::in_foreground)
+                    }) {
+                        pane.term.type_text(&tr(project_panel::REQUEST));
+                    } else {
+                        ui.project_agent_unavailable(&pane);
+                    }
+                });
+            });
+        });
+    }
+
+    fn project_agent_unavailable(self: &Rc<Self>, pane: &Pane) {
+        pane.life.set(None);
+        self.paint_header(pane);
+        self.update_status();
+        self.banner(&tr(t!("The agent is no longer running in this terminal's foreground.")), true);
+    }
+
     fn update_status(&self) {
         let pane = self.focused();
         let info = pane.as_ref().map(|p| p.info.borrow().clone());
@@ -1501,11 +1557,8 @@ pub fn build(
     {
         let weak = Rc::downgrade(&ui);
         ui.project.on_ask(move || {
-            if let Some(ui) = weak.upgrade()
-                && ui.project.can_ask()
-                && let Some(pane) = ui.focused()
-            {
-                pane.term.type_text(&tr(project_panel::REQUEST));
+            if let Some(ui) = weak.upgrade() {
+                ui.ask_project_agent();
             }
         });
     }

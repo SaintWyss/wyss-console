@@ -274,6 +274,33 @@ pub fn sessions(host: &Host) -> Result<Vec<Session>, HostError> {
     parse_sessions(&host.call("native_sessions", json!({"sample": false}))?)
 }
 
+pub fn running_panel_pid(host: &Host, session: &str, terminal: &str) -> Option<u32> {
+    let reply = host.call_timeout(
+        "native_sessions",
+        json!({"sample": false}),
+        std::time::Duration::from_millis(750),
+    ).ok()?;
+    matching_running_pid(&reply, session, terminal)
+}
+
+fn matching_running_pid(reply: &Value, session: &str, terminal: &str) -> Option<u32> {
+    let entry = reply.as_array()?.iter().find(|entry| entry["id"].as_str() == Some(session))?;
+    if entry["state"].as_str() != Some("running") || entry["terminal_id"].as_str() != Some(terminal) {
+        return None;
+    }
+    u32::try_from(entry["pid"].as_u64()?).ok().filter(|pid| *pid > 0)
+}
+
+#[test]
+fn panel_security_ask_checks_fresh_session_and_terminal_identity() {
+    let current = json!([{"id":"agent", "terminal_id":"pane", "state":"running", "pid":123}]);
+    assert_eq!(matching_running_pid(&current, "agent", "pane"), Some(123));
+    assert_eq!(matching_running_pid(&current, "agent", "other"), None);
+    assert_eq!(matching_running_pid(&current, "other", "pane"), None);
+    let exited = json!([{"id":"agent", "terminal_id":"pane", "state":"exited", "pid":123}]);
+    assert_eq!(matching_running_pid(&exited, "agent", "pane"), None);
+}
+
 // ---- opening a launch --------------------------------------------------------------------
 
 /// Why a launch did not open: a sentence in the language in force.
