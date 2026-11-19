@@ -418,7 +418,6 @@
     "Skills": "Skills",
     "Skip": "Omitir",
     "Skip AUR review": "Saltar revisión AUR",
-    "Something went wrong in the desktop.": "Algo salió mal en el escritorio.",
     "Split side by side (Ctrl+Shift+D)": "Dividir lado a lado (Ctrl+Shift+D)",
     "Split the pane side by side": "Dividir el panel lado a lado",
     "Split the pane, one above the other": "Dividir el panel en dos, uno encima del otro",
@@ -654,6 +653,16 @@
     "it could not be written to the session folder": "no se pudo escribir en la carpeta de la sesión",
     "there is no stored sign-in token for a folder of the session's own": "no hay un token de inicio de sesión guardado para una carpeta propia de la sesión",
     "the project folder would load your own configuration again": "la carpeta del proyecto volvería a cargar tu propia configuración",
-    "the Arsenal library could not be read": "no se pudo leer la biblioteca de Arsenal"
+    "the Arsenal library could not be read": "no se pudo leer la biblioteca de Arsenal",
+    "A preset cannot run with your home folder (~) as the working directory: the agent would load your own ~/.claude again on top of the preset. Choose a project folder in Workspace → General → Working directory.": "Un preset no puede correr con tu carpeta personal (~) como directorio de trabajo: el agente volvería a cargar tu ~/.claude encima del preset. Elegí una carpeta de proyecto en Workspace → General → Directorio de trabajo.",
+    "This preset needs your Claude Code sign-in, and it was not found in the system keyring. Sign in once with claude in a terminal and try again.": "Este preset necesita tu sesión de Claude Code y no se encontró en el llavero del sistema. Iniciá sesión una vez con claude en una terminal y probá de nuevo.",
+    "The preset’s own folder for the agent could not be prepared. Nothing was started.": "No se pudo preparar la carpeta propia del preset para el agente. No se inició nada.",
+    "This agent build cannot use a preset’s own folder. Start it without the preset.": "Esta versión del agente no puede usar la carpeta propia de un preset. Inicialo sin el preset.",
+    "This agent build cannot apply Arsenal presets. Start it without the preset.": "Esta versión del agente no puede aplicar presets de Arsenal. Inicialo sin el preset.",
+    "The working directory cannot be used with a preset (it is missing or its name has special characters). Choose another folder in Workspace.": "El directorio de trabajo no se puede usar con un preset (no existe o su nombre tiene caracteres especiales). Elegí otra carpeta en Workspace.",
+    "That terminal is no longer open.": "Esa terminal ya no está abierta.",
+    "The terminal host is from another version. Close Wyss Console and open it again.": "El host de terminales es de otra versión. Cerrá Wyss Console y abrila de nuevo.",
+    "Something failed inside the terminal host. Nothing was started.": "Algo falló dentro del host de terminales. No se inició nada.",
+    "The terminal host answered “{code}”. Nothing was started.": "El host de terminales respondió «{code}». No se inició nada."
   }
 }

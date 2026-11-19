@@ -215,12 +215,21 @@ pub fn failure_text(code: &str) -> String {
         "not_running" => tr(t!("That session is not running.")),
         "still_running" => tr(t!("A running session cannot be removed. Stop it first.")),
         "stop_failed" => tr(t!("The session could not be stopped.")),
+        "arsenal_home_cwd_is_home" => tr(t!("A preset cannot run with your home folder (~) as the working directory: the agent would load your own ~/.claude again on top of the preset. Choose a project folder in Workspace → General → Working directory.")),
+        "arsenal_token_missing" => tr(t!("This preset needs your Claude Code sign-in, and it was not found in the system keyring. Sign in once with claude in a terminal and try again.")),
+        "arsenal_home_failed" => tr(t!("The preset’s own folder for the agent could not be prepared. Nothing was started.")),
+        "arsenal_home_unqualified" => tr(t!("This agent build cannot use a preset’s own folder. Start it without the preset.")),
+        "arsenal_unqualified" => tr(t!("This agent build cannot apply Arsenal presets. Start it without the preset.")),
+        "arsenal_project_glob" => tr(t!("The working directory cannot be used with a preset (it is missing or its name has special characters). Choose another folder in Workspace.")),
+        "unknown_terminal" => tr(t!("That terminal is no longer open.")),
+        "unknown_op" => tr(t!("The terminal host is from another version. Close Wyss Console and open it again.")),
+        "internal" => tr(t!("Something failed inside the terminal host. Nothing was started.")),
         "store_unavailable" => tr(t!("The Console could not write its own state.")),
         "unavailable" => tr(t!("The Console has no private folder to keep native sessions in, so it cannot start agents.")),
         "request_invalid" => tr(t!("The request was not valid.")),
         "host_unavailable" => tr(t!("The terminal host is not answering. Nothing was sent; nothing changed.")),
         "host_outdated" => tr(t!("The terminal host is older than this window and cannot start with this option. Update it before using it; existing sessions are unchanged.")),
-        _ => tr(t!("Something went wrong in the desktop.")),
+        _ => trf(t!("The terminal host answered “{code}”. Nothing was started."), &[("code", code)]),
     }
 }
 
@@ -596,7 +605,7 @@ mod tests {
     fn failures_have_words_and_unknown_codes_the_general_sentence() {
         assert_eq!(failure_text("agent_not_installed"), "That agent is not installed on this computer.");
         assert_eq!(failure_text("limit_reached"), "The terminal limit (16) is reached. Close one to start another.");
-        assert_eq!(failure_text("something_new"), "Something went wrong in the desktop.");
+        assert_eq!(failure_text("something_new"), "The terminal host answered “something_new”. Nothing was started.");
         assert_eq!(explain(&HostError::Io(std::io::Error::other("x"))), failure_text("host_unavailable"));
         assert_eq!(explain(&HostError::Remote { code: "busy".into(), reasons: vec![] }), "A start is already in progress.");
     }
@@ -846,4 +855,34 @@ mod tests {
         let Opened::NeedsApproval(needed) = out else { panic!("{out:?}") };
         assert_eq!((needed.before, needed.bypass, needed.fingerprint), (vec!["true".to_owned()], true, wyss_console::launch::bind(&other, &home)));
     }
+
+    #[test]
+    fn every_error_the_host_can_send_has_its_own_message() {
+        use std::path::Path;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut codes = std::collections::BTreeSet::new();
+        let mut stack = vec![root.join("native"), root.join("host")];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") && !path.to_string_lossy().contains("test") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for part in text.split("Error::new(\"").skip(1) {
+                        if let Some(code) = part.split('"').next().filter(|c| c.chars().all(|c| c.is_ascii_lowercase() || c == '_')) {
+                            codes.insert(code.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        // Codes of host operations this window never calls, or that only reach other clients.
+        let not_shown = ["delegation_unavailable", "handoff_target_unverified", "busy", "too_large"];
+        let generic = failure_text("a_code_nobody_sends");
+        for code in codes.iter().filter(|c| !not_shown.contains(&c.as_str())) {
+            assert_ne!(failure_text(code).replace(code.as_str(), ""), generic.replace("a_code_nobody_sends", ""), "{code} has no message of its own");
+        }
+    }
+
 }
