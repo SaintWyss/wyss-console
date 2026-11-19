@@ -90,10 +90,13 @@ pub struct Session {
     pub agent_id: Option<String>,
     pub profile_id: Option<String>,
     pub restart_bypass: Option<bool>,
+    /// The Arsenal exclusion the host started it with: a preview of its restart sends it again.
+    pub arsenal: Option<Value>,
 }
 
 pub fn parse_session(v: &Value) -> Option<Session> {
     Some(Session {
+        arsenal: v.get("arsenal").filter(|a| a.is_object()).cloned(),
         id: v["id"].as_str()?.to_owned(),
         agent_id: v["agent_id"].as_str().map(str::to_owned),
         profile_id: v["profile"]["id"].as_str().map(str::to_owned),
@@ -210,12 +213,17 @@ pub fn launcher(host: &Host) -> Result<Launcher, HostError> {
 }
 
 /// `native_preview` for an agent and the profile a permission is sent as.
-pub fn preview(host: &Host, agent: &str, profile: Option<&str>) -> Result<Preview, HostError> {
-    parse_preview(&host.call("native_preview", json!({"agent_id": agent, "profile_id": profile}))?)
+/// With `arsenal`, the plan and its token cover that exclusion: the start must send the same.
+pub fn preview(host: &Host, agent: &str, profile: Option<&str>, arsenal: Option<&Value>) -> Result<Preview, HostError> {
+    let mut params = json!({"agent_id": agent, "profile_id": profile});
+    if let Some(arsenal) = arsenal {
+        params["arsenal"] = arsenal.clone();
+    }
+    parse_preview(&host.call("native_preview", params)?)
 }
 
-pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, preview: &Preview) -> Result<Started, HostError> {
-    let params = json!({
+pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, arsenal: Option<&Value>, preview: &Preview) -> Result<Started, HostError> {
+    let mut params = json!({
         "agent_id": agent,
         "project": project,
         "profile_id": profile,
@@ -224,6 +232,9 @@ pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, pre
         "plan_token": preview.plan_token,
         "expected_cli_version": preview.provider_version,
     });
+    if let Some(arsenal) = arsenal {
+        params["arsenal"] = arsenal.clone();
+    }
     parse_started(&host.call("native_start", params)?)
 }
 
@@ -255,7 +266,8 @@ pub fn prepare_restart(host: &Host, id: &str) -> Result<Restart, HostError> {
         }
     }
     let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
-    preview(host, agent, session.profile_id.as_deref()).map(Restart::Confirm)
+    // The host restarts with the exclusion it stored, so the preview names that same one.
+    preview(host, agent, session.profile_id.as_deref(), session.arsenal.as_ref()).map(Restart::Confirm)
 }
 
 fn full_access(session: &Session) -> bool {
@@ -342,6 +354,24 @@ pub fn open_launch(
     before: &BeforeCommands<'_>,
     approvals: Option<&wyss_console::launch::Approvals>,
 ) -> Result<Opened, Refusal> {
+    open_launch_with(host, launch, fingerprint, home, before, approvals, &|preset, agent, directory| {
+        wyss_console::arsenal::library::launch_for_process(preset, agent, std::path::Path::new(directory))
+    })
+}
+
+/// Compiles a preset (its name, the agent, the folder) into the Arsenal part of the launch.
+type ArsenalFor<'a> = dyn Fn(&str, &str, &str) -> Result<wyss_console::native::arsenal::ArsenalLaunch, String> + 'a;
+
+/// [`open_launch`] with the preset compiler given: tests give it a stand-in.
+fn open_launch_with(
+    host: &Host,
+    launch: &Launch,
+    fingerprint: &str,
+    home: &str,
+    before: &BeforeCommands<'_>,
+    approvals: Option<&wyss_console::launch::Approvals>,
+    arsenal_for: &ArsenalFor<'_>,
+) -> Result<Opened, Refusal> {
     let directory = launches::resolve_directory(&launch.directory, home).map_err(|e| Refusal(e.to_owned()))?;
     // The approval covers the file's exact text and the folder it resolved to here.
     let fingerprint = &wyss_console::launch::bind(fingerprint, &directory);
@@ -363,11 +393,18 @@ pub fn open_launch(
             Ok(Opened::Terminal { terminal_id: id, title: launch.name.clone() })
         }
         Kind::Session { agent, permission, before: before_cmds, preset } => {
-            if let Some(name) = preset {
-                // The preset is an Arsenal selection: its plan and its exclusions live in the
-                // Console app, which this window cannot ask. Nothing is started without them.
-                return Err(Refusal(trf(t!("The preset “{name}” can only be applied by the Console app. Nothing was started."), &[("name", name)])));
-            }
+            // The preset is an Arsenal selection: compiled here against the skills installed now,
+            // and the very same exclusion goes to every preview and to the start.
+            let arsenal = match preset {
+                None => None,
+                Some(name) => {
+                    let compiled = arsenal_for(name, agent.id(), &directory).map_err(|reason| {
+                        Refusal(trf(t!("The preset “{name}” cannot be applied: {reason} Nothing was started."), &[("name", name), ("reason", &reason)]))
+                    })?;
+                    Some(serde_json::to_value(compiled).map_err(|_| Refusal(failure_text("internal")))?)
+                }
+            };
+            let arsenal = arsenal.as_ref();
             let bypass = launch.full_access();
             if !before_cmds.is_empty() || bypass {
                 let Some(approvals) = approvals else {
@@ -379,7 +416,7 @@ pub fn open_launch(
                 }
             }
             let profile = permission.map(|p| p.profile_id());
-            let pre = preview(host, agent.id(), profile)?;
+            let pre = preview(host, agent.id(), profile, arsenal)?;
             if !pre.can_start {
                 return Err(Refusal(trf(t!("The launch “{name}” cannot start with this permission. No commands were run."), &[("name", &launch.name)])));
             }
@@ -389,11 +426,11 @@ pub fn open_launch(
                 .map(|(_, result)| trf(t!("A command before the start did not succeed ({result}); the agent started anyway."), &[("result", &result)]))
                 .collect();
             // The `before` commands may take minutes: the start uses a token of its own, fresh.
-            let pre = if before_cmds.is_empty() { pre } else { preview(host, agent.id(), profile)? };
+            let pre = if before_cmds.is_empty() { pre } else { preview(host, agent.id(), profile, arsenal)? };
             if !pre.can_start {
                 return Err(Refusal(trf(t!("The launch “{name}” cannot start with this permission. No commands were run."), &[("name", &launch.name)])));
             }
-            let started = start(host, agent.id(), &directory, profile, &pre)?;
+            let started = start(host, agent.id(), &directory, profile, arsenal, &pre)?;
             Ok(Opened::Agent { started, notes })
         }
     }
@@ -589,12 +626,63 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_with_an_arsenal_preset_is_refused_without_touching_the_host() {
+    fn a_preset_that_cannot_be_compiled_is_refused_without_touching_the_host() {
         let host = Host::new("/nonexistent/none.sock");
         let before = |_: &[String], _: &str, _: &str| -> Vec<(String, String)> { panic!("no command may run") };
         let home = std::env::temp_dir().to_string_lossy().into_owned();
-        let r = open_launch(&host, &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT, &home, &before, None).unwrap_err();
-        assert!(r.0.contains("Reviewer") && r.0.contains("Nothing was started"), "{}", r.0);
+        let missing = |_: &str, _: &str, _: &str| Err("There is no Arsenal preset \"Reviewer\" for this agent.".to_owned());
+        let r = open_launch_with(&host, &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT, &home, &before, Some(&test_approvals()), &missing).unwrap_err();
+        assert!(r.0.contains("Reviewer") && r.0.contains("no Arsenal preset") && r.0.contains("Nothing was started"), "{}", r.0);
+    }
+
+    #[test]
+    fn a_launch_with_a_preset_sends_the_same_compiled_arsenal_to_every_preview_and_the_start() {
+        let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-9"}});
+        let (path, h) = fake_host(vec![
+            ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok-1", "through_shell": true, "with_cost": [], "provider_version": "codex-cli 0.159.0"}})),
+            ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok-2", "through_shell": true, "with_cost": [], "provider_version": "codex-cli 0.159.0"}})),
+            ("native_start", json!({"ok": reply})),
+        ]);
+        let home = std::env::temp_dir().to_string_lossy().into_owned();
+        let asked = std::cell::RefCell::new(Vec::new());
+        let compile = |preset: &str, agent: &str, dir: &str| {
+            asked.borrow_mut().push((preset.to_owned(), agent.to_owned(), dir.to_owned()));
+            Ok(wyss_console::native::arsenal::ArsenalLaunch {
+                selection: "6f1d2b8e-0000-4000-8000-00000000a001".into(),
+                selection_name: "Reviewer".into(),
+                config_hash: "c".repeat(64),
+                skills_off: vec!["design".into()],
+                skill_files_off: vec!["/h/.codex/skills/design/SKILL.md".into()],
+                home: None,
+                codex_home: None,
+                launch_instructions: None,
+            })
+        };
+        let before = |_: &[String], _: &str, _: &str| vec![("true".to_owned(), "ok".to_owned())];
+        let out = open_launch_with(&Host::new(&path), &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT, &home, &before, Some(&test_approvals()), &compile).unwrap();
+        assert!(matches!(out, Opened::Agent { .. }), "{out:?}");
+        assert_eq!(asked.borrow().as_slice(), &[("Reviewer".to_owned(), "codex".to_owned(), home.clone())]);
+        let seen = h.join().unwrap();
+        let arsenal = &seen[0]["params"]["arsenal"];
+        assert_eq!(arsenal["skills_off"], json!(["design"]));
+        assert_eq!(arsenal["selection_name"], "Reviewer");
+        assert_eq!(&seen[1]["params"]["arsenal"], arsenal, "the fresh preview names the same exclusion");
+        assert_eq!(&seen[2]["params"]["arsenal"], arsenal, "the start sends what its token covers");
+        assert_eq!(seen[2]["params"]["plan_token"], "tok-2");
+    }
+
+    #[test]
+    fn a_restart_preview_names_the_exclusion_the_session_started_with() {
+        let mut row = session_answer("running");
+        row["restart_bypass"] = json!(true);
+        row["arsenal"] = json!({"selection": "s-1", "skills_off": ["design"]});
+        let (path, h) = fake_host(vec![
+            ("native_sessions", json!({"ok": [row]})),
+            ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok", "through_shell": true, "with_cost": []}})),
+        ]);
+        let Restart::Confirm(_) = prepare_restart(&Host::new(&path), "0123456789abcdef0123456789abcdef").unwrap() else { panic!("asks") };
+        let seen = h.join().unwrap();
+        assert_eq!(seen[1]["params"]["arsenal"], json!({"selection": "s-1", "skills_off": ["design"]}));
     }
 
     #[test]

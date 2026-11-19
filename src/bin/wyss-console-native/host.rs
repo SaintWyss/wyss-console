@@ -527,7 +527,7 @@ pub(crate) mod tests {
         let home = launcher.home.clone().expect("the host knows its home project");
         assert!(home.starts_with(iso.dir.to_str().unwrap()), "{home}");
         if launcher.installed.iter().any(|a| a == "codex") {
-            let p = native::preview(&host, "codex", Some("template-full-access")).unwrap();
+            let p = native::preview(&host, "codex", Some("template-full-access"), None).unwrap();
             assert!(!p.can_start || p.plan_token.is_some(), "a start that may go on is bound to its token");
         }
 

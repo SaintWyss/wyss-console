@@ -1687,10 +1687,6 @@ fn agent_editor(
         let action = screen.try_launch.clone();
         move || {
             let Some(action) = &action else { return };
-            if !draft.borrow().uses_global() {
-                screen.message(&tr("This preset can only be tried in the Console app."));
-                return;
-            }
             let current = draft.borrow().clone();
             if let Some(id) = current.id.as_deref().filter(|_| !current.dirty()) {
                 action(id);

@@ -1694,3 +1694,34 @@ fn final_review_direct_start_rejects_changed_version_with_same_cache_key() {
         .unwrap_err();
     assert_eq!(error.code, "provider_version_unverified");
 }
+
+#[test]
+fn a_preset_compiled_from_the_library_is_accepted_by_preview_and_start() {
+    let world = World::new();
+    let (store, scan) = crate::arsenal::library::tests::fixture("claude_code", b"keep body");
+    let data = world.home.join("arsenal-data");
+    std::fs::create_dir_all(&data).unwrap();
+    let launch = crate::arsenal::library::launch_for(
+        &store,
+        &data,
+        "Front",
+        "claude_code",
+        &world.home,
+        &scan,
+    )
+    .unwrap();
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    assert!(preview.not_applicable.is_empty(), "{:?}", preview.not_applicable);
+    assert!(preview.applied[0].contains("2 installed skill(s) switched off"));
+    let reply = arsenal_start(
+        &world,
+        Some(launch.clone()),
+        preview.plan_token,
+        "2.1.309 (Claude Code)",
+    )
+    .expect("the host starts the compiled preset");
+    assert_eq!(reply.session.session.arsenal.as_ref(), Some(&launch));
+}

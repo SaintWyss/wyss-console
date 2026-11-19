@@ -193,10 +193,232 @@ pub fn installed_items(
     Some(results)
 }
 
+/// The Arsenal part of one launch of `preset` (a selection's name) for `provider` in `directory`:
+/// the same plan Workspace shows, against the skills `installed` now, with the environment and the
+/// project instructions the preset chose in `data` (the Arsenal folder). Refused, with the reason,
+/// when the selection is not there or an item of it cannot load.
+pub fn launch_for(
+    store: &Store,
+    data: &Path,
+    preset: &str,
+    provider: &str,
+    directory: &Path,
+    installed: &LaunchScan,
+) -> Result<crate::native::arsenal::ArsenalLaunch, String> {
+    let unread = |e: Error| format!("The Arsenal library could not be read ({e:?}).");
+    let selection = store
+        .selections()
+        .map_err(unread)?
+        .into_iter()
+        .find(|selection| selection.name == preset && selection.provider == provider)
+        .ok_or_else(|| format!("There is no Arsenal preset \"{preset}\" for this agent."))?;
+    let (items, _) = resolve_items(store, &selection).map_err(unread)?;
+    let key = directory.to_string_lossy().into_owned();
+    let plan = terminal::plan(terminal::Input {
+        selection: &selection,
+        items,
+        provider,
+        version: None,
+        evidence: None,
+        installed,
+        project: Some((key.clone(), key)),
+    });
+    if plan.status == "blocked" {
+        let reasons: Vec<String> = plan
+            .items
+            .iter()
+            .filter(|item| matches!(item.state, "rejected" | "missing"))
+            .map(|item| format!("{}: {}", item.name, item.reason))
+            .chain(
+                plan.conflicts
+                    .iter()
+                    .filter(|conflict| conflict.blocking)
+                    .map(|conflict| format!("{}: {}", conflict.code, conflict.names.join(", "))),
+            )
+            .collect();
+        return Err(if reasons.is_empty() {
+            "Too many installed skills would be switched off.".to_owned()
+        } else {
+            reasons.join(" ")
+        });
+    }
+    let settings = |e: std::io::Error| format!("The preset's settings could not be read ({e}).");
+    let (home, codex_home) = if provider == "codex" {
+        (
+            None,
+            super::environment::codex::get(data, &selection.id).map_err(settings)?,
+        )
+    } else {
+        (
+            super::environment::get(data, &selection.id).map_err(settings)?,
+            None,
+        )
+    };
+    let launch_instructions =
+        match super::role_instructions::get(data, &selection.id).map_err(settings)? {
+            super::role_instructions::Choice::Load => None,
+            choice => Some(choice),
+        };
+    let launch = crate::native::arsenal::ArsenalLaunch {
+        selection: selection.id,
+        selection_name: selection.name,
+        config_hash: plan.config_hash,
+        skills_off: plan.excluded,
+        skill_files_off: plan.excluded_files,
+        home,
+        codex_home,
+        launch_instructions,
+    };
+    launch
+        .validate()
+        .map_err(|_| "The Arsenal preset is not well formed.".to_owned())?;
+    Ok(launch)
+}
+
+/// [`launch_for`] with the library, its folder and the skills installed now.
+pub fn launch_for_process(
+    preset: &str,
+    provider: &str,
+    directory: &Path,
+) -> Result<crate::native::arsenal::ArsenalLaunch, String> {
+    let closed = || "The Arsenal library could not be opened.".to_owned();
+    let store = super::open_read_only().map_err(|_| closed())?;
+    let data = super::environment::directory().ok_or_else(closed)?;
+    let project = catalogue::validate_project_process(directory);
+    let installed = catalogue::launch_scan_process(project, provider)
+        .ok_or("The installed skills could not be read.")?;
+    launch_for(&store, &data, preset, provider, directory, &installed)
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::agentconfig::catalogue::Candidate;
+    use crate::arsenal::store::{self, Item, NewCapability, SelectionInput};
     use std::cell::Cell;
+
+    fn installed(provider: &'static str, name: &str, body: &[u8]) -> Candidate {
+        Candidate {
+            kind: "skill",
+            provider,
+            source: format!("{}_user_skills", provider.trim_end_matches("_code")),
+            scope: "user",
+            name: name.to_owned(),
+            description: String::new(),
+            origin: String::new(),
+            files: Vec::new(),
+            excluded: Vec::new(),
+            review: Vec::new(),
+            executes_code: false,
+            blocked: None,
+            managed_by: None,
+            content: vec![("SKILL.md".to_owned(), body.to_vec())],
+        }
+    }
+
+    /// A library holding `keep` (installed with the same content) and a preset "Front" keeping it,
+    /// with `design` and `gsd-help` installed too, for `provider`.
+    pub(crate) fn fixture(provider: &'static str, kept_body: &[u8]) -> (Store, LaunchScan) {
+        let mut store = Store::open(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let source = format!("{}_user_skills", provider.trim_end_matches("_code"));
+        let imported = store
+            .import(&NewCapability {
+                identity: store::identity(provider, "skill", &source, "keep"),
+                provider: provider.into(),
+                source: source.clone(),
+                kind: "skill".into(),
+                name: "keep".into(),
+                description: "test".into(),
+                origin: "~/skills/keep".into(),
+                files: vec![("SKILL.md".into(), b"keep body".to_vec())],
+            })
+            .unwrap();
+        store
+            .save_selection(&SelectionInput {
+                id: None,
+                name: "Front".into(),
+                provider: provider.into(),
+                items: vec![Item {
+                    capability: imported.capability,
+                    revision: None,
+                }],
+                composites: vec![],
+            })
+            .unwrap();
+        let skills = vec![
+            installed(provider, "keep", kept_body),
+            installed(provider, "design", b"d"),
+            installed(provider, "gsd-help", b"g"),
+        ];
+        let files = skills
+            .iter()
+            .map(|s| Some(PathBuf::from(format!("/h/.codex/skills/{}/SKILL.md", s.name))))
+            .collect();
+        let nested = skills.iter().map(|_| Vec::new()).collect();
+        let scan = LaunchScan {
+            skills,
+            composites: vec![],
+            mcp_servers: Default::default(),
+            truncated: false,
+            unreadable: vec![],
+            skill_files: files,
+            nested_files: nested,
+            base_off: Default::default(),
+        };
+        (store, scan)
+    }
+
+    fn data_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("arsenal-launch-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_claude_preset_switches_off_every_other_installed_skill_by_name() {
+        let (store, scan) = fixture("claude_code", b"keep body");
+        let data = data_dir();
+        let launch = launch_for(&store, &data, "Front", "claude_code", Path::new("/w"), &scan).unwrap();
+        assert_eq!(launch.selection_name, "Front");
+        assert_eq!(launch.skills_off, vec!["design", "gsd-help"]);
+        assert!(launch.skill_files_off.is_empty(), "Claude switches skills off by name only");
+        assert_eq!((launch.home.clone(), launch.codex_home.clone(), launch.launch_instructions.clone()), (None, None, None));
+        assert!(launch.validate().is_ok());
+        // The hash is the plan's: the same inputs give the same one.
+        let again = launch_for(&store, &data, "Front", "claude_code", Path::new("/w"), &scan).unwrap();
+        assert_eq!(again.config_hash, launch.config_hash);
+    }
+
+    #[test]
+    fn a_codex_preset_names_the_skill_file_of_each_skill_switched_off_and_its_choices() {
+        let (store, scan) = fixture("codex", b"keep body");
+        let data = data_dir();
+        let id = store.selections().unwrap()[0].id.clone();
+        let choice = crate::arsenal::role_instructions::Choice::Exclude { role: String::new() };
+        crate::arsenal::role_instructions::set(&data, &id, &choice).unwrap();
+        let launch = launch_for(&store, &data, "Front", "codex", Path::new("/w"), &scan).unwrap();
+        assert_eq!(launch.skills_off, vec!["design", "gsd-help"]);
+        assert_eq!(
+            launch.skill_files_off,
+            vec!["/h/.codex/skills/design/SKILL.md", "/h/.codex/skills/gsd-help/SKILL.md"]
+        );
+        assert_eq!(launch.launch_instructions, Some(choice));
+        assert!(launch.home.is_none(), "a Codex launch never carries Claude Code's home");
+        assert!(launch.validate().is_ok());
+    }
+
+    #[test]
+    fn a_missing_preset_or_one_whose_skill_cannot_load_is_refused_with_the_reason() {
+        let (store, scan) = fixture("claude_code", b"keep body");
+        let data = data_dir();
+        let error = launch_for(&store, &data, "Nope", "claude_code", Path::new("/w"), &scan).unwrap_err();
+        assert!(error.contains("no Arsenal preset \"Nope\""), "{error}");
+        let error = launch_for(&store, &data, "Front", "codex", Path::new("/w"), &scan).unwrap_err();
+        assert!(error.contains("no Arsenal preset"), "another provider's preset is not this one: {error}");
+        let (store, scan) = fixture("claude_code", b"edited since");
+        let error = launch_for(&store, &data, "Front", "claude_code", Path::new("/w"), &scan).unwrap_err();
+        assert!(error.starts_with("keep: The installed copy differs"), "{error}");
+    }
 
     #[test]
     fn installed_scans_are_reused_by_provider_and_project_until_expiry() {

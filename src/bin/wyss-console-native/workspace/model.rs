@@ -474,6 +474,7 @@ impl Draft {
         })
     }
 
+    #[cfg(test)]
     pub fn uses_global(&self) -> bool {
         self.selection.is_none() && !self.needs_selection()
     }
