@@ -275,18 +275,7 @@ pub struct Draft {
 }
 
 impl Draft {
-    pub fn load(
-        places: &Places,
-        launch: Option<&Launch>,
-        agent: &str,
-        store: Option<&Store>,
-    ) -> Result<Self, String> {
-        let dir = environment::directory().ok_or("Arsenal directory unavailable")?;
-        let selections = store
-            .map(Store::selections)
-            .transpose()
-            .map_err(|e| format!("{e:?}"))?
-            .unwrap_or_default();
+    pub fn basic(places: &Places, launch: Option<&Launch>, agent: &str) -> Self {
         let mut draft = Self {
             id: None,
             name: String::new(),
@@ -315,7 +304,7 @@ impl Draft {
                     agent,
                     permission,
                     before,
-                    preset,
+                    ..
                 },
         }) = launch
         {
@@ -325,6 +314,29 @@ impl Draft {
             draft.agent.clone_from(agent);
             draft.permission.clone_from(permission);
             draft.before.clone_from(before);
+        }
+        draft
+    }
+
+    pub fn load(
+        places: &Places,
+        launch: Option<&Launch>,
+        agent: &str,
+        store: Option<&Store>,
+    ) -> Result<Self, String> {
+        let dir = environment::directory().ok_or("Arsenal directory unavailable")?;
+        let selections = store
+            .map(Store::selections)
+            .transpose()
+            .map_err(|e| format!("{e:?}"))?
+            .unwrap_or_default();
+        let mut draft = Self::basic(places, launch, agent);
+        if let Some(Launch {
+            id,
+            kind: Kind::Session { agent, preset, .. },
+            ..
+        }) = launch
+        {
             draft.role = roles::read(&dir)
                 .assigned
                 .remove(id)
@@ -1134,14 +1146,20 @@ impl Skills {
             .collect()
     }
 
-    pub fn load(draft: &Draft, store: Option<&Store>, library: &[arsenal::store::Summary]) -> Self {
+    pub fn load(
+        draft: &Draft,
+        store: Option<&std::sync::Mutex<Store>>,
+        library: &[arsenal::store::Summary],
+        scans: &arsenal::library::InstalledScanCache,
+    ) -> Self {
         let plan = store.and_then(|store| {
+            let installed = scans.scan(&draft.agent, Path::new(&draft.directory))?;
             arsenal::library::installed_items(
-                store,
+                &store.lock().unwrap(),
                 &draft.agent,
-                Path::new(&draft.directory),
                 &draft.items,
                 library,
+                &installed,
             )
         });
         let reasons = match plan {
@@ -1192,56 +1210,45 @@ fn listing_tokens(item: &arsenal::store::Summary) -> u64 {
     (item.name.len() as u64 + item.description.len() as u64 + 24).div_ceil(4)
 }
 
-pub fn counts(
-    draft: &Draft,
-    options: &Options,
-    codex: &CodexOptions,
-    skills: &Skills,
-    tab: &str,
-) -> (usize, usize) {
-    match tab {
-        "skills" => {
-            let library = skills
-                .library
-                .iter()
-                .filter(|item| item.provider == draft.agent && item.kind == "skill");
-            let active = library
-                .clone()
-                .filter(|item| skills.active(draft, &item.id))
-                .count();
-            let total = library.count();
-            if draft.agent == CLAUDE {
-                let account = &options.account_skills;
-                (
-                    active
-                        + account
-                            .iter()
-                            .filter(|name| !draft.claude.account_skills_off.contains(name))
-                            .count(),
-                    total + account.len(),
-                )
-            } else {
-                (active, total)
-            }
-        }
-        "mcp" => mcp_counts(&draft.claude, options),
-        "hooks" => {
-            let (entries, fixed) = if draft.agent == CLAUDE {
-                (&options.hooks, 0)
-            } else {
-                (
-                    &codex.hooks,
-                    hooks(&fixed_hooks(codex))
-                        .iter()
-                        .map(|(_, rows)| rows.len())
-                        .sum(),
-                )
-            };
-            let (on, total) = hook_counts(draft, &hooks(entries));
-            (on + fixed, total + fixed)
-        }
-        _ => (0, 0),
+pub fn skill_counts(draft: &Draft, options: &Options, skills: &Skills) -> (usize, usize) {
+    let library = skills
+        .library
+        .iter()
+        .filter(|item| item.provider == draft.agent && item.kind == "skill");
+    let active = library
+        .clone()
+        .filter(|item| skills.active(draft, &item.id))
+        .count();
+    let total = library.count();
+    if draft.agent == CLAUDE {
+        let account = &options.account_skills;
+        (
+            active
+                + account
+                    .iter()
+                    .filter(|name| !draft.claude.account_skills_off.contains(name))
+                    .count(),
+            total + account.len(),
+        )
+    } else {
+        (active, total)
     }
+}
+
+pub fn hook_tab_counts(draft: &Draft, options: &Options, codex: &CodexOptions) -> (usize, usize) {
+    let (entries, fixed) = if draft.agent == CLAUDE {
+        (&options.hooks, 0)
+    } else {
+        (
+            &codex.hooks,
+            hooks(&fixed_hooks(codex))
+                .iter()
+                .map(|(_, rows)| rows.len())
+                .sum(),
+        )
+    };
+    let (on, total) = hook_counts(draft, &hooks(entries));
+    (on + fixed, total + fixed)
 }
 
 #[cfg(test)]

@@ -9,7 +9,9 @@ use std::{
 use gtk::{gio, prelude::*};
 use wyss_console::{
     arsenal::{
-        self, environment, roles,
+        self, environment,
+        library::InstalledScanCache,
+        roles,
         store::{Store, Summary},
     },
     distributors,
@@ -32,7 +34,12 @@ use crate::{
 };
 
 type Action = Rc<dyn Fn(&str)>;
-type Rows = BTreeMap<String, glib::WeakRef<gtk::Button>>;
+type Rows = BTreeMap<String, Row>;
+
+struct Row {
+    button: glib::WeakRef<gtk::Button>,
+    badge: glib::WeakRef<gtk::Label>,
+}
 
 fn label(text: &str, class: &str) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
@@ -247,8 +254,13 @@ impl Drop for Timing {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static SKILL_LOADS: Cell<usize> = const { Cell::new(0) };
+}
+
 struct Catalog {
-    store: Mutex<Option<Store>>,
+    store: Option<Mutex<Store>>,
     library: Vec<Summary>,
     inventory: model::Inventory,
     distributors: Option<distributors::List>,
@@ -274,49 +286,72 @@ impl Catalog {
             distributors::Places::from_env().and_then(|places| distributors::list(&places).ok())
         };
         Self {
-            store: Mutex::new(store),
+            store: store.map(Mutex::new),
             library,
             inventory,
             distributors,
         }
     }
 
-    fn skills(&self, draft: &Draft) -> Arc<model::Skills> {
+    fn skills(&self, draft: &Draft, scans: &InstalledScanCache) -> Arc<model::Skills> {
+        #[cfg(test)]
+        SKILL_LOADS.set(SKILL_LOADS.get() + 1);
         let _timing = Timing::new("editor:disk:skill-availability");
         Arc::new(model::Skills::load(
             draft,
-            self.store.lock().unwrap().as_ref(),
+            self.store.as_ref(),
             &self.library,
+            scans,
         ))
     }
 
-    fn prepare(&self, places: &Places, launch: Option<&Launch>) -> Result<Prepared, String> {
-        let draft = {
-            let _timing = Timing::new("editor:draft-load");
-            Draft::load(places, launch, CLAUDE, self.store.lock().unwrap().as_ref())?
-        };
-        let skills = self.skills(&draft);
-        Ok(Prepared { draft, skills })
+    fn prepare(&self, places: &Places, launch: Option<&Launch>) -> Result<Draft, String> {
+        let _timing = Timing::new("editor:draft-load");
+        let store = self.store.as_ref().map(|store| store.lock().unwrap());
+        Draft::load(places, launch, CLAUDE, store.as_deref())
     }
-}
-
-#[derive(Clone)]
-struct Prepared {
-    draft: Draft,
-    skills: Arc<model::Skills>,
 }
 
 struct Listing {
     entries: launch::List,
     deletable_commands: BTreeSet<String>,
-    badges: BTreeMap<String, String>,
     missing_directories: BTreeSet<String>,
-    agents: BTreeMap<String, Result<Prepared, String>>,
+}
+
+struct Details {
+    catalog: Arc<Catalog>,
+    badges: BTreeMap<String, String>,
+    agents: BTreeMap<String, Result<Draft, String>>,
+}
+
+impl Details {
+    fn load(places: &Places, entries: &[Launch]) -> Self {
+        let catalog = Arc::new(Catalog::load(places));
+        let mut badges = BTreeMap::new();
+        let mut agents = BTreeMap::new();
+        for entry in entries {
+            if let Kind::Session { agent, .. } = &entry.kind {
+                let prepared = catalog.prepare(places, Some(entry));
+                if agent == CLAUDE
+                    && let Ok(draft) = &prepared
+                {
+                    let tokens = model::estimate(draft, &catalog.inventory.0, &catalog.library);
+                    badges.insert(entry.id.clone(), format!("~{}", model::k_tokens(tokens)));
+                }
+                agents.insert(entry.id.clone(), prepared);
+            }
+        }
+        Self {
+            catalog,
+            badges,
+            agents,
+        }
+    }
 }
 
 struct Cache {
     listing: Result<Listing, String>,
-    catalog: Arc<Catalog>,
+    details: Option<Details>,
 }
 
 async fn load_cache(
@@ -333,17 +368,11 @@ async fn load_cache(
 
 impl Cache {
     fn load(places: &Places) -> Self {
-        let launches = {
-            let _timing = Timing::new("editor:disk:launches");
-            launch::list_for_editor(places)
-        };
-        let catalog = Arc::new(Catalog::load(places));
-        let listing = launches.map(|launches| {
+        let _timing = Timing::new("editor:disk:launches");
+        let listing = launch::list_for_editor(places).map(|entries| {
             let mut deletable_commands = BTreeSet::new();
-            let mut badges = BTreeMap::new();
             let mut missing_directories = BTreeSet::new();
-            let mut agents = BTreeMap::new();
-            for entry in &launches.launches {
+            for entry in &entries.launches {
                 if matches!(entry.kind, Kind::Commands { .. })
                     && launch::can_delete_commands(places, &entry.id)
                 {
@@ -352,26 +381,17 @@ impl Cache {
                 if !std::path::Path::new(&entry.directory).is_dir() {
                     missing_directories.insert(entry.id.clone());
                 }
-                if let Kind::Session { agent, .. } = &entry.kind {
-                    let prepared = catalog.prepare(places, Some(entry));
-                    if agent == CLAUDE
-                        && let Ok(Prepared { draft, .. }) = &prepared
-                    {
-                        let tokens = model::estimate(draft, &catalog.inventory.0, &catalog.library);
-                        badges.insert(entry.id.clone(), format!("~{}", model::k_tokens(tokens)));
-                    }
-                    agents.insert(entry.id.clone(), prepared);
-                }
             }
             Listing {
-                entries: launches,
+                entries,
                 deletable_commands,
-                badges,
                 missing_directories,
-                agents,
             }
         });
-        Self { listing, catalog }
+        Self {
+            listing,
+            details: None,
+        }
     }
 }
 
@@ -388,6 +408,8 @@ struct Screen {
     cache: Rc<RefCell<Option<Cache>>>,
     reload_id: Rc<Cell<u64>>,
     edit_id: Rc<Cell<u64>>,
+    preview: Rc<Cell<bool>>,
+    scans: Arc<InstalledScanCache>,
     pending: Rc<RefCell<Option<Pending>>>,
     saving: Rc<WriteState>,
     io: Arc<Mutex<()>>,
@@ -473,7 +495,7 @@ impl Screen {
     }
 
     fn editor_enabled(&self) -> bool {
-        Pending::editor_enabled(&self.pending.borrow(), self.saving.saving())
+        !self.preview.get() && Pending::editor_enabled(&self.pending.borrow(), self.saving.saving())
     }
 
     fn sync_editor_sensitivity(&self) {
@@ -518,9 +540,16 @@ impl Screen {
                 name.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 name.set_hexpand(true);
                 line.append(&name);
-                if let Some(badge) = listing.badges.get(&entry.id) {
-                    line.append(&label(badge, "hint"));
+                let badge = label("", "hint");
+                let estimate = cache
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.badges.get(&entry.id));
+                if let Some(estimate) = estimate {
+                    badge.set_text(estimate);
                 }
+                badge.set_visible(estimate.is_some());
+                line.append(&badge);
                 contents.append(&line);
                 if listing.missing_directories.contains(&entry.id) {
                     contents.append(&label(&tr("directory not found"), "warning"));
@@ -535,7 +564,13 @@ impl Screen {
                     let _timing = Timing::new("click");
                     screen.open(&id);
                 });
-                rows.insert(entry.id.clone(), item.downgrade());
+                rows.insert(
+                    entry.id.clone(),
+                    Row {
+                        button: item.downgrade(),
+                        badge: badge.downgrade(),
+                    },
+                );
                 list.append(&item);
             }
         }
@@ -555,6 +590,7 @@ impl Screen {
 
     fn reload(&self, pending: Option<Pending>) {
         let timing = Timing::new("list-reload");
+        let paint_start = timing.start;
         let id = self.reload_id.get().wrapping_add(1);
         self.reload_id.set(id);
         Pending::queue_reload(&mut self.pending.borrow_mut(), pending);
@@ -570,20 +606,20 @@ impl Screen {
                 screen.message(&tr("Launch configuration is unavailable"));
                 return;
             };
-            let initial = cache
+            let entries = cache
                 .listing
                 .as_ref()
-                .ok()
-                .and_then(|listing| listing.entries.launches.first().cloned());
+                .map(|listing| listing.entries.launches.clone())
+                .unwrap_or_default();
+            let initial = entries.first().cloned();
             if screen.cache.borrow().is_none() && cache.listing.is_ok() {
                 screen.message("");
             }
             *screen.cache.borrow_mut() = Some(cache);
             if let Some(new) = screen.new.upgrade() {
-                new.set_sensitive(true);
+                new.set_sensitive(false);
             }
             screen.refresh();
-            drop(timing);
             match pending {
                 Some(Pending::Initial) => {
                     if let Some(entry) = initial {
@@ -611,6 +647,88 @@ impl Screen {
                 _ => {}
             }
             screen.sync_editor_sensitivity();
+            drop(timing);
+            if let Some(list) = screen.list.upgrade() {
+                // The first frame only needs launch definitions and the basic editor fields.
+                let load = RefCell::new(Some(move || {
+                    drop(Timing {
+                        stage: "list-first-paint",
+                        start: paint_start,
+                    });
+                    screen.load_details(id, entries);
+                }));
+                list.add_tick_callback(move |_, clock| {
+                    let handler = Rc::new(Cell::new(None));
+                    let load = RefCell::new(load.take());
+                    handler.set(Some(clock.connect_after_paint({
+                        let handler = handler.clone();
+                        move |clock| {
+                            let load = load.take();
+                            if let Some(id) = handler.take() {
+                                clock.disconnect(id);
+                            }
+                            if let Some(load) = load {
+                                load();
+                            }
+                        }
+                    })));
+                    glib::ControlFlow::Break
+                });
+            }
+        });
+    }
+
+    fn load_details(&self, id: u64, entries: Vec<Launch>) {
+        if self.reload_id.get() != id {
+            return;
+        }
+        let places = self.places.clone();
+        let screen = self.clone();
+        glib::spawn_future_local(async move {
+            let loaded = gio::spawn_blocking(move || Details::load(&places, &entries)).await;
+            if screen.reload_id.get() != id || screen.list.upgrade().is_none() {
+                return;
+            }
+            let Ok(details) = loaded else {
+                screen.message(&tr("Launch configuration is unavailable"));
+                return;
+            };
+            let catalog = details.catalog.clone();
+            let prepared = if screen.preview.get() {
+                let selected = screen.selected.borrow();
+                selected
+                    .as_ref()
+                    .and_then(|id| details.agents.get(id))
+                    .cloned()
+            } else {
+                None
+            };
+            for (id, estimate) in &details.badges {
+                if let Some(badge) = screen
+                    .rows
+                    .borrow()
+                    .get(id)
+                    .and_then(|row| row.badge.upgrade())
+                {
+                    badge.set_text(estimate);
+                    badge.set_visible(true);
+                }
+            }
+            if let Some(cache) = screen.cache.borrow_mut().as_mut() {
+                cache.details = Some(details);
+            }
+            if let Some(new) = screen.new.upgrade() {
+                new.set_sensitive(true);
+            }
+            if let Some(prepared) = prepared {
+                screen.show_agent(screen.edit_id.get(), catalog, prepared);
+            }
+            if matches!(*screen.pending.borrow(), Some(Pending::Preset(_))) {
+                let pending = screen.pending.borrow_mut().take();
+                if let Some(Pending::Preset(id)) = pending {
+                    screen.create_from_preset(&id);
+                }
+            }
         });
     }
 
@@ -641,7 +759,7 @@ impl Screen {
             return;
         }
         let rows = self.rows.borrow();
-        let row = |id: &str| rows.get(id).and_then(glib::WeakRef::upgrade);
+        let row = |id: &str| rows.get(id).and_then(|row| row.button.upgrade());
         if let Some(previous) = selected.as_deref().and_then(row) {
             previous.remove_css_class("on");
         }
@@ -654,6 +772,7 @@ impl Screen {
     fn start_edit(&self) -> Option<(gtk::Box, u64)> {
         let editor = self.editor.upgrade()?;
         self.pending.borrow_mut().take();
+        self.preview.set(false);
         let id = self.edit_id.get().wrapping_add(1);
         self.edit_id.set(id);
         editor.set_sensitive(self.editor_enabled());
@@ -677,13 +796,21 @@ impl Screen {
             command_editor(self, &editor, launch.as_ref());
             return;
         }
-        let (catalog, prepared) = {
-            let cache = self.cache.borrow();
-            let Some(cache) = cache.as_ref() else { return };
+        let details = self.cache.borrow().as_ref().and_then(|cache| {
+            let details = cache.details.as_ref()?;
             let prepared = launch
                 .as_ref()
-                .and_then(|launch| cache.listing.as_ref().ok()?.agents.get(&launch.id).cloned());
-            (cache.catalog.clone(), prepared)
+                .and_then(|launch| details.agents.get(&launch.id).cloned());
+            Some((details.catalog.clone(), prepared))
+        });
+        let Some((catalog, prepared)) = details else {
+            if let Some(launch) = &launch {
+                self.preview.set(true);
+                editor.set_sensitive(false);
+                let draft = Draft::basic(&self.places, Some(launch), CLAUDE);
+                agent_editor(self, &editor, Rc::new(RefCell::new(draft)), None, edit_id);
+            }
+            return;
         };
         if let Some(prepared) = prepared {
             self.show_agent(edit_id, catalog, prepared);
@@ -695,7 +822,7 @@ impl Screen {
         }
     }
 
-    fn show_agent(&self, edit_id: u64, catalog: Arc<Catalog>, result: Result<Prepared, String>) {
+    fn show_agent(&self, edit_id: u64, catalog: Arc<Catalog>, result: Result<Draft, String>) {
         let Some(editor) = self
             .editor
             .upgrade()
@@ -703,15 +830,29 @@ impl Screen {
         else {
             return;
         };
-        self.message("");
+        let was_preview = self.preview.replace(false);
+        if !was_preview {
+            self.message("");
+        }
         editor.set_sensitive(self.editor_enabled());
         match result {
-            Ok(Prepared { draft, skills }) => {
+            Ok(draft) => {
                 editor.insert_action_group("workspace-metrics", None::<&gio::SimpleActionGroup>);
                 clear(&editor);
-                agent_editor(self, &editor, Rc::new(RefCell::new(draft)), catalog, skills);
+                agent_editor(
+                    self,
+                    &editor,
+                    Rc::new(RefCell::new(draft)),
+                    Some(catalog),
+                    edit_id,
+                );
             }
-            Err(error) => self.message(&tr(&error)),
+            Err(error) => {
+                if was_preview {
+                    clear(&editor);
+                }
+                self.message(&tr(&error));
+            }
         }
     }
 
@@ -719,7 +860,7 @@ impl Screen {
         &self,
         edit_id: u64,
         catalog: Arc<Catalog>,
-        prepare: impl FnOnce(&Catalog) -> Result<Prepared, String> + Send + 'static,
+        prepare: impl FnOnce(&Catalog) -> Result<Draft, String> + Send + 'static,
     ) {
         self.message(&tr("Reading…"));
         let screen = self.clone();
@@ -735,7 +876,10 @@ impl Screen {
     fn create_from_preset(&self, id: &str) {
         let (catalog, used) = {
             let cache = self.cache.borrow();
-            let Some(cache) = cache.as_ref() else {
+            let Some((cache, details)) = cache
+                .as_ref()
+                .and_then(|cache| Some((cache, cache.details.as_ref()?)))
+            else {
                 *self.pending.borrow_mut() = Some(Pending::Preset(id.to_owned()));
                 return;
             };
@@ -747,7 +891,7 @@ impl Screen {
                 .flat_map(|listing| &listing.entries.launches)
                 .map(|launch| launch.id.clone())
                 .collect::<BTreeSet<_>>();
-            (cache.catalog.clone(), used)
+            (details.catalog.clone(), used)
         };
         let Some((_, edit_id)) = self.start_edit() else {
             return;
@@ -757,8 +901,12 @@ impl Screen {
         let id = id.to_owned();
         self.prepare_agent(edit_id, catalog, move |catalog| {
             let draft = {
-                let store = catalog.store.lock().unwrap();
-                let store = store.as_ref().ok_or("Presets could not be read.")?;
+                let store = catalog
+                    .store
+                    .as_ref()
+                    .ok_or("Presets could not be read.")?
+                    .lock()
+                    .unwrap();
                 let selections = store
                     .selections()
                     .map_err(|_| "Presets could not be read.")?;
@@ -766,7 +914,7 @@ impl Screen {
                     .iter()
                     .find(|selection| selection.id == id)
                     .ok_or("That preset is no longer available. Refresh and try again.")?;
-                let mut draft = Draft::from_preset(&places, selection, store)?;
+                let mut draft = Draft::from_preset(&places, selection, &store)?;
                 if used.contains(&launch::slug(&draft.name)) {
                     let stem: String = selection.name.chars().take(30).collect();
                     for next in 2..=used.len() + 1 {
@@ -779,8 +927,7 @@ impl Screen {
                 }
                 draft
             };
-            let skills = catalog.skills(&draft);
-            Ok(Prepared { draft, skills })
+            Ok(draft)
         });
     }
 
@@ -920,6 +1067,8 @@ pub fn build(
         cache: Rc::default(),
         reload_id: Rc::default(),
         edit_id: Rc::default(),
+        preview: Rc::default(),
+        scans: Arc::default(),
         pending: Rc::default(),
         saving: Rc::default(),
         io: Arc::default(),
@@ -1278,12 +1427,22 @@ fn command_options(
 
 type Editing = Rc<RefCell<Draft>>;
 
+fn current_skill_result<T>(
+    current_edit: u64,
+    requested_edit: u64,
+    current_request: u64,
+    requested: u64,
+    result: T,
+) -> Option<T> {
+    (current_edit == requested_edit && current_request == requested).then_some(result)
+}
+
 fn agent_editor(
     screen: &Screen,
     editor: &gtk::Box,
     draft: Editing,
-    catalog: Arc<Catalog>,
-    skills: Arc<model::Skills>,
+    catalog: Option<Arc<Catalog>>,
+    edit_id: u64,
 ) {
     let name = entry(&draft.borrow().name);
     name.set_placeholder_text(Some(&tr("Launch name")));
@@ -1310,6 +1469,25 @@ fn agent_editor(
     header.append(&context);
     editor.append(&header);
 
+    let Some(catalog) = catalog else {
+        let tabs = horizontal(0);
+        tabs.add_css_class("tabs");
+        for (id, title) in model::tabs(&draft.borrow().agent) {
+            let tab = button(&tr(title), "tab");
+            if id == "general" {
+                tab.add_css_class("on");
+            }
+            tabs.append(&tab);
+        }
+        editor.append(&tabs);
+        let page = vertical(0);
+        page.add_css_class("body");
+        page.add_css_class("agent-body");
+        general(screen, &page, &draft, None);
+        editor.append(&scroll(&page));
+        return;
+    };
+
     let refresh = gio::SimpleAction::new("refresh", None);
     let actions = gio::SimpleActionGroup::new();
     actions.add_action(&refresh);
@@ -1321,9 +1499,9 @@ fn agent_editor(
         .hhomogeneous(false)
         .vhomogeneous(false)
         .build();
-    let data = Rc::new(RefCell::new(skills));
+    let data = Rc::new(RefCell::new(None::<Arc<model::Skills>>));
     let catalog = Rc::new(RefCell::new(catalog));
-    let skills_directory = Rc::new(RefCell::new(draft.borrow().directory.clone()));
+    let skills_directory = Rc::new(RefCell::new(None::<String>));
     let skills_request = Rc::new(Cell::new(0u64));
     let mut counters = Vec::new();
     let mut tab_buttons = Vec::new();
@@ -1352,7 +1530,7 @@ fn agent_editor(
         let catalog = catalog.clone();
         let skills_directory = skills_directory.clone();
         let skills_request = skills_request.clone();
-        move |stack: &gtk::Stack| {
+        Rc::new(move |stack: &gtk::Stack| {
             let Some(id) = stack.visible_child_name() else {
                 return;
             };
@@ -1369,48 +1547,69 @@ fn agent_editor(
                 return;
             }
             let catalog = catalog.borrow().clone();
-            if matches!(id.as_str(), "skills" | "summary")
-                && *skills_directory.borrow() != draft.borrow().directory
-            {
+            if skills_directory.borrow().as_deref() != Some(draft.borrow().directory.as_str()) {
                 let current = draft.borrow().clone();
+                let directory = current.directory.clone();
+                skills_directory.replace(Some(directory.clone()));
+                data.take();
+                for tab in ["skills", "summary"] {
+                    if let Some(page) = tab_content(stack, tab) {
+                        clear(&page);
+                    }
+                }
                 let request_id = skills_request.get().wrapping_add(1);
                 skills_request.set(request_id);
-                let (stack, screen, draft, data, skills_directory, skills_request) = (
+                let (stack, screen, draft, data, skills_directory, skills_request, catalog) = (
                     stack.downgrade(),
                     screen.clone(),
                     draft.clone(),
                     data.clone(),
                     skills_directory.clone(),
                     skills_request.clone(),
+                    catalog.clone(),
                 );
                 glib::spawn_future_local(async move {
-                    let worker = catalog.clone();
-                    let directory = current.directory.clone();
-                    let Ok(skills) = gio::spawn_blocking(move || worker.skills(&current)).await
-                    else {
+                    if screen.edit_id.get() != edit_id
+                        || skills_request.get() != request_id
+                        || stack.upgrade().is_none()
+                    {
                         return;
-                    };
-                    let Some(stack) = stack.upgrade().filter(|_| {
-                        skills_request.get() == request_id && draft.borrow().directory == directory
-                    }) else {
-                        return;
-                    };
-                    skills_directory.replace(directory);
-                    data.replace(skills);
-                    for tab in ["skills", "summary"] {
-                        if let Some(page) = tab_content(&stack, tab) {
-                            clear(&page);
-                        }
                     }
+                    let worker = catalog.clone();
+                    let scans = screen.scans.clone();
+                    let result = gio::spawn_blocking(move || worker.skills(&current, &scans)).await;
+                    let Some(result) = current_skill_result(
+                        screen.edit_id.get(),
+                        edit_id,
+                        skills_request.get(),
+                        request_id,
+                        result,
+                    ) else {
+                        return;
+                    };
+                    let Some(stack) = stack.upgrade() else { return };
+                    if draft.borrow().directory != directory {
+                        skills_directory.take();
+                        return;
+                    }
+                    let skills = result.unwrap_or_else(|_| {
+                        Arc::new(model::Skills::load(
+                            &draft.borrow(),
+                            None,
+                            &catalog.library,
+                            &screen.scans,
+                        ))
+                    });
+                    data.replace(Some(skills));
                     if let Some(id) = stack.visible_child_name()
                         && matches!(id.as_str(), "skills" | "summary")
                         && let Some(page) = tab_content(&stack, &id)
                     {
+                        clear(&page);
                         agent_tab(&screen, &page, &draft, &id, data.borrow().clone(), &catalog);
                     }
                     let _ = stack.activate_action("workspace-metrics.refresh", None);
                 });
-                return;
             }
             if let Some(page) = tab_content(stack, &id)
                 && page.first_child().is_none()
@@ -1418,7 +1617,7 @@ fn agent_editor(
                 agent_tab(&screen, &page, &draft, &id, data.borrow().clone(), &catalog);
             }
             let _ = stack.activate_action("workspace-metrics.refresh", None);
-        }
+        })
     };
     refresh.connect_activate({
         let draft = draft.clone();
@@ -1428,27 +1627,40 @@ fn agent_editor(
             let catalog = catalog.borrow();
             let (claude, codex) = &catalog.inventory;
             let data = data.borrow();
-            let library = &data.library;
             let draft = draft.borrow();
             let is_claude = draft.agent == CLAUDE;
-            meter.set_visible(is_claude);
-            if is_claude {
+            meter.set_visible(is_claude && data.is_some());
+            if is_claude && let Some(data) = data.as_ref() {
                 let tokens = data.estimate(&draft, claude);
                 context_label.set_text(&format!(
                     "{} {}",
                     tr("Initial context estimated"),
                     model::k_tokens(tokens)
                 ));
-                let ceiling = model::estimate_ceiling(claude, library);
+                let ceiling = model::estimate_ceiling(claude, &data.library);
                 let percentage = (100. * tokens as f64 / ceiling as f64).round();
                 meter.set_fraction(percentage.min(100.) / 100.);
+            } else if is_claude {
+                context_label.set_text("");
             } else {
                 context_label.set_text(&tr("Initial context: no estimate for Codex"));
             }
             for (id, title, button) in &counters {
                 if let Some(button) = button.upgrade() {
-                    let (on, total) = model::counts(&draft, claude, codex, &data, id);
-                    button.set_label(&format!("{} {on}/{total}", tr(title)));
+                    let text = match *id {
+                        "skills" => data
+                            .as_ref()
+                            .map(|data| model::skill_counts(&draft, claude, data)),
+                        "mcp" => Some(model::mcp_counts(&draft.claude, claude)),
+                        "hooks" => Some(model::hook_tab_counts(&draft, claude, codex)),
+                        _ => None,
+                    };
+                    let title = tr(title);
+                    if let Some((on, total)) = text {
+                        button.set_label(&format!("{title} {on}/{total}"));
+                    } else {
+                        button.set_label(&title);
+                    }
                 }
             }
         }
@@ -1456,7 +1668,10 @@ fn agent_editor(
     editor.append(&tabs);
     editor.append(&scroll(&stack));
     show_page(&stack);
-    stack.connect_visible_child_notify(show_page);
+    stack.connect_visible_child_notify({
+        let show_page = show_page.clone();
+        move |stack| show_page(stack)
+    });
 
     let original = draft.borrow().id.clone();
     let delete = original
@@ -1535,7 +1750,7 @@ fn agent_editor(
         }
         stack.set_sensitive(false);
         skills_request.set(skills_request.get().wrapping_add(1));
-        let (stack, page, places, screen, draft, skills_directory, data, catalog, id, refresh) = (
+        let (stack, page, places, screen, draft, skills_directory, data, catalog, show_page) = (
             stack.downgrade(),
             page.downgrade(),
             screen_for_reload.places.clone(),
@@ -1544,52 +1759,45 @@ fn agent_editor(
             skills_directory.clone(),
             data.clone(),
             catalog.clone(),
-            id.to_owned(),
-            refresh.clone(),
+            show_page.clone(),
         );
         let current = draft.borrow().clone();
         glib::spawn_future_local(async move {
+            let scans = screen.scans.clone();
             let loaded = gio::spawn_blocking(move || {
                 let mut current = current;
                 let fresh = Arc::new(Catalog::load(&places));
-                current.include_new_skills(fresh.store.lock().unwrap().as_ref());
-                let skills = fresh.skills(&current);
-                (current, skills, fresh)
+                let store = fresh.store.as_ref().map(|store| store.lock().unwrap());
+                current.include_new_skills(store.as_deref());
+                drop(store);
+                scans.invalidate();
+                (current, fresh)
             })
             .await;
+            if screen.edit_id.get() != edit_id {
+                return;
+            }
             let (Some(stack), Some(page)) = (stack.upgrade(), page.upgrade()) else {
                 return;
             };
             stack.set_sensitive(true);
-            let Ok((current, skills, fresh)) = loaded else {
-                return;
-            };
-            skills_directory.borrow_mut().clone_from(&current.directory);
-            {
-                let mut draft = draft.borrow_mut();
-                draft.items = current.items;
-                draft.new_skills = current.new_skills;
-            }
-            data.replace(skills);
-            catalog.replace(fresh.clone());
-            for (id, _) in model::tabs(&current.agent) {
-                if let Some(content) = tab_content(&stack, id) {
-                    clear(&content);
+            skills_directory.take();
+            data.take();
+            if let Ok((current, fresh)) = loaded {
+                {
+                    let mut draft = draft.borrow_mut();
+                    draft.items = current.items;
+                    draft.new_skills = current.new_skills;
                 }
+                catalog.replace(fresh);
+                for (id, _) in model::tabs(&current.agent) {
+                    if let Some(content) = tab_content(&stack, id) {
+                        clear(&content);
+                    }
+                }
+                refresh_save(&page);
             }
-            let visible = stack.visible_child_name().unwrap_or_else(|| id.into());
-            if let Some(content) = tab_content(&stack, &visible) {
-                agent_tab(
-                    &screen,
-                    &content,
-                    &draft,
-                    &visible,
-                    data.borrow().clone(),
-                    &fresh,
-                );
-            }
-            refresh_save(&page);
-            refresh.activate(None);
+            show_page(&stack);
         });
     });
     actions.add_action(&reload);
@@ -1608,7 +1816,7 @@ fn agent_tab(
     parent: &gtk::Box,
     draft: &Editing,
     id: &str,
-    data: Arc<model::Skills>,
+    data: Option<Arc<model::Skills>>,
     catalog: &Arc<Catalog>,
 ) {
     let _timing = Timing::new(match id {
@@ -1619,9 +1827,13 @@ fn agent_tab(
         "summary" => "editor:summary",
         _ => return,
     });
+    if matches!(id, "skills" | "summary") && data.is_none() {
+        parent.append(&label(&tr(t!("Checking what can load…")), "hint"));
+        return;
+    }
     match id {
-        "general" => general(screen, parent, draft, catalog),
-        "skills" => skills(parent, draft, data, catalog),
+        "general" => general(screen, parent, draft, Some(catalog)),
+        "skills" => skills(parent, draft, data.unwrap(), catalog),
         _ => {
             let (claude, codex) = &catalog.inventory;
             let is_claude = draft.borrow().agent == CLAUDE;
@@ -1640,22 +1852,21 @@ fn agent_tab(
                     };
                     hooks(parent, draft, entries, &fixed);
                 }
-                "summary" => summary(parent, &draft.borrow(), claude, codex, &data),
+                "summary" => summary(parent, &draft.borrow(), claude, codex, &data.unwrap()),
                 _ => {}
             }
         }
     }
 }
 
-fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: &Arc<Catalog>) {
+fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: Option<&Arc<Catalog>>) {
     let current = draft.borrow();
     let mut providers = vec![(CLAUDE, "Claude Code"), (CODEX, "Codex")];
     // Distributor definitions supply their display names when they describe the supported agents.
-    let installed = &catalog.distributors;
+    let installed = catalog.and_then(|catalog| catalog.distributors.as_ref());
     for (id, label) in &mut providers {
-        if let Some(found) = installed
-            .as_ref()
-            .and_then(|list| list.distributors.iter().find(|item| item.id == *id))
+        if let Some(found) =
+            installed.and_then(|list| list.distributors.iter().find(|item| item.id == *id))
         {
             *label = &found.name;
         }
@@ -1825,6 +2036,7 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: &Arc<Ca
         }
     });
 
+    let Some(catalog) = catalog else { return };
     application.connect_changed({
         let screen = screen.clone();
         let draft = draft.clone();
@@ -1842,15 +2054,9 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: &Arc<Ca
             let mut current = draft.borrow().clone();
             let application = application.to_owned();
             screen.prepare_agent(edit_id, catalog.clone(), move |catalog| {
-                {
-                    let store = catalog.store.lock().unwrap();
-                    model::change_agent(&mut current, store.as_ref(), &application)?;
-                }
-                let skills = catalog.skills(&current);
-                Ok(Prepared {
-                    draft: current,
-                    skills,
-                })
+                let store = catalog.store.as_ref().map(|store| store.lock().unwrap());
+                model::change_agent(&mut current, store.as_deref(), &application)?;
+                Ok(current)
             });
         }
     });
@@ -2299,13 +2505,7 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
                 move || {
                     let Some(count) = count.upgrade() else { return };
                     let draft = draft.borrow();
-                    let (on, total) = model::counts(
-                        &draft,
-                        &catalog.inventory.0,
-                        &catalog.inventory.1,
-                        &data,
-                        "skills",
-                    );
+                    let (on, total) = model::skill_counts(&draft, &catalog.inventory.0, &data);
                     let mut text = count_text(on, total);
                     if draft.agent == CLAUDE {
                         text.push_str(&format!(" · ~{}", model::k_tokens(data.listings(&draft))));
@@ -2830,7 +3030,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_cache_runs_on_worker_without_probing_providers() {
+    fn workspace_listing_does_not_load_skill_availability() {
         let root = crate::personalization_scratch()
             .join(format!("workspace-cache-{}", uuid::Uuid::new_v4()));
         let fixture = crate::PersonalizationFixture(root);
@@ -2879,6 +3079,13 @@ mod tests {
     }
 
     #[test]
+    fn skills_results_from_previous_editor_are_discarded() {
+        assert_eq!(current_skill_result(4, 4, 1, 1, "current"), Some("current"));
+        assert_eq!(current_skill_result(4, 4, 2, 1, "superseded"), None);
+        assert_eq!(current_skill_result(5, 4, 1, 1, "previous editor"), None);
+    }
+
+    #[test]
     fn cache_worker_child() {
         let Some(root) = std::env::var_os("WYSS_WORKSPACE_CACHE_CHILD").map(PathBuf::from) else {
             return;
@@ -2886,6 +3093,12 @@ mod tests {
         let mut places = Places::from_env().unwrap();
         assert_eq!(places.home, root.join("home"));
         places.os_release = root.join("os-release");
+        launch::list_for_editor(&places).unwrap();
+        fs::write(
+            places.folder.join("fixture.toml"),
+            "name = \"Fixture Agent\"\ndirectory = \"~\"\n[session]\nagent = \"codex\"\n",
+        )
+        .unwrap();
         let caller = std::thread::current().id();
         let cache = glib::MainContext::new()
             .block_on(load_cache(
@@ -2897,12 +3110,33 @@ mod tests {
                         caller,
                         "loaded on the caller's thread"
                     );
-                    Cache::load(places)
+                    let cache = Cache::load(places);
+                    assert_eq!(SKILL_LOADS.get(), 0, "list reload requested availability");
+                    assert!(
+                        cache.details.is_none(),
+                        "list reload waited for the catalog"
+                    );
+                    let entries = &cache.listing.as_ref().unwrap().entries.launches;
+                    let details = Details::load(places, entries);
+                    assert!(details.agents["fixture"].is_ok());
+                    assert_eq!(
+                        SKILL_LOADS.get(),
+                        0,
+                        "draft preparation requested availability"
+                    );
+                    cache
                 },
             ))
             .unwrap();
         let listing = cache.listing.unwrap();
         assert_eq!(listing.entries.system.id, "cachyos");
-        assert_eq!(listing.entries.launches.len(), 3);
+        assert_eq!(listing.entries.launches.len(), 4);
+        assert!(
+            listing
+                .entries
+                .launches
+                .iter()
+                .any(|launch| launch.id == "fixture")
+        );
     }
 }

@@ -66,6 +66,7 @@ pub const ES: &[(&str, &str)] = &[
     ("Changes this preset", "Cambia este preset"),
     ("Changes this selection", "Cambia esta selección"),
     ("Check", "Verificar"),
+    ("Checking what can load…", "Revisando qué puede cargar…"),
     ("Claude account", "Cuenta de Claude"),
     ("Clean the package cache", "Limpiar caché de paquetes"),
     ("Close search", "Cerrar búsqueda"),
