@@ -8,6 +8,7 @@ apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 desktop="$apps/wyss-console-native.desktop"
 bindir="$HOME/.local/bin"
 link="$bindir/wyss-console-native"
+panel="$bindir/wyss-panel"
 build="${CARGO_TARGET_DIR:-$repo/target}/release"
 bins=(wyss-console wyss-host wyss-screen)
 
@@ -29,6 +30,10 @@ case "${1:-status}" in
             [[ $(readlink "$link") == "$prefix/bin/wyss-console" ]] ||
                 die "lanzador ocupado: $link"
         fi
+        if [[ -e "$panel" || -L "$panel" ]]; then
+            [[ $(readlink "$panel") == "$prefix/bin/wyss-panel" ]] ||
+                die "lanzador ocupado: $panel"
+        fi
         for bin in "${bins[@]}"; do
             [[ -x "$build/$bin" ]] || die "falta $build/$bin"
         done
@@ -45,7 +50,14 @@ case "${1:-status}" in
         for bin in "${bins[@]}"; do
             install -m 755 -- "$build/$bin" "$stage/bin/$bin"
         done
-        (cd -- "$stage/bin" && sha256sum "${bins[@]}") > "$stage/SHA256"
+        cat > "$stage/bin/wyss-panel" <<'PANEL'
+#!/bin/bash
+set -euo pipefail
+script=$(readlink -f -- "${BASH_SOURCE[0]}")
+exec "${script%/*}/wyss-console" panel "$@"
+PANEL
+        chmod 755 -- "$stage/bin/wyss-panel"
+        (cd -- "$stage/bin" && sha256sum "${bins[@]}" wyss-panel) > "$stage/SHA256"
         touch -- "$stage/.wyss-native-install"
         if owned "$prefix"; then
             if owned "$previous"; then rm -rf -- "$previous"; fi
@@ -79,6 +91,7 @@ StartupWMClass=dev.wyss.Console
 X-Wyss-Native=true
 DESKTOP
         ln -sfn -- "$prefix/bin/wyss-console" "$link"
+        ln -sfn -- "$prefix/bin/wyss-panel" "$panel"
         printf 'Instalado en %s\n' "$prefix"
         ;;
     rollback)
@@ -94,6 +107,13 @@ DESKTOP
         fi
         mv -- "$stage/current" "$previous"
         rmdir -- "$stage"
+        if [[ -x "$prefix/bin/wyss-panel" ]]; then
+            if [[ ! -e "$panel" && ! -L "$panel" ]]; then
+                ln -s -- "$prefix/bin/wyss-panel" "$panel"
+            fi
+        elif [[ -L "$panel" && $(readlink "$panel") == "$prefix/bin/wyss-panel" ]]; then
+            rm -- "$panel"
+        fi
         printf 'Versión anterior restaurada en %s\n' "$prefix"
         ;;
     uninstall)
@@ -104,6 +124,9 @@ DESKTOP
         fi
         if [[ -L "$link" && $(readlink "$link") == "$prefix/bin/wyss-console" ]]; then
             rm -- "$link"
+        fi
+        if [[ -L "$panel" && $(readlink "$panel") == "$prefix/bin/wyss-panel" ]]; then
+            rm -- "$panel"
         fi
         for slot in "$prefix" "$previous"; do
             if owned "$slot"; then rm -rf -- "$slot"; fi

@@ -8,6 +8,7 @@ pub mod distributors;
 pub mod host;
 pub mod launch;
 pub mod native;
+pub mod project;
 pub mod screen;
 pub mod settings;
 pub mod terminal;

@@ -101,24 +101,15 @@ pub enum Git {
 /// Looks for `.git` from `dir` upwards and reads its `HEAD`. `.git` may be a folder or a file
 /// (`gitdir: <path>`, worktrees and submodules).
 pub fn git_state(dir: &Path) -> Git {
-    for d in dir.ancestors() {
-        let dot = d.join(".git");
-        let git_dir = if dot.is_dir() {
-            dot
-        } else if dot.is_file() {
-            let Ok(text) = fs::read_to_string(&dot) else { continue };
-            let Some(rel) = text.trim().strip_prefix("gitdir:") else { continue };
-            let p = PathBuf::from(rel.trim());
-            if p.is_absolute() { p } else { d.join(p) }
-        } else {
-            continue;
-        };
-        let Ok(head) = fs::read_to_string(git_dir.join("HEAD")) else { return Git::NoRepo };
-        let head = head.trim();
-        return match head.strip_prefix("ref: ") {
-            Some(r) => Git::Branch(r.strip_prefix("refs/heads/").unwrap_or(r).to_owned()),
-            None => Git::Detached(head.chars().take(7).collect()),
-        };
+    use wyss_console::project::{self, Branch};
+    for root in dir.ancestors() {
+        if root.join(".git").symlink_metadata().is_ok_and(|meta| meta.is_dir() || meta.is_file()) {
+            return match project::head_ref(root) {
+                Some(Branch::Named(name)) => Git::Branch(name),
+                Some(Branch::Detached(sha)) => Git::Detached(sha.chars().take(7).collect()),
+                None => Git::NoRepo,
+            };
+        }
     }
     Git::NoRepo
 }
@@ -200,12 +191,13 @@ mod tests {
     fn cwd_follows_the_process() {
         let here = std::env::current_dir().unwrap().canonicalize().unwrap();
         assert_eq!(cwd(me()).unwrap().canonicalize().unwrap(), here);
-        let child = Command::new("sleep").arg("30").current_dir("/tmp").spawn();
+        let scratch = std::env::temp_dir().canonicalize().unwrap();
+        let child = Command::new("sleep").arg("30").current_dir(&scratch).spawn();
         let mut child = child.unwrap();
         let got = cwd(child.id() as i32);
         let _ = child.kill();
         let _ = child.wait();
-        assert_eq!(got, Some(PathBuf::from("/tmp")));
+        assert_eq!(got, Some(scratch));
     }
 
     fn scratch(name: &str) -> PathBuf {

@@ -195,10 +195,17 @@ pub struct SavedTab {
     pub focus: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SavedPanel {
+    pub open: bool,
+    pub width: Option<i32>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedLayout {
     pub tabs: Vec<SavedTab>,
     pub active: usize,
+    pub project: SavedPanel,
 }
 
 fn node_json(n: &Node) -> Value {
@@ -218,6 +225,7 @@ pub fn to_json(l: &SavedLayout) -> Value {
     json!({
         "version": LAYOUT_VERSION,
         "active": l.active,
+        "project": {"open": l.project.open, "width": l.project.width},
         "tabs": l.tabs.iter().map(|t| json!({"n": t.n, "focus": t.focus, "root": node_json(&t.root)})).collect::<Vec<_>>(),
     })
 }
@@ -267,7 +275,12 @@ pub fn read_layout(v: &Value) -> Option<SavedLayout> {
         tabs.push(SavedTab { n: t["n"].as_u64().filter(|n| *n > 0).unwrap_or(i as u64 + 1), root, focus });
     }
     let active = v["active"].as_u64().map(|a| a as usize).filter(|a| *a < tabs.len()).unwrap_or(0);
-    Some(SavedLayout { tabs, active })
+    let panel = &v["project"];
+    let project = SavedPanel {
+        open: panel["open"].as_bool().unwrap_or(false),
+        width: panel["width"].as_i64().and_then(|n| i32::try_from(n).ok()).filter(|n| *n >= 280),
+    };
+    Some(SavedLayout { tabs, active, project })
 }
 
 /// What opening the window shows: the saved layout without the terminals that are gone, plus a
@@ -303,7 +316,7 @@ pub fn restore(saved: Option<&SavedLayout>, alive: &[String]) -> (SavedLayout, u
         next_n += 1;
     }
     let active = active_id.unwrap_or(0).min(tabs.len().saturating_sub(1));
-    (SavedLayout { tabs, active }, next_n)
+    (SavedLayout { tabs, active, project: saved.map(|s| s.project).unwrap_or_default() }, next_n)
 }
 
 /// Layout file in the `gtk-term` state directory under `$XDG_STATE_HOME` (default `~/.local/state`).
@@ -446,6 +459,7 @@ mod tests {
         SavedLayout {
             tabs: vec![SavedTab { n: 1, root: resize(&three(), "", 0.3), focus: "b".into() }, SavedTab { n: 4, root: leaf("d"), focus: "d".into() }],
             active: 1,
+            project: SavedPanel { open: true, width: Some(390) },
         }
     }
 
@@ -453,6 +467,14 @@ mod tests {
     fn a_layout_survives_writing_and_reading() {
         let l = saved();
         assert_eq!(read_layout(&to_json(&l)), Some(l));
+    }
+
+    #[test]
+    fn old_layouts_open_with_the_project_panel_closed() {
+        let mut old = to_json(&saved());
+        old.as_object_mut().unwrap().remove("project");
+        assert_eq!(read_layout(&old).unwrap().project, SavedPanel::default());
+        assert_eq!(restore(Some(&saved()), &[]).0.project, saved().project);
     }
 
     #[test]

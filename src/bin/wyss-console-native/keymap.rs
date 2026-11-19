@@ -21,6 +21,7 @@ pub enum Action {
     ClosePane,
     /// Search the scrollback of the focused pane.
     Search,
+    Project,
     Focus(Focus),
     Tab(i32),
     /// Go to the n-th tab (1 to 9).
@@ -36,6 +37,7 @@ pub fn action(code: u32, ctrl: bool, shift: bool, alt: bool, meta: bool) -> Opti
         40 => Action::Split(Dir::Row),             // D
         26 => Action::Split(Dir::Col),             // E
         25 => Action::ClosePane,                   // W
+        33 => Action::Project,                     // P
         41 => Action::Search,                      // F
         113 => Action::Focus(Focus::Way(Way::Left)),
         114 => Action::Focus(Focus::Way(Way::Right)),
@@ -56,12 +58,13 @@ pub fn from_gtk(code: u32, mods: gtk::gdk::ModifierType) -> Option<Action> {
 }
 
 /// What each chord does, for the legend and the tooltips.
-pub const LEGEND: [(&str, &str); 12] = [
+pub const LEGEND: [(&str, &str); 13] = [
     ("Ctrl+Shift+T", t!("New terminal in a new tab")),
     ("Ctrl+Shift+D", t!("Split the pane side by side")),
     ("Ctrl+Shift+E", t!("Split the pane, one above the other")),
     ("Ctrl+Shift+W", t!("Close the pane")),
     ("Ctrl+Shift+F", t!("Search the pane’s scrollback")),
+    ("Ctrl+Shift+P", t!("Show or hide the project panel")),
     ("Ctrl+Shift+Arrows", t!("Move to the pane in that direction")),
     ("Ctrl+Shift+. and ,", t!("Next and previous pane")),
     ("Ctrl+Shift+PageDown, PageUp", t!("Next and previous tab")),
@@ -85,6 +88,7 @@ mod tests {
         assert_eq!(chord(40), Some(Action::Split(Dir::Row)));
         assert_eq!(chord(26), Some(Action::Split(Dir::Col)));
         assert_eq!(chord(25), Some(Action::ClosePane));
+        assert_eq!(chord(33), Some(Action::Project));
         assert_eq!(chord(41), Some(Action::Search), "Ctrl+Shift+F");
         assert_eq!(chord(113), Some(Action::Focus(Focus::Way(Way::Left))));
         assert_eq!(chord(114), Some(Action::Focus(Focus::Way(Way::Right))));
@@ -133,7 +137,7 @@ mod tests {
     #[test]
     fn the_legend_lists_every_leader_action() {
         let keys: Vec<&str> = LEGEND.iter().map(|(k, _)| *k).collect();
-        for k in ["Ctrl+Shift+T", "Ctrl+Shift+D", "Ctrl+Shift+E", "Ctrl+Shift+W", "Ctrl+Shift+F", "Ctrl+C", "Ctrl+Shift+C"] {
+        for k in ["Ctrl+Shift+T", "Ctrl+Shift+D", "Ctrl+Shift+E", "Ctrl+Shift+W", "Ctrl+Shift+F", "Ctrl+Shift+P", "Ctrl+C", "Ctrl+Shift+C"] {
             assert!(keys.contains(&k), "{k}");
         }
     }

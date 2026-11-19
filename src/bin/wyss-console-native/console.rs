@@ -15,6 +15,7 @@ use crate::icons::{self, Icon};
 use crate::keymap::{self, Action, Focus};
 use crate::layout::{self, Dir, Node, SavedLayout, SavedTab};
 use crate::procinfo::{self, Git};
+use crate::project_panel::{self, Panel};
 use crate::term;
 use crate::{launches, native, search, settings, t, theme};
 use wyss_console::settings::{Preferences, SettingsService};
@@ -39,7 +40,7 @@ struct Info {
     shell: String,
     pid: Option<i32>,
     rss: Option<u64>,
-    cwd: Option<String>,
+    cwd: Option<std::path::PathBuf>,
     git: Option<Git>,
 }
 
@@ -113,6 +114,7 @@ struct Res {
 struct Ui {
     win: gtk::ApplicationWindow,
     stack: gtk::Stack,
+    project: Rc<Panel>,
     tab_strip: gtk::Box,
     folder: gtk::Label,
     git: gtk::Label,
@@ -740,6 +742,7 @@ impl Ui {
         let i = self.active.get();
         match a {
             Action::NewTab => self.new_tab(),
+            Action::Project => self.toggle_project(),
             Action::Search => {
                 let focus = self.tabs.borrow().get(i).map(|t| t.focus.clone());
                 if let Some(k) = focus {
@@ -781,14 +784,35 @@ impl Ui {
         }
     }
 
+    fn focused(&self) -> Option<Rc<Pane>> {
+        self.tabs.borrow().get(self.active.get()).and_then(|t| self.pane(&t.focus))
+    }
+
+    fn focus_terminal(&self) {
+        if let Some(pane) = self.focused() {
+            pane.term.widget.grab_focus();
+        }
+    }
+
+    fn toggle_project(self: &Rc<Self>) {
+        let open = !self.project.is_open();
+        self.project.set_open(open, open);
+        if !open { self.focus_terminal(); }
+        self.save_soon();
+    }
+
     // ---- status bar and /proc -------------------------------------------------------------
 
     fn update_status(&self) {
-        let focus = self.tabs.borrow().get(self.active.get()).map(|t| t.focus.clone());
-        let focus_key = focus.clone();
-        let info = focus.and_then(|k| self.pane(&k)).map(|p| p.info.borrow().clone());
+        let pane = self.focused();
+        let info = pane.as_ref().map(|p| p.info.borrow().clone());
+        let tag = pane.as_ref().and_then(|p| p.native.borrow().clone());
+        let agent = pane.as_ref().is_some_and(|p| p.life.get() == Some(native::Lifecycle::Running))
+            && tag.as_ref().is_some_and(|t| matches!(t.agent_name.as_str(), "Claude Code" | "Codex"));
+        self.project.follow(pane.map(|p| p.key.clone()), info.as_ref().and_then(|i| i.cwd.clone()), agent);
         match info {
             Some(Info { known: true, cwd: Some(cwd), git, .. }) => {
+                let cwd = cwd.to_string_lossy();
                 self.folder.set_text(&procinfo::home_short(&cwd, self.home.as_deref()));
                 self.folder.set_tooltip_text(Some(&cwd));
                 self.git.set_text(&match git {
@@ -802,7 +826,6 @@ impl Ui {
                 self.git.set_text("");
             }
         }
-        let tag = focus_key.and_then(|k| self.pane(&k)).and_then(|p| p.native.borrow().clone());
         self.kind.set_text(&tag.map(|t| native::agent_label(&t)).unwrap_or_else(|| tr("Terminal")));
     }
 
@@ -1201,7 +1224,7 @@ impl Ui {
 
     fn snapshot(&self) -> SavedLayout {
         let tabs = self.tabs.borrow();
-        SavedLayout { tabs: tabs.iter().map(|t| SavedTab { n: t.n, root: t.tree.clone(), focus: t.focus.clone() }).collect(), active: self.active.get() }
+        SavedLayout { tabs: tabs.iter().map(|t| SavedTab { n: t.n, root: t.tree.clone(), focus: t.focus.clone() }).collect(), active: self.active.get(), project: self.project.snapshot() }
     }
 
     fn save_now(&self) {
@@ -1259,7 +1282,7 @@ fn probe(host: Option<&Host>, j: Job) -> Res {
                 info.rss = Some(rss);
                 if let Some(cwd) = procinfo::cwd(pid) {
                     info.git = Some(procinfo::git_state(&cwd));
-                    info.cwd = Some(cwd.to_string_lossy().into_owned());
+                    info.cwd = Some(cwd);
                 }
             }
             None => info.running = false,
@@ -1323,7 +1346,7 @@ fn apply_theme(provider: &gtk::CssProvider, next: theme::Theme) {
     if let Some(settings) = gtk::Settings::default() {
         settings.set_gtk_application_prefer_dark_theme(theme::prefers_dark(next));
     }
-    provider.load_from_string(&format!("{}{THEME}{}{}{}{}{}", theme::defines(next), crate::workspace::CSS, crate::distributors::CSS, crate::arsenal::CSS, crate::credentials::CSS, settings::CSS));
+    provider.load_from_string(&format!("{}{THEME}{}{}{}{}{}{}", theme::defines(next), crate::workspace::CSS, crate::distributors::CSS, crate::arsenal::CSS, crate::credentials::CSS, settings::CSS, project_panel::CSS));
 }
 
 pub fn build(
@@ -1364,8 +1387,10 @@ pub fn build(
     tools.add_css_class("tools");
     let split_row = tool_button(Icon::SplitRow, &tr("Split side by side (Ctrl+Shift+D)"));
     let split_col = tool_button(Icon::SplitCol, &tr("Split, one above the other (Ctrl+Shift+E)"));
+    let project_btn = tool_button(Icon::Folder, &tr("Project (Ctrl+Shift+P)"));
+    project_btn.update_property(&[gtk::accessible::Property::Label(&tr("Project"))]);
     let keys = tool_button(Icon::Keyboard, &tr("Keyboard shortcuts"));
-    for b in [&split_row, &split_col, &keys] {
+    for b in [&split_row, &split_col, &project_btn, &keys] {
         tools.append(b);
     }
     let launch_btn = gtk::Button::with_label(&format!("+ {}", tr("Launch")));
@@ -1422,7 +1447,9 @@ pub fn build(
     main.set_hexpand(true);
     main.append(&tabbar);
     main.append(&banner);
-    main.append(&stack);
+    let project = Panel::new(&stack);
+    project.paned.set_vexpand(true);
+    main.append(&project.paned);
     main.append(&status);
     let outer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     outer.append(&rail);
@@ -1440,6 +1467,7 @@ pub fn build(
     let ui = Rc::new(Ui {
         win: win.clone(),
         stack,
+        project,
         tab_strip,
         folder,
         git,
@@ -1463,6 +1491,30 @@ pub fn build(
         terminal_preferences: Cell::new(preferences.terminal),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
+
+    {
+        let weak = Rc::downgrade(&ui);
+        project_btn.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() { ui.toggle_project(); }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&ui);
+        ui.project.on_ask(move || {
+            if let Some(ui) = weak.upgrade()
+                && ui.project.can_ask()
+                && let Some(pane) = ui.focused()
+            {
+                pane.term.type_text(&tr(project_panel::REQUEST));
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&ui);
+        ui.project.paned.connect_position_notify(move |_| {
+            if let Some(ui) = weak.upgrade() { ui.save_soon(); }
+        });
+    }
 
     {
         let ui = ui.clone();
@@ -1703,7 +1755,7 @@ pub fn build(
     });
 
     // Restore from the host: the terminals still alive, in the saved layout.
-    let mut plan = SavedLayout { tabs: Vec::new(), active: 0 };
+    let mut plan = SavedLayout { tabs: Vec::new(), active: 0, project: Default::default() };
     let mut attach: HashMap<String, term::Attach> = HashMap::new();
     let mut tags: HashMap<String, native::Tag> = HashMap::new();
     if let Some(h) = &cfg.host {
@@ -1726,6 +1778,7 @@ pub fn build(
             Err(e) => eprintln!("wyss-console: term_list failed: {e}"),
         }
     }
+    ui.project.restore(plan.project);
     for t in &plan.tabs {
         for k in layout::leaves(&t.root) {
             if let (Some(h), Some(a)) = (&cfg.host, attach.remove(&k)) {
@@ -1759,6 +1812,10 @@ pub fn build(
             }
             if key == gdk::Key::Escape && ui.launch_panel.is_visible() {
                 ui.hide_launches();
+                return glib::Propagation::Stop;
+            }
+            if key == gdk::Key::Escape && ui.project.contains_focus(&ui.win) {
+                ui.focus_terminal();
                 return glib::Propagation::Stop;
             }
             match keymap::from_gtk(code, mods) {

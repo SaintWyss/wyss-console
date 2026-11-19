@@ -733,6 +733,14 @@ impl Terminal {
         Terminal { widget: area, local_pid, state }
     }
 
+    pub fn type_text(&self, text: &str) {
+        // This entry point neither submits input nor accepts terminal control sequences.
+        if !text.chars().any(char::is_control) {
+            self.state.write(text.as_bytes());
+            self.widget.grab_focus();
+        }
+    }
+
     pub fn apply_preferences(&self, preferences: wyss_console::settings::Terminal, theme_changed: bool) {
         let state = &self.state;
         let previous = state.preferences.replace(preferences);

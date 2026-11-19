@@ -1,0 +1,14 @@
+.console .project-panel { background-color: @surface; color: @text; padding: 8px 22px 22px; }
+.console .project-title { font-size: 20px; font-weight: 600; }
+.console .project-branch { font-family: monospace; font-weight: 700; }
+.console .project-panel .lbl { color: @text; font-weight: 600; }
+.console .project-panel .hint { color: @muted; }
+.console .project-panel .mono { font-family: monospace; }
+.console .project-panel .ok { color: @ok; }
+.console .project-panel .warn { color: @warn; }
+.console .project-panel .error { color: @error; }
+.console .project-section { border-top: 1px solid @line; }
+.console .project-section > title { padding: 9px 0; }
+.console .project-section > title:focus-visible { outline: 2px solid @accent; outline-offset: -2px; }
+.console .project-row { padding: 5px 0; border-bottom: 1px solid @line; }
+.console .project-line { padding: 4px 0; }

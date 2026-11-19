@@ -91,6 +91,7 @@ fn list_item(line: &str) -> Option<&str> {
     after.starts_with(char::is_whitespace).then_some(after)
 }
 
+#[cfg(test)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Part {
     pub title: String,
@@ -98,6 +99,7 @@ pub struct Part {
     pub parts: Vec<Part>,
 }
 
+#[cfg(test)]
 pub fn outline(blocks: Vec<Block>) -> Part {
     let mut counts = [0; 7];
     let mut first = None;

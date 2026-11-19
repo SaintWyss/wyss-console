@@ -18,6 +18,7 @@ mod palette;
 mod personalization;
 mod prefs;
 mod procinfo;
+mod project_panel;
 mod pty;
 mod search;
 mod selection;
@@ -33,6 +34,22 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 
 fn main() -> glib::ExitCode {
+    let mut args = std::env::args();
+    args.next();
+    if args.next().as_deref() == Some("panel") {
+        use std::io::{stdin, stdout};
+        let result = std::env::current_dir().and_then(|cwd| {
+            let args: Vec<_> = args.collect();
+            wyss_console::project::command(&cwd, &args, &mut stdin().lock(), &mut stdout().lock())
+        });
+        return match result {
+            Ok(()) => glib::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("wyss-panel: {error}");
+                glib::ExitCode::FAILURE
+            }
+        };
+    }
     let tabs: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(1).max(1);
     let service = SettingsService::from_environment();
     let snapshot = settings::Snapshot::load(&service);
