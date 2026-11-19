@@ -344,6 +344,47 @@ fn prepare_paste(text: &str, read_bracketed: impl FnOnce() -> bool) -> (bool, Ve
     (paste_needs_confirmation(text, bracketed), paste_bytes(text, bracketed))
 }
 
+/// What Ctrl+V does with the clipboard: text pastes as text; an image has no text form, so the
+/// terminal forwards Ctrl+V (0x16) and the program in front (Claude Code, Codex) reads the image
+/// itself, as it does under Warp.
+#[derive(Debug, PartialEq, Eq)]
+enum ClipboardPaste {
+    Text,
+    ForwardImage,
+    Nothing,
+}
+
+fn clipboard_paste(has_text: bool, has_image: bool) -> ClipboardPaste {
+    match (has_text, has_image) {
+        (true, _) => ClipboardPaste::Text,
+        (false, true) => ClipboardPaste::ForwardImage,
+        (false, false) => ClipboardPaste::Nothing,
+    }
+}
+
+fn paste_clipboard(state: &Rc<State>, area: &gtk::Widget) {
+    let clipboard = area.clipboard();
+    let formats = clipboard.formats();
+    let has_text = formats.contains_type(String::static_type());
+    let has_image = formats.contains_type(gtk::gdk::Texture::static_type())
+        || ["image/png", "image/jpeg", "image/bmp", "image/webp"].iter().any(|m| formats.contain_mime_type(m));
+    match clipboard_paste(has_text, has_image) {
+        ClipboardPaste::Text => {
+            let state = state.clone();
+            let area_w = area.downgrade();
+            clipboard.read_text_async(None::<&gtk::gio::Cancellable>, move |r| {
+                if let Ok(Some(t)) = r
+                    && let Some(w) = area_w.upgrade()
+                {
+                    paste_or_confirm(&state, &w, t.to_string());
+                }
+            });
+        }
+        ClipboardPaste::ForwardImage => state.write(b"\x16"),
+        ClipboardPaste::Nothing => {}
+    }
+}
+
 /// Pastes `text`, holding the same DEC 2004 snapshot through the confirmation and send.
 fn paste_or_confirm(state: &Rc<State>, widget: &gtk::Widget, text: String) {
     let (confirm, bytes) = prepare_paste(&text, || state.shared.lock().bracketed_paste());
@@ -657,7 +698,9 @@ impl Terminal {
                     return;
                 }
                 if let (Some(text), Some(w)) = (state.selected_text(), g.widget()) {
+                    // Like Warp, selecting also copies: Ctrl+V pastes the last thing selected or copied.
                     w.display().primary_clipboard().set_text(&text);
+                    w.clipboard().set_text(&text);
                 }
             });
         }
@@ -707,15 +750,7 @@ impl Terminal {
                 gtk::ShortcutTrigger::parse_string(trigger),
                 Some(gtk::CallbackAction::new(move |_, _| {
                     if let Some(a) = area_w.upgrade() {
-                        let state = state.clone();
-                        let area_w = a.downgrade();
-                        a.clipboard().read_text_async(None::<&gtk::gio::Cancellable>, move |r| {
-                            if let Ok(Some(t)) = r
-                                && let Some(w) = area_w.upgrade()
-                            {
-                                paste_or_confirm(&state, w.upcast_ref(), t.to_string());
-                            }
-                        });
+                        paste_clipboard(&state, a.upcast_ref());
                     }
                     glib::Propagation::Stop
                 })),
@@ -1151,6 +1186,14 @@ mod tests {
             assert_eq!(retry_read_error(&busy, failures), retry_read_error(&transport, failures));
             assert_eq!(retry_read_error(&closed, failures), None);
         }
+    }
+
+    #[test]
+    fn ctrl_v_pastes_text_or_forwards_an_image() {
+        assert_eq!(clipboard_paste(true, false), ClipboardPaste::Text);
+        assert_eq!(clipboard_paste(true, true), ClipboardPaste::Text, "text wins when both are there");
+        assert_eq!(clipboard_paste(false, true), ClipboardPaste::ForwardImage);
+        assert_eq!(clipboard_paste(false, false), ClipboardPaste::Nothing);
     }
 
     #[test]
