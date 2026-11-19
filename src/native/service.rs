@@ -1148,6 +1148,7 @@ impl NativeService {
             skip_all(&mut skills_skipped, launch, "token_missing");
         }
         if let (Some(spec), Some(launch)) = (&plan.home, request.arsenal.as_ref()) {
+            'claude_home: {
             let token =
                 launch_home::token().ok_or_else(|| NativeError::new("arsenal_token_missing"))?;
             let owner_home = std::env::var_os("HOME")
@@ -1157,8 +1158,17 @@ impl NativeService {
             let owner = launch_home::Owner::from_home(&owner_home);
             let ready = read_copies(launch, &mut skills_skipped);
             let (built, unwritten) =
-                launch_home::build_with_skills(&owner, &home_dir, spec, &ready)
-                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+                match launch_home::build_with_skills(&owner, &home_dir, spec, &ready) {
+                    Ok(built) => built,
+                    // A folder only for the copies that cannot be built: the agent starts as the
+                    // owner's own, and the copies are reported.
+                    Err(_) if home_only_for_copies(launch, request.agent_id) => {
+                        skills_skipped.clear();
+                        skip_all(&mut skills_skipped, launch, "write_failed");
+                        break 'claude_home;
+                    }
+                    Err(_) => return Err(NativeError::new("arsenal_home_failed")),
+                };
             skills_skipped.extend(unwritten);
             if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
                 &launch.launch_instructions
@@ -1178,11 +1188,13 @@ impl NativeService {
             if !spec.memory {
                 home_env.push(("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_owned(), "1".to_owned()));
             }
+            }
         }
         // Codex: its own folder too, with the real `HOME` and no token. The sign-in is the owner's
         // own, through the home's link to it. A home that cannot be built stops the start: the
         // session never runs with the hooks the preset left out.
         if let (Some(spec), Some(launch)) = (&plan.codex_home, request.arsenal.as_ref()) {
+            'codex_home: {
             let owner_home = std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .ok_or_else(|| NativeError::new("store_unavailable"))?;
@@ -1195,8 +1207,15 @@ impl NativeService {
             let owner = launch_home_codex::CodexOwner::from_process(&owner_home);
             let ready = read_copies(launch, &mut skills_skipped);
             let (built, unwritten) =
-                launch_home_codex::build_with_skills(&owner, &home_dir, spec, &ready)
-                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+                match launch_home_codex::build_with_skills(&owner, &home_dir, spec, &ready) {
+                    Ok(built) => built,
+                    Err(_) if home_only_for_copies(launch, request.agent_id) => {
+                        skills_skipped.clear();
+                        skip_all(&mut skills_skipped, launch, "write_failed");
+                        break 'codex_home;
+                    }
+                    Err(_) => return Err(NativeError::new("arsenal_home_failed")),
+                };
             skills_skipped.extend(unwritten);
             if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
                 &launch.launch_instructions
@@ -1212,6 +1231,7 @@ impl NativeService {
             let built_dir = built.to_string_lossy().into_owned();
             home_env.push(("CODEX_HOME".to_owned(), built_dir.clone()));
             home_pin = Some(("CODEX_HOME", built_dir));
+            }
         }
         if let Some(brief) = &request.brief {
             if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {

@@ -94,7 +94,8 @@
     "Not installed for this provider: revision {revision} is copied to this session from Arsenal.": "No está instalada para este proveedor: la revisión {revision} se copia a esta sesión desde Arsenal.",
     "Installed as a link, so its content cannot be compared: this session gets revision {revision} from Arsenal. Your installed copy is not changed.": "Está instalada como enlace, por eso no se puede comparar su contenido: esta sesión usa la revisión {revision} desde Arsenal. Tu copia instalada no cambia.",
     "The installed copy differs from revision {revision}: this session gets that revision from Arsenal. Your installed copy is not changed.": "La copia instalada no coincide con la revisión {revision}: esta sesión usa esa revisión desde Arsenal. Tu copia instalada no cambia.",
-    "{count} stored skill(s) copied to this session from Arsenal: {names}.": "Skills guardadas que se copian a esta sesión desde Arsenal ({count}): {names}."
+    "{count} stored skill(s) copied to this session from Arsenal: {names}.": "Skills guardadas que se copian a esta sesión desde Arsenal ({count}): {names}.",
+    "your own environment, with the skills copied from Arsenal": "tu propio entorno, con las skills copiadas desde Arsenal"
   },
   "sentences": {
     "(Syncthing carries it)": "(Syncthing lo transporta)",

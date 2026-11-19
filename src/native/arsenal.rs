@@ -304,7 +304,7 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             if plan.not_applicable.is_empty()
                 && let Some(spec) = codex_home
             {
-                plan.applied.push(codex_home_summary(spec));
+                plan.applied.push(codex_home_summary(spec, copies));
                 plan.codex_home = Some(spec.clone());
                 copies_summary(plan, launch);
             }
@@ -358,7 +358,7 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
         launch.skills_off.len()
     ));
     if let Some(home) = home {
-        plan.applied.push(home_summary(home));
+        plan.applied.push(home_summary(home, copies));
         plan.home = Some(home.clone());
         copies_summary(plan, launch);
     }
@@ -382,7 +382,7 @@ fn copies_summary(plan: &mut LaunchPlan, launch: &ArsenalLaunch) {
     }
 }
 
-fn home_summary(home: &super::launch_home::HomeSpec) -> String {
+fn home_summary(home: &super::launch_home::HomeSpec, copies: bool) -> String {
     let mut parts = Vec::new();
     if !home.instructions {
         parts.push("without CLAUDE.md and rules".to_owned());
@@ -410,20 +410,29 @@ fn home_summary(home: &super::launch_home::HomeSpec) -> String {
             home.account_skills_off.len()
         ));
     }
+    if parts.is_empty() && copies {
+        parts.push(SAME_ENVIRONMENT.to_owned());
+    }
     format!(
         "Own launch folder, signed in with the stored long-lived token: {}.",
         parts.join(", ")
     )
 }
 
+/// A launch folder that changes nothing of the environment: it is there for the copied skills.
+const SAME_ENVIRONMENT: &str = "your own environment, with the skills copied from Arsenal";
+
 /// What a Codex launch home changes, in one line the owner reads before starting.
-fn codex_home_summary(home: &super::launch_home_codex::CodexHomeSpec) -> String {
+fn codex_home_summary(home: &super::launch_home_codex::CodexHomeSpec, copies: bool) -> String {
     let mut parts = Vec::new();
     if !home.instructions {
         parts.push("without AGENTS.md".to_owned());
     }
     if !home.hooks_off.is_empty() {
         parts.push(format!("{} hook(s) left out", home.hooks_off.len()));
+    }
+    if parts.is_empty() && copies {
+        parts.push(SAME_ENVIRONMENT.to_owned());
     }
     format!(
         "Own Codex folder, signed in with your own Codex sign-in: {}. Codex asks to trust the hooks the first time in each new folder.",

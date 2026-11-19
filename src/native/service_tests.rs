@@ -1955,3 +1955,130 @@ fn a_codex_preset_copies_its_stored_skills_into_its_codex_home() {
         "a copy reached the owner's folder"
     );
 }
+
+/// A Claude agent that prints the folder it runs with.
+fn claude_printing_its_folder(world: &World) {
+    let version = super::capabilities::ARSENAL_TEST_VERSION;
+    script(
+        &world.bin.join("claude"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{version}'; exit 0; }}\n\
+             echo \"CFG=[$CLAUDE_CONFIG_DIR]\"; echo CLAUDE-READY; exec cat"
+        ),
+    );
+}
+
+#[test]
+fn without_a_stored_token_a_preset_with_copies_starts_as_the_owner_and_says_why() {
+    let (world, _env, _ring) = claude_home_world();
+    // The key ring holds no token.
+    script(&world.base.join("fake-ring/secret-tool"), "exit 1");
+    claude_printing_its_folder(&world);
+    let launch = super::arsenal::ArsenalLaunch {
+        materialize: stored_skills(
+            "claude_code",
+            &[("tutor", files(&[("SKILL.md", b"tutor without token")]))],
+            None,
+        ),
+        ..arsenal_launch(&[])
+    };
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, None, Some(&launch))
+        .unwrap();
+    assert!(
+        preview
+            .applied
+            .iter()
+            .any(|line| line.ends_with("your own environment, with the skills copied from Arsenal.")),
+        "{:?}",
+        preview.applied
+    );
+    let reply = arsenal_start(
+        &world,
+        Some(launch),
+        preview.plan_token,
+        super::capabilities::ARSENAL_TEST_VERSION,
+    )
+    .unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "CLAUDE-READY");
+    assert!(out.contains("CFG=[]"), "{out:?}");
+    assert_eq!(
+        reply.skills_skipped,
+        vec![super::arsenal::SkippedSkill {
+            name: "tutor".into(),
+            reason: "token_missing".into()
+        }]
+    );
+}
+
+#[test]
+fn a_codex_preset_with_copies_whose_folder_cannot_be_built_starts_as_the_owner_and_says_why() {
+    let world = World::new();
+    script(
+        &world.bin.join("codex"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{CODEX_VERSION}'; exit 0; }}\n\
+             echo \"CODEXHOME=[$CODEX_HOME]\"; echo CODEX-READY; exec cat"
+        ),
+    );
+    // The owner has no `~/.codex`, so no folder of the session's own can be built.
+    let owner_home = world.home.parent().unwrap().join("owner-home");
+    fs::create_dir_all(&owner_home).unwrap();
+    let _env = FakeOwnerEnv::new(&owner_home);
+    let launch = super::arsenal::ArsenalLaunch {
+        materialize: stored_skills(
+            "codex",
+            &[("tutor", files(&[("SKILL.md", b"tutor without folder")]))],
+            None,
+        ),
+        ..arsenal_launch(&[])
+    };
+    let reply = start_in(&world, AgentId::Codex, &world.home, &launch).unwrap();
+    let out = world.output_until(&reply.terminal.terminal_id, "CODEX-READY");
+    assert!(out.contains("CODEXHOME=[]"), "{out:?}");
+    assert_eq!(
+        reply.skills_skipped,
+        vec![super::arsenal::SkippedSkill {
+            name: "tutor".into(),
+            reason: "write_failed".into()
+        }]
+    );
+}
+
+#[test]
+fn a_codex_preset_without_copies_any_more_gets_the_link_to_the_owner_skills_back() {
+    let world = World::new();
+    script(
+        &world.bin.join("codex"),
+        &format!(
+            "[ \"$1\" = \"--version\" ] && {{ echo '{CODEX_VERSION}'; exit 0; }}\n\
+             echo CODEX-READY; exec cat"
+        ),
+    );
+    let owner_home = world.home.parent().unwrap().join("owner-home");
+    let owner = owner_home.join(".codex");
+    fs::create_dir_all(owner.join("skills/design")).unwrap();
+    fs::write(owner.join("config.toml"), "model = \"x\"\n").unwrap();
+    let _env = FakeOwnerEnv::new(&owner_home);
+    let launch = super::arsenal::ArsenalLaunch {
+        materialize: stored_skills(
+            "codex",
+            &[("tutor", files(&[("SKILL.md", b"codex tutor again")]))],
+            None,
+        ),
+        ..arsenal_launch(&[])
+    };
+    let reply = start_in(&world, AgentId::Codex, &world.home, &launch).unwrap();
+    world.output_until(&reply.terminal.terminal_id, "CODEX-READY");
+    let skills = world
+        .base
+        .join("launch-homes/codex")
+        .join(&launch.selection)
+        .join("skills");
+    assert!(skills.join("tutor/SKILL.md").is_file());
+    let reply = start_in(&world, AgentId::Codex, &world.home, &codex_own_home()).unwrap();
+    world.output_until(&reply.terminal.terminal_id, "CODEX-READY");
+    assert_eq!(fs::read_link(&skills).unwrap(), owner.join("skills"));
+    assert!(!owner.join("skills/tutor").exists());
+}

@@ -644,6 +644,7 @@ pub const INCOMING_ES: &[(&str, &str)] = &[
     ("without AGENTS.md", "sin AGENTS.md"),
     ("without CLAUDE.md and rules", "sin CLAUDE.md ni archivos de reglas"),
     ("without your agents", "sin tus agentes"),
+    ("your own environment, with the skills copied from Arsenal", "tu propio entorno, con las skills copiadas desde Arsenal"),
     ("{count} account skill(s) off", "Skills de la cuenta desactivadas: {count}"),
     ("{count} hook(s) left out", "Hooks omitidos: {count}"),
     ("{count} kept skill(s) are switched off in your own {provider} configuration and stay off: {names}.", "Estas skills conservadas siguen desactivadas en tu configuración de {provider}: {names} ({count})."),
