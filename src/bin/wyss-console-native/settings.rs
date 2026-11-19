@@ -4,10 +4,10 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use crate::personalization::vertical;
+use crate::personalization::{horizontal, label, rail_item, scroll, vertical};
 
 use gtk::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 use wyss_console::settings::{
     AppearanceTheme, CursorStyle, FONT_SIZE, Language, Preferences, SettingsFailure,
     SettingsService, SettingsView, Storage,
@@ -16,6 +16,8 @@ use wyss_console::settings::{
 use crate::host::Host;
 use crate::i18n::{Lang, lang, tr, trf};
 use crate::{t, theme::Theme};
+
+pub const CSS: &str = include_str!("settings.css");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Landing {
@@ -283,62 +285,144 @@ fn failure_text(error: SettingsFailure) -> &'static str {
     }
 }
 
-fn label(text: &str, class: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.set_xalign(0.0);
-    label.set_wrap(true);
-    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    label.add_css_class(class);
-    label
+struct Category {
+    title: &'static str,
+    icon: &'static str,
+    description: &'static str,
 }
 
-fn card(grid: &gtk::Grid, column: i32, row: i32, title: &str) -> gtk::Box {
-    let card = vertical(10);
-    card.add_css_class("settings-card");
-    card.set_valign(gtk::Align::Start);
-    card.set_hexpand(true);
-    card.append(&label(&tr(title), "settings-card-title"));
-    grid.attach(&card, column, row, 1, 1);
-    card
+const CATEGORIES: [Category; 5] = [
+    Category {
+        title: t!("General"),
+        icon: "preferences-system-symbolic",
+        description: t!("How Wyss Console looks and behaves on this computer."),
+    },
+    Category {
+        title: t!("Appearance"),
+        icon: "preferences-desktop-appearance-symbolic",
+        description: t!("The interface theme. It does not change agent or provider permissions."),
+    },
+    Category {
+        title: t!("Terminal"),
+        icon: "utilities-terminal-symbolic",
+        description: t!("Applies to all terminals, open or new."),
+    },
+    Category {
+        title: t!("Sessions"),
+        icon: "view-list-tree-symbolic",
+        description: t!("What happens to your terminals when you close the window or log out."),
+    },
+    Category {
+        title: t!("About"),
+        icon: "help-about-symbolic",
+        description: t!("Version and platform."),
+    },
+];
+
+fn adjacent_category(index: usize, next: bool) -> usize {
+    let count = CATEGORIES.len();
+    (index + if next { 1 } else { count - 1 }) % count
 }
 
-fn fields(card: &gtk::Box) -> gtk::Grid {
-    let grid = gtk::Grid::builder()
-        .column_spacing(12)
-        .row_spacing(8)
-        .build();
-    card.append(&grid);
-    grid
+fn category_rail(pages: &gtk::Stack) -> gtk::Box {
+    let rail = vertical(2);
+    rail.add_css_class("personal-rail");
+    let buttons = CATEGORIES.each_ref().map(|category| {
+        let button = gtk::ToggleButton::new();
+        rail_item(&button, category.icon, category.title);
+        button.connect_toggled({
+            let pages = pages.downgrade();
+            move |button| {
+                if button.is_active()
+                    && let Some(pages) = pages.upgrade()
+                {
+                    pages.set_visible_child_name(category.title);
+                }
+            }
+        });
+        rail.append(&button);
+        button
+    });
+    let targets = buttons.each_ref().map(ObjectExt::downgrade);
+    for (index, button) in buttons.iter().enumerate() {
+        if index != 0 {
+            button.set_group(Some(&buttons[0]));
+        }
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed({
+            let targets = targets.clone();
+            move |_, key, _, _| {
+                let next = match key {
+                    gdk::Key::Up | gdk::Key::KP_Up => false,
+                    gdk::Key::Down | gdk::Key::KP_Down => true,
+                    _ => return glib::Propagation::Proceed,
+                };
+                if let Some(target) = targets[adjacent_category(index, next)].upgrade() {
+                    target.set_active(true);
+                    target.grab_focus();
+                }
+                glib::Propagation::Stop
+            }
+        });
+        button.add_controller(keys);
+    }
+    buttons[0].set_active(true);
+    rail
+}
+
+fn category_panel(pages: &gtk::Stack, category: &Category) -> gtk::Box {
+    let panel = vertical(0);
+    panel.add_css_class("settings-panel");
+    let heading = vertical(3);
+    heading.add_css_class("settings-heading");
+    let title = label(&tr(category.title), "settings-title");
+    title.set_accessible_role(gtk::AccessibleRole::Heading);
+    title.update_property(&[gtk::accessible::Property::Level(1)]);
+    heading.append(&title);
+    heading.append(&label(&tr(category.description), "hint"));
+    panel.append(&heading);
+    pages.add_named(&scroll(&panel), Some(category.title));
+    panel
 }
 
 fn field(
-    grid: &gtk::Grid,
-    row: i32,
+    parent: &gtk::Box,
     name: &str,
-    control: &(impl IsA<gtk::Widget> + IsA<gtk::Accessible>),
+    control: &impl IsA<gtk::Widget>,
     hint: Option<&str>,
-) {
-    let caption = label(&tr(name), "settings-caption");
-    caption.set_width_chars(17);
+) -> gtk::Box {
+    let row = horizontal(24);
+    row.add_css_class("row");
+    let copy = vertical(3);
+    copy.set_hexpand(true);
+    copy.set_valign(gtk::Align::Center);
+    let caption = label(&tr(name), "lbl");
+    let control = control.as_ref();
     caption.set_mnemonic_widget(Some(control));
     control.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
-        caption.upcast_ref()
+        caption.upcast_ref(),
     ])]);
-    grid.attach(&caption, 0, row, 1, 1);
-    control.set_halign(gtk::Align::Start);
-    grid.attach(control, 1, row, 1, 1);
+    copy.append(&caption);
     if let Some(hint) = hint {
-        let hint = label(hint, "settings-hint");
-        hint.set_hexpand(true);
+        let hint = label(hint, "hint");
         control.update_relation(&[gtk::accessible::Relation::DescribedBy(&[hint.upcast_ref()])]);
-        grid.attach(&hint, 1, row + 1, 1, 1);
+        copy.append(&hint);
     }
+    let slot = horizontal(0);
+    slot.set_hexpand(false);
+    slot.set_valign(gtk::Align::Center);
+    slot.append(control);
+    row.append(&copy);
+    row.append(&slot);
+    parent.append(&row);
+    slot
 }
 
 fn dropdown(texts: &[String]) -> gtk::DropDown {
     let words = texts.iter().map(String::as_str).collect::<Vec<_>>();
     let result = gtk::DropDown::from_strings(&words);
     result.set_size_request(176, -1);
+    result.set_hexpand(true);
     result
 }
 
@@ -413,9 +497,13 @@ impl Page {
         self.storage.set(storage);
         self.saved.set(saved);
         self.controls.show(self.values.get());
-        self.status
-            .set_text(&tr(status(storage, self.values.get(), saved)));
-        let message = notice(storage).map(|(title, text)| format!("{}. {}", tr(title), tr(text)));
+        let storage_notice = notice(storage);
+        let summary = storage_notice.map_or_else(
+            || status(storage, self.values.get(), saved),
+            |(title, _)| title,
+        );
+        self.status.set_text(&tr(summary));
+        let message = storage_notice.map(|(title, text)| format!("{}. {}", tr(title), tr(text)));
         self.notice.set_visible(message.is_some());
         self.notice.set_text(message.as_deref().unwrap_or_default());
         if storage == Storage::Unavailable {
@@ -427,10 +515,17 @@ impl Page {
     }
 
     fn editable(&self, edit: bool, reset: bool) {
-        for card in &self.editors {
-            card.set_sensitive(edit);
+        for fields in &self.editors {
+            fields.set_sensitive(edit);
         }
         self.reset.set_sensitive(reset);
+    }
+
+    fn show_failure(&self, error: SettingsFailure) {
+        let text = tr(failure_text(error));
+        self.status.set_text(&text);
+        self.failure.set_text(&text);
+        self.failure.set_visible(true);
     }
 
     fn request(self: &Rc<Self>, change: Change) {
@@ -465,13 +560,11 @@ impl Page {
                 Ok(Err((error, snapshot))) => {
                     page.values.set(snapshot.values);
                     page.display(snapshot.view.storage, snapshot.saved);
-                    page.failure.set_text(&tr(failure_text(error)));
-                    page.failure.set_visible(true);
+                    page.show_failure(error);
                 }
                 Err(_) => {
                     page.display(previous_storage, previously_saved);
-                    page.failure.set_text(&tr(failure_text(SettingsFailure::Internal)));
-                    page.failure.set_visible(true);
+                    page.show_failure(SettingsFailure::Internal);
                 }
             }
             page.saving.set(false);
@@ -504,67 +597,37 @@ pub(super) fn build(
     apply: impl Fn(Preferences) + 'static,
 ) -> (gtk::Box, Landing) {
     let Snapshot { view, values, saved } = snapshot;
-    let root = vertical(0);
+    let root = horizontal(0);
     root.add_css_class("settings-view");
-    let heading = vertical(3);
-    heading.add_css_class("settings-heading");
-    heading.append(&label(&tr("Settings"), "settings-title"));
-    let status = label("", "settings-hint");
-    heading.append(&status);
-    root.append(&heading);
-
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .build();
-    let body = vertical(14);
-    body.add_css_class("settings-body");
-    scroller.set_child(Some(&body));
-    root.append(&scroller);
-
+    let content = vertical(0);
+    content.set_hexpand(true);
     let notice = label("", "settings-notice");
-    body.append(&notice);
+    content.append(&notice);
     let failure = label("", "settings-notice");
     failure.add_css_class("settings-error");
     failure.set_visible(false);
-    body.append(&failure);
-    let introduction = label(
-        &tr(
-            "Preferences change how Wyss Console looks and behaves. They never change what Codex may do: sessions start in Inference, Local Tools is chosen for each session, and every command or file change it proposes waits for your approval.",
-        ),
-        "settings-hint",
-    );
-    introduction.set_max_width_chars(83);
-    introduction.set_halign(gtk::Align::Start);
-    body.append(&introduction);
+    content.append(&failure);
 
-    let grid = gtk::Grid::builder()
-        .column_homogeneous(true)
-        .column_spacing(14)
-        .row_spacing(14)
-        .build();
-    body.append(&grid);
-    let appearance = card(&grid, 0, 0, t!("Appearance"));
-    let interface = card(&grid, 1, 0, t!("Interface"));
-    let terminal = card(&grid, 0, 1, t!("Terminal"));
-    let about = card(&grid, 1, 1, t!("About"));
-    let reset_card = card(&grid, 0, 2, t!("Reset"));
-    let lifecycle = card(&grid, 1, 2, t!("Terminals after the window closes"));
+    let pages = gtk::Stack::builder().vexpand(true).build();
+    let [general, appearance, terminal, sessions, about] =
+        CATEGORIES.each_ref().map(|category| category_panel(&pages, category));
+    root.append(&category_rail(&pages));
+    content.append(&pages);
+    root.append(&content);
 
-    let theme = dropdown(&[tr("Dark"), tr("Light"), tr("High contrast")]);
-    field(
-        &fields(&appearance),
-        0,
-        t!("Color theme"),
-        &theme,
-        Some(&tr(
-            "Changes appearance only. It does not change provider or approval permissions.",
-        )),
-    );
+    let status = label("", "hint");
+    status.add_css_class("settings-status");
+    general.append(&status);
+    let general_fields = vertical(0);
+    general.append(&general_fields);
+    let appearance_fields = vertical(0);
+    appearance.append(&appearance_fields);
+    let terminal_fields = vertical(0);
+    terminal.append(&terminal_fields);
+    let widths = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
 
     let language = dropdown(&["English".into(), "Español".into()]);
     let landing = dropdown(&Landing::ALL.map(|page| tr(page.label())));
-    let interface_fields = fields(&interface);
     let language_note = format!(
         "{} {}",
         tr(
@@ -572,20 +635,28 @@ pub(super) fn build(
         ),
         tr("Reopen Wyss Console to apply the new language."),
     );
-    field(
-        &interface_fields,
-        0,
+    widths.add_widget(&field(
+        &general_fields,
         t!("Language"),
         &language,
         Some(&language_note),
-    );
-    field(
-        &interface_fields,
-        2,
+    ));
+    widths.add_widget(&field(
+        &general_fields,
         t!("Open on"),
         &landing,
         Some(&tr("The view shown when Wyss Console starts.")),
-    );
+    ));
+
+    let theme = dropdown(&[tr("Dark"), tr("Light"), tr("High contrast")]);
+    widths.add_widget(&field(
+        &appearance_fields,
+        t!("Color theme"),
+        &theme,
+        Some(&tr(
+            "Changes appearance only. It does not change provider or approval permissions.",
+        )),
+    ));
 
     let fonts = FONT_SIZE.collect::<Vec<_>>();
     let font = dropdown(
@@ -614,62 +685,61 @@ pub(super) fn build(
     );
     let cursor = dropdown(&[tr("Block"), tr("Bar"), tr("Underline")]);
     let blink = gtk::CheckButton::new();
-    let terminal_fields = fields(&terminal);
-    field(&terminal_fields, 0, t!("Font size"), &font, None);
-    field(
+    widths.add_widget(&field(&terminal_fields, t!("Font size"), &font, None));
+    widths.add_widget(&field(
         &terminal_fields,
-        1,
         t!("History kept"),
         &history,
         Some(&tr(
             "How far back each terminal can scroll. Larger values use more memory.",
         )),
-    );
-    field(&terminal_fields, 3, t!("Cursor"), &cursor, None);
-    field(&terminal_fields, 4, t!("Blinking cursor"), &blink, None);
-    terminal.append(&label(
-        &tr(
-            "These apply to every terminal, open or new. What a terminal runs is not a preference.",
-        ),
-        "settings-hint",
     ));
+    widths.add_widget(&field(&terminal_fields, t!("Cursor"), &cursor, None));
+    widths.add_widget(&field(&terminal_fields, t!("Blinking cursor"), &blink, None));
 
-    let facts = fields(&about);
+    let lifecycle_input = Cell::new(Some(host));
+    sessions.connect_map(move |panel| {
+        if let Some(host) = lifecycle_input.take() {
+            build_lifecycle(panel, host);
+        }
+    });
+
+    let facts_widths = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
     let platform = format!("{} ({})", tr("Linux"), std::env::consts::ARCH);
-    for (row, (name, value)) in [
+    for (name, value) in [
         (
-            "Wyss Console".into(),
+            "Wyss Console",
             trf("Version {version}", &[("version", view.about.version)]),
         ),
         (
-            tr("Build"),
+            t!("Build"),
             view.about
                 .revision
                 .map_or_else(|| tr("Not available"), str::to_owned),
         ),
-        (tr("Platform"), platform),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        facts.attach(&label(&name, "settings-hint"), 0, row as i32, 1, 1);
+        (t!("Platform"), platform),
+    ] {
         let value = label(&value, "settings-value");
         value.set_selectable(true);
-        facts.attach(&value, 1, row as i32, 1, 1);
+        value.set_max_width_chars(24);
+        facts_widths.add_widget(&field(&about, name, &value, None));
     }
-    let reset = gtk::Button::with_label(&tr("Reset preferences…"));
+
+    let reset = gtk::Button::new();
+    reset.set_child(Some(&label(&tr("Reset preferences…"), "")));
     reset.set_halign(gtk::Align::Start);
-    reset_card.append(&reset);
-    reset_card.append(&label(
+    reset.add_css_class("danger");
+    let reset_section = vertical(3);
+    reset_section.add_css_class("settings-reset");
+    reset_section.append(&label(&tr("Reset"), "lbl"));
+    let reset_hint = label(
         &tr("Restores the defaults on this screen. Nothing else is deleted."),
-        "settings-hint",
-    ));
-    let lifecycle_input = Cell::new(Some(host));
-    lifecycle.connect_map(move |card| {
-        if let Some(host) = lifecycle_input.take() {
-            build_lifecycle(card, host);
-        }
-    });
+        "hint",
+    );
+    reset.update_relation(&[gtk::accessible::Relation::DescribedBy(&[reset_hint.upcast_ref()])]);
+    reset_section.append(&reset_hint);
+    reset_section.append(&reset);
+    about.append(&reset_section);
 
     let page = Rc::new(Page {
         service,
@@ -688,7 +758,7 @@ pub(super) fn build(
             history_values,
             fonts,
         },
-        editors: [appearance, interface, terminal],
+        editors: [general_fields, appearance_fields, terminal_fields],
         status,
         notice,
         failure,
@@ -740,16 +810,18 @@ pub(super) fn build(
     (root, values.landing)
 }
 
-fn build_lifecycle(card: &gtk::Box, host: Option<Host>) {
+fn build_lifecycle(panel: &gtk::Box, host: Option<Host>) {
     use wyss_console::host::persistence::{Facts, Placement, Sources, read_facts, to_json};
 
-    let note = label(&tr("Reading…"), "settings-hint");
-    card.append(&note);
+    panel.append(&label(&tr("Terminals after the window closes"), "lbl"));
+    let note = label(&tr("Reading…"), "hint");
+    note.add_css_class("settings-lifecycle-note");
+    panel.append(&note);
     let table = gtk::Grid::builder()
         .column_spacing(10)
         .row_spacing(0)
         .build();
-    card.append(&table);
+    panel.append(&table);
     let uses_host = host.is_some();
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
@@ -776,11 +848,11 @@ fn build_lifecycle(card: &gtk::Box, host: Option<Host>) {
         .ok()
         .flatten();
         let Some(mut result) = result else {
-            note.set_text(&tr("What survives what could not be read from the host."));
+            note.set_text(&tr(t!("The host status could not be read.")));
             return;
         };
         let Some(events) = result["events"].as_array_mut() else {
-            note.set_text(&tr("What survives what could not be read from the host."));
+            note.set_text(&tr(t!("The host status could not be read.")));
             return;
         };
         if uses_host {
@@ -841,7 +913,7 @@ fn build_lifecycle(card: &gtk::Box, host: Option<Host>) {
                 let cell = label(&tr(text), "settings-table-cell");
                 cell.set_yalign(0.0);
                 cell.set_hexpand(column == 2);
-                cell.set_width_chars(if column == 2 { 15 } else { 11 });
+                cell.set_max_width_chars(if column == 2 { 32 } else { 15 });
                 table.attach(&cell, column as i32, index as i32 + 1, 1, 1);
             }
         }
@@ -874,6 +946,38 @@ const _: &[&str] = &[
 mod tests {
     use super::*;
     use wyss_console::settings::{EventFilter, LandingPage};
+
+    #[test]
+    fn category_order_and_arrow_navigation_follow_the_settings_rail() {
+        assert_eq!(
+            CATEGORIES.each_ref().map(|category| category.title),
+            ["General", "Appearance", "Terminal", "Sessions", "About"]
+        );
+        assert_eq!(adjacent_category(0, false), 4);
+        assert_eq!(adjacent_category(4, true), 0);
+        for index in 0..CATEGORIES.len() - 1 {
+            assert_eq!(adjacent_category(index, true), index + 1);
+            assert_eq!(adjacent_category(index + 1, false), index);
+        }
+    }
+
+    #[test]
+    fn general_uses_the_specified_storage_copy() {
+        use crate::i18n::translate;
+
+        let values = Values {
+            shared: Preferences::default(),
+            landing: Landing::Console,
+        };
+        assert_eq!(
+            translate(Lang::Es, status(Storage::Ready, values, true)),
+            "Guardado en esta computadora"
+        );
+        assert_eq!(
+            translate(Lang::Es, status(Storage::Ready, values, false)),
+            "Valores por defecto"
+        );
+    }
 
     #[test]
     fn settings_round_trip_preserves_saved_landing_and_event_preferences() {

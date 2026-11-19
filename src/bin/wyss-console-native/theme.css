@@ -500,39 +500,3 @@ button.launch-item:focus-visible {
   box-shadow: none;
   color: inherit;
 }
-
-/* Settings follows the Console's two-column cards and uses the active theme tokens. */
-.settings-heading {
-  padding: 14px 16px 10px;
-}
-.settings-title, .settings-card-title, .settings-table-heading {
-  color: @text;
-  font-weight: 600;
-}
-.settings-title { font-size: 15px; }
-.settings-card-title { font-size: 14px; }
-.settings-body { padding: 0 16px 16px; }
-.settings-card {
-  background: @chrome;
-  border: 1px solid @line;
-  border-radius: 6px;
-  padding: 14px;
-}
-.settings-card dropdown > button { min-height: 30px; }
-.settings-hint { color: @muted; }
-.settings-notice {
-  color: @text;
-  background: @chrome;
-  border: 1px solid @line;
-  border-radius: 5px;
-  padding: 10px 12px;
-}
-.settings-error {
-  color: @error_text;
-  background: @error_soft;
-  border-color: @error_line;
-}
-.settings-table-cell, .settings-table-heading {
-  padding: 6px;
-  border-bottom: 1px solid @line;
-}

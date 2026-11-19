@@ -1323,7 +1323,7 @@ fn apply_theme(provider: &gtk::CssProvider, next: theme::Theme) {
     if let Some(settings) = gtk::Settings::default() {
         settings.set_gtk_application_prefer_dark_theme(next.prefers_dark());
     }
-    provider.load_from_string(&format!("{}{THEME}{}{}{}{}", theme::defines(next), crate::workspace::CSS, crate::distributors::CSS, crate::arsenal::CSS, crate::credentials::CSS));
+    provider.load_from_string(&format!("{}{THEME}{}{}{}{}{}", theme::defines(next), crate::workspace::CSS, crate::distributors::CSS, crate::arsenal::CSS, crate::credentials::CSS, settings::CSS));
 }
 
 pub fn build(
