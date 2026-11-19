@@ -41,24 +41,51 @@ pub struct Project {
 }
 
 pub fn detect(cwd: &Path) -> Option<Project> {
-    let cwd = cwd.canonicalize().ok()?;
-    detect_among(cwd.ancestors())
+    let home = std::env::var_os("HOME");
+    detect_from(cwd, home.as_deref().map(Path::new))
 }
 
-fn detect_among<'a>(ancestors: impl Iterator<Item = &'a Path>) -> Option<Project> {
+fn detect_from(cwd: &Path, home: Option<&Path>) -> Option<Project> {
+    let cwd = cwd.canonicalize().ok()?;
+    let canonical_home = home.and_then(|path| path.canonicalize().ok());
+    let home = canonical_home.as_deref().or(home);
+    if let Some(relative) = home.and_then(|path| cwd.strip_prefix(path).ok())
+        && relative.components().next().is_some_and(|part| {
+            matches!(
+                part.as_os_str().to_str(),
+                Some(".cache" | ".local" | ".config")
+            )
+        })
+    {
+        return None;
+    }
+    // An external project can be detected without walking into a shared ancestor of HOME.
+    let ancestors = cwd.ancestors().take_while(|dir| {
+        dir.parent().is_some() && home.is_none_or(|home| *dir == home || !home.starts_with(dir))
+    });
+    detect_among(ancestors, home)
+}
+
+fn has_git_marker(root: &Path) -> bool {
+    root.join(".git")
+        .symlink_metadata()
+        .is_ok_and(|m| m.is_dir() || m.is_file())
+}
+
+fn detect_among<'a>(
+    ancestors: impl Iterator<Item = &'a Path>,
+    home: Option<&Path>,
+) -> Option<Project> {
     let mut manifest = None;
     for dir in ancestors {
-        let has_git = dir
-            .join(".git")
-            .symlink_metadata()
-            .is_ok_and(|m| m.is_dir() || m.is_file());
-        if has_git {
+        if has_git_marker(dir) {
             return Some(Project {
                 root: dir.into(),
-                has_git,
+                has_git: true,
             });
         }
-        if manifest.is_none()
+        if Some(dir) != home
+            && manifest.is_none()
             && MANIFESTS
                 .iter()
                 .any(|name| dir.join(name).symlink_metadata().is_ok_and(|m| m.is_file()))
@@ -217,14 +244,19 @@ fn license(text: &str) -> Option<String> {
 }
 
 pub fn overview(project: &Project) -> (Summary, Option<Result<Git, GitError>>, usize) {
-    let (summary, mut remaining) = summary(project);
-    let git = project
-        .has_git
-        .then(|| git::git_with_budget(&project.root, &mut remaining));
+    let has_git = project.has_git && has_git_marker(&project.root);
+    let (summary, mut remaining) = summary(project, has_git);
+    let git = has_git.then(|| git::git_with_budget(&project.root, &mut remaining));
     (summary, git, remaining)
 }
 
-fn summary(project: &Project) -> (Summary, usize) {
+impl Project {
+    pub fn read_git(&self) -> Option<Result<Git, GitError>> {
+        (self.has_git && has_git_marker(&self.root)).then(|| git(&self.root))
+    }
+}
+
+fn summary(project: &Project, has_git: bool) -> (Summary, usize) {
     let mut files = Files::new(&project.root);
     let readme = [
         "README.md",
@@ -235,11 +267,7 @@ fn summary(project: &Project) -> (Summary, usize) {
     ]
     .into_iter()
     .find_map(|p| files.text(Path::new(p)))
-    .and_then(|text| {
-        text.lines()
-            .find(|l| !l.trim().is_empty())
-            .map(markdown::plain_line)
-    });
+    .and_then(|text| markdown::readme_excerpt(&text));
     let license = ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"]
         .into_iter()
         .find_map(|p| license(&files.text(Path::new(p))?))
@@ -257,10 +285,7 @@ fn summary(project: &Project) -> (Summary, usize) {
             .into_owned(),
         readme,
         license,
-        origin: project
-            .has_git
-            .then(|| git::origin(&project.root))
-            .flatten(),
+        origin: has_git.then(|| git::origin(&project.root)).flatten(),
     };
     (overview, files.remaining)
 }
@@ -421,7 +446,7 @@ pub fn inventory(project: &Project, remaining: usize, cancelled: impl Fn() -> bo
     inv.quality.truncate(32);
 
     let mut paths = Vec::new();
-    if project.has_git {
+    if project.has_git && has_git_marker(&project.root) {
         match run(&project.root, &["ls-files", "-z", "--cached"]) {
             Ok(bytes) => paths.extend(
                 bytes

@@ -447,7 +447,6 @@ impl Panel {
                     let _ = tx.send((id, update));
                 }
             };
-            let git = |p: &Project| p.has_git.then(|| project::git(&p.root));
             let notes = |p: &Project| {
                 let path = project::cache_path(p);
                 let items = path
@@ -488,7 +487,7 @@ impl Panel {
                         }
                     }
                 }
-                Job::Git(p) => send(Update::Git(git(&p))),
+                Job::Git(p) => send(Update::Git(p.read_git())),
                 Job::Notes(p) => send(notes(&p)),
             }
         });

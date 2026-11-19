@@ -25,10 +25,10 @@ fn detects_nearest_git_before_manifest_and_handles_nonprojects() {
     let dir = Fixture::new();
     let child = dir.0.join("child");
     fs::create_dir(&child).unwrap();
-    assert_eq!(detect_among(child.ancestors().take(2)), None);
+    assert_eq!(detect_among(child.ancestors().take(2), None), None);
     fs::write(child.join("Cargo.toml"), "").unwrap();
     assert_eq!(
-        detect_among(child.ancestors().take(2)),
+        detect_among(child.ancestors().take(2), None),
         Some(Project {
             root: child.clone(),
             has_git: false
@@ -50,6 +50,95 @@ fn detects_nearest_git_before_manifest_and_handles_nonprojects() {
             has_git: true
         })
     );
+}
+
+#[test]
+fn panel_qa_root_respects_home_and_state_boundaries() {
+    let dir = Fixture::new();
+    let home = dir.0.join("home");
+    let child = home.join("empty");
+    fs::create_dir_all(&child).unwrap();
+    fs::write(dir.0.join(".git"), "gitdir: missing").unwrap();
+    let detect = |cwd: &Path| detect_from(cwd, Some(&home));
+    assert_eq!(detect(&home), None, "an enclosing checkout is outside HOME");
+    fs::write(home.join("Makefile"), "").unwrap();
+    assert_eq!(detect(&child), None, "a HOME manifest is insufficient");
+    assert_eq!(detect(&dir.0), None, "an ancestor of HOME is out of bounds");
+    assert_eq!(detect(Path::new("/")), None);
+    for state in [".cache", ".local", ".config"] {
+        let state = home.join(state);
+        let nested = state.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(state.join("Makefile"), "").unwrap();
+        fs::write(nested.join("Cargo.toml"), "").unwrap();
+        assert_eq!(detect(&state), None);
+        assert_eq!(detect(&nested), None);
+    }
+    fs::create_dir(home.join(".git")).unwrap();
+    assert_eq!(detect(&child).unwrap().root, home);
+
+    let external = dir.0.join("external");
+    fs::create_dir(&external).unwrap();
+    fs::write(external.join("Makefile"), "").unwrap();
+    assert_eq!(
+        detect(&external),
+        Some(Project {
+            root: external,
+            has_git: false,
+        })
+    );
+}
+
+#[test]
+fn panel_qa_git_uses_no_repository_state_without_a_marker() {
+    let dir = Fixture::new();
+    let root = dir.0.join("project");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("Cargo.toml"), "").unwrap();
+    let project = detect_from(&root, Some(&dir.0)).unwrap();
+    assert!(!project.has_git);
+    assert!(overview(&project).1.is_none());
+    assert!(project.read_git().is_none());
+
+    let marker = root.join(".git");
+    fs::write(&marker, "gitdir: missing").unwrap();
+    let project = detect_from(&root, Some(&dir.0)).unwrap();
+    assert!(matches!(overview(&project).1, Some(Err(GitError::Command))));
+    assert!(matches!(project.read_git(), Some(Err(GitError::Command))));
+    fs::remove_file(marker).unwrap();
+    assert!(
+        overview(&project).1.is_none(),
+        "the cached marker was removed"
+    );
+    assert!(project.read_git().is_none());
+}
+
+#[test]
+fn panel_qa_readme_uses_first_prose_sentence_and_caps_unicode() {
+    let dir = Fixture::new();
+    let readme = dir.0.join("README.md");
+    let project = Project {
+        root: dir.0.clone(),
+        has_git: false,
+    };
+    fs::write(
+        &readme,
+        "# Wyss Console\n\nAlternate heading\n=================\n\n\
+         <img src=\"logo.png\">\n<!--\nHidden comment.\n-->\n\n\
+         [![CI](badge.svg)](ci) ![Logo](logo.svg)\n\n\
+         ```sh\nprintf 'Not prose.'\n```\n\n- List item.\n\n\
+         **Aplicación** [GTK4](docs/gtk.md)\npara `Linux` 1.2. Otra oración.\n\nTercer párrafo.",
+    )
+    .unwrap();
+    assert_eq!(
+        overview(&project).0.readme.as_deref(),
+        Some("Aplicación GTK4 para Linux 1.2.")
+    );
+    let long = "á".repeat(201);
+    fs::write(&readme, format!("# Header\n\n{long}.")).unwrap();
+    assert_eq!(overview(&project).0.readme, Some("á".repeat(200)));
+    fs::write(&readme, "# Header\n\n![Logo](logo.svg)\n").unwrap();
+    assert_eq!(overview(&project).0.readme, None);
 }
 
 #[test]
@@ -167,7 +256,7 @@ fn scan_is_bounded_and_does_not_read_ignored_or_symlinked_files() {
         .unwrap()
         .set_len(FILE_LIMIT as u64 + 1)
         .unwrap();
-    let project = detect_among(std::iter::once(root.as_path())).unwrap();
+    let project = detect_among(std::iter::once(root.as_path()), None).unwrap();
     let inv = inventory(&project, READ_LIMIT, || false);
     assert!(inv.limited);
     assert_eq!(inv.languages, [("Rust", 7)]);
@@ -291,11 +380,10 @@ fn git_reader_never_runs_fsmonitor_or_filters_and_counts_changes() {
     fs::write(root.join("same.rs"), "same\n").unwrap();
     fs::remove_file(root.join("old.rs")).unwrap();
     let project = detect(root).unwrap();
-    let (summary, _) = summary(&project);
-    let result = git(root);
+    let (summary, result, _) = overview(&project);
     let _ = inventory(&project, READ_LIMIT, || false);
     assert!(!marker.exists(), "the repository executed its trap");
-    let git = result.unwrap();
+    let git = result.unwrap().unwrap();
     assert_eq!(summary.origin.as_deref(), Some("host/owner/repo"));
     assert_eq!((git.modified, git.new, git.deleted), (1, 1, 1));
     assert_eq!(git.upstream, Some((0, 0)));
