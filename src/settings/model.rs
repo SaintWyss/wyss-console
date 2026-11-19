@@ -48,6 +48,14 @@ pub enum AppearanceTheme {
     Dark,
     Light,
     HighContrast,
+    CatppuccinMocha,
+    Dracula,
+    GruvboxDark,
+    Monokai,
+    Nord,
+    RosePine,
+    SolarizedLight,
+    TokyoNight,
 }
 
 /// The language the window's own text is written in. A closed word: it selects one of the

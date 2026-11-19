@@ -1,6 +1,6 @@
 //! Colors of the terminal surface for the theme in force: default foreground and background, the
 //! 256-color palette (base 16 + 6x6x6 cube + grayscale ramp), the selection, the cursor and the
-//! search highlights. Dark, light and high contrast each define a base palette.
+//! search highlights. Each theme defines a base palette.
 
 use std::sync::OnceLock;
 
@@ -24,8 +24,7 @@ pub fn hex(h: &str) -> Rgb {
     Rgb { r: (n >> 16) as u8, g: (n >> 8) as u8, b: n as u8 }
 }
 
-/// The Console's ANSI palette for light and high contrast: black, red, green, yellow, blue, magenta,
-/// cyan, white, then the same eight bright.
+// ANSI order: black, red, green, yellow, blue, magenta, cyan, white, then bright variants.
 const LIGHT: [&str; 16] = [
     "#111827", "#a40000", "#075a2c", "#644200", "#004f9e", "#6b2292", "#00636b", "#475569", "#343f50", "#7f0000", "#004820", "#503400", "#003d7a", "#571578", "#004b52", "#1f2937",
 ];
@@ -37,6 +36,56 @@ const DARK: [(u8, u8, u8); 16] = [
     (0x81, 0xa2, 0xbe), (0xb2, 0x94, 0xbb), (0x8a, 0xbe, 0xb7), (0xc5, 0xc8, 0xc6),
     (0x66, 0x66, 0x66), (0xd5, 0x4e, 0x53), (0xb9, 0xca, 0x4a), (0xe7, 0xc5, 0x47),
     (0x7a, 0xa6, 0xda), (0xc3, 0x97, 0xd8), (0x70, 0xc0, 0xb1), (0xea, 0xea, 0xea),
+];
+
+// Terminal schemes and attribution are listed in THIRD-PARTY.md.
+const CATPPUCCIN_MOCHA: [&str; 16] = [
+    "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af",
+    "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+    "#585b70", "#f7aec2", "#c2ecbf", "#fcd682",
+    "#aeccfc", "#f398da", "#b1eae1", "#a6adc8",
+];
+const DRACULA: [&str; 16] = [
+    "#21222c", "#ff5555", "#50fa7b", "#f1fa8c",
+    "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+    "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5",
+    "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
+];
+const GRUVBOX_DARK: [&str; 16] = [
+    "#282828", "#cc241d", "#98971a", "#d79921",
+    "#458588", "#b16286", "#689d6a", "#a89984",
+    "#928374", "#fb4934", "#b8bb26", "#fabd2f",
+    "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+];
+const MONOKAI: [&str; 16] = [
+    "#272822", "#f92672", "#a6e22e", "#e6db74",
+    "#fd971f", "#ae81ff", "#66d9ef", "#fdfff1",
+    "#6e7066", "#f92672", "#a6e22e", "#e6db74",
+    "#fd971f", "#ae81ff", "#66d9ef", "#fdfff1",
+];
+const NORD: [&str; 16] = [
+    "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b",
+    "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
+    "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b",
+    "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+];
+const ROSE_PINE: [&str; 16] = [
+    "#26233a", "#eb6f92", "#31748f", "#f6c177",
+    "#9ccfd8", "#c4a7e7", "#ebbcba", "#e0def4",
+    "#6e6a86", "#eb6f92", "#31748f", "#f6c177",
+    "#9ccfd8", "#c4a7e7", "#ebbcba", "#e0def4",
+];
+const SOLARIZED_LIGHT: [&str; 16] = [
+    "#073642", "#dc322f", "#859900", "#b58900",
+    "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+    "#002b36", "#cb4b16", "#586e75", "#657b83",
+    "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+];
+const TOKYO_NIGHT: [&str; 16] = [
+    "#15161e", "#f7768e", "#9ece6a", "#e0af68",
+    "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+    "#414868", "#f7768e", "#9ece6a", "#e0af68",
+    "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
 ];
 
 /// The 256 entries: `base` for the first 16, then the cube and the ramp.
@@ -59,8 +108,8 @@ fn table(base: [Rgb; 16]) -> [Rgb; 256] {
 
 pub fn colors_for(theme: Theme) -> Colors {
     let tok = |name: &str| hex(theme::token(theme, name).expect("a token"));
-    match theme {
-        Theme::Dark => Colors {
+    let (ansi, selection, cursor) = match theme {
+        Theme::Dark => return Colors {
             fg: tok("text"),
             bg: tok("bg"),
             sel_bg: hex("#3a4a63"),
@@ -69,7 +118,7 @@ pub fn colors_for(theme: Theme) -> Colors {
             find_current: hex("#ff9f43"),
             table: table(DARK.map(|(r, g, b)| Rgb { r, g, b })),
         },
-        Theme::Light => Colors {
+        Theme::Light => return Colors {
             fg: hex("#111111"),
             bg: hex("#ffffff"),
             sel_bg: hex("#b5d3f5"),
@@ -78,7 +127,7 @@ pub fn colors_for(theme: Theme) -> Colors {
             find_current: hex("#ff8a3d"),
             table: table(LIGHT.map(hex)),
         },
-        Theme::HighContrast => Colors {
+        Theme::HighContrast => return Colors {
             fg: hex("#ffffff"),
             bg: hex("#000000"),
             sel_bg: hex("#0047ab"),
@@ -87,20 +136,41 @@ pub fn colors_for(theme: Theme) -> Colors {
             find_current: hex("#ff8c00"),
             table: table(HIGH_CONTRAST.map(hex)),
         },
+        // The renderer retains the foreground on selection; choose a darker palette surface
+        // in themes whose port pairs a light selection background with dark selection text.
+        Theme::CatppuccinMocha => (CATPPUCCIN_MOCHA, "#45475a", "#f5e0dc"),
+        Theme::Dracula => (DRACULA, "#44475a", "#f8f8f2"),
+        Theme::GruvboxDark => (GRUVBOX_DARK, "#665c54", "#ebdbb2"),
+        Theme::Monokai => (MONOKAI, "#57584f", "#c0c1b5"),
+        Theme::Nord => (NORD, "#434c5e", "#eceff4"),
+        Theme::RosePine => (ROSE_PINE, "#403d52", "#e0def4"),
+        Theme::SolarizedLight => (SOLARIZED_LIGHT, "#f3edda", "#657b83"),
+        Theme::TokyoNight => (TOKYO_NIGHT, "#283457", "#c0caf5"),
+    };
+    // The search overlay sits above the text, so these three themes need gentler tints.
+    let (find, find_current) = match theme {
+        Theme::GruvboxDark => (tok("warn-line"), hex("#765f2b")),
+        Theme::Nord => (tok("warn-line"), hex("#4f6875")),
+        Theme::SolarizedLight => (hex("#f4e8c5"), hex("#eaece1")),
+        _ => (tok("warn-line"), tok("accent-line")),
+    };
+    let Rgb { r, g, b } = hex(cursor);
+    Colors {
+        fg: if theme == Theme::Monokai { hex("#fdfff1") } else { tok("text") },
+        bg: tok("terminal-bg"),
+        sel_bg: hex(selection),
+        cursor: [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 0.55],
+        find,
+        find_current,
+        table: table(ansi.map(hex)),
     }
 }
 
 /// The palette for the active theme, cached once per theme.
 pub fn colors() -> &'static Colors {
-    static DARK: OnceLock<Colors> = OnceLock::new();
-    static LIGHT: OnceLock<Colors> = OnceLock::new();
-    static HIGH_CONTRAST: OnceLock<Colors> = OnceLock::new();
+    static CACHE: [OnceLock<Colors>; theme::ALL.len()] = [const { OnceLock::new() }; theme::ALL.len()];
     let theme = theme::current();
-    match theme {
-        Theme::Dark => &DARK,
-        Theme::Light => &LIGHT,
-        Theme::HighContrast => &HIGH_CONTRAST,
-    }.get_or_init(|| colors_for(theme))
+    CACHE[theme as usize].get_or_init(|| colors_for(theme))
 }
 
 #[cfg(test)]
@@ -132,11 +202,11 @@ mod tests {
 
     #[test]
     fn the_text_of_every_theme_is_readable_on_its_background() {
-        // WCAG contrast of the default foreground over the background and of the red used for errors.
+        // WCAG relative luminance of an sRGB color.
         fn lum(c: Rgb) -> f64 {
             let f = |v: u8| {
                 let v = v as f64 / 255.0;
-                if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
             };
             0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
         }
@@ -144,11 +214,27 @@ mod tests {
             let (x, y) = (lum(a), lum(b));
             (x.max(y) + 0.05) / (x.min(y) + 0.05)
         };
-        for theme in [Theme::Dark, Theme::Light, Theme::HighContrast] {
-            let c = colors_for(theme);
-            assert!(ratio(c.fg, c.bg) >= 7.0, "{theme:?} text");
-            if theme != Theme::Dark {
-                assert!(ratio(c.table[1], c.bg) >= 4.5, "{theme:?} red");
+        for theme in theme::ALL {
+            let token = |name| hex(theme::token(theme, name).unwrap());
+            let bg = token("bg");
+            let colors = colors_for(theme);
+            let text = ratio(token("text"), bg);
+            let muted = ratio(token("muted"), bg);
+            let accent = ratio(token("text-on-accent"), token("accent"));
+            let terminal = ratio(colors.fg, colors.bg);
+            println!("{theme:?}: text {text:.2}, muted {muted:.2}, accent {accent:.2}, terminal {terminal:.2}");
+            assert!(text >= 4.5, "{theme:?} text: {text}");
+            assert!(muted >= 3.0, "{theme:?} muted: {muted}");
+            assert!(accent >= 4.5, "{theme:?} text-on-accent: {accent}");
+            assert!(terminal >= 4.5, "{theme:?} terminal text: {terminal}");
+            assert!(ratio(colors.fg, colors.sel_bg) >= 4.5, "{theme:?} terminal selection");
+            match theme {
+                Theme::Dark => assert!(terminal >= 7.0),
+                Theme::Light | Theme::HighContrast => {
+                    assert!(terminal >= 7.0);
+                    assert!(ratio(colors.table[1], colors.bg) >= 4.5, "{theme:?} red");
+                }
+                _ => {}
             }
         }
     }

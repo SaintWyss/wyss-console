@@ -1321,7 +1321,7 @@ fn shortcuts_popover(anchor: &gtk::Button) -> gtk::Popover {
 fn apply_theme(provider: &gtk::CssProvider, next: theme::Theme) {
     theme::set(next);
     if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_application_prefer_dark_theme(next.prefers_dark());
+        settings.set_gtk_application_prefer_dark_theme(theme::prefers_dark(next));
     }
     provider.load_from_string(&format!("{}{THEME}{}{}{}{}{}", theme::defines(next), crate::workspace::CSS, crate::distributors::CSS, crate::arsenal::CSS, crate::credentials::CSS, settings::CSS));
 }

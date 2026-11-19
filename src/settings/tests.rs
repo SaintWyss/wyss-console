@@ -202,6 +202,33 @@ fn preferences_persist_across_a_restart_of_the_service() {
 }
 
 #[test]
+fn every_theme_word_round_trips_in_preferences_json() {
+    let mut document = serde_json::to_value(changed()).unwrap();
+    for word in [
+        "dark",
+        "light",
+        "high_contrast",
+        "catppuccin_mocha",
+        "dracula",
+        "gruvbox_dark",
+        "monokai",
+        "nord",
+        "rose_pine",
+        "solarized_light",
+        "tokyo_night",
+    ] {
+        document["interface"]["theme"] = word.into();
+        let preferences: Preferences = serde_json::from_value(document.clone())
+            .unwrap_or_else(|error| panic!("{word}: {error}"));
+        assert!(preferences.validate().is_ok(), "{word}");
+        assert_eq!(serde_json::to_value(preferences).unwrap(), document, "{word}");
+    }
+
+    document["interface"]["theme"] = "sepia".into();
+    assert!(serde_json::from_value::<Preferences>(document).is_err());
+}
+
+#[test]
 fn schema_one_preferences_gain_the_dark_default_without_a_read_write_and_upgrade_on_next_change() {
     let account = Account::new();
     let old = br#"{"schema_version":1,"interface":{"landing_page":"sessions"},"terminal":{"font_size":20,"scrollback":12000,"cursor_style":"bar","cursor_blink":true},"events":{"time_format":"h24","default_filter":"approvals"}}"#;
@@ -390,6 +417,8 @@ fn every_kind_of_damaged_file_falls_back_to_defaults_and_is_set_aside() {
     unknown["terminal"]["shell"] = "/bin/sh".into();
     let mut word = serde_json::to_value(Preferences::default()).unwrap();
     word["interface"]["landing_page"] = "settings".into();
+    let mut unknown_theme = serde_json::to_value(Preferences::default()).unwrap();
+    unknown_theme["interface"]["theme"] = "sepia".into();
     let mut missing = serde_json::to_value(Preferences::default()).unwrap();
     missing.as_object_mut().unwrap().remove("terminal");
     let mut missing_theme = serde_json::to_value(Preferences::default()).unwrap();
@@ -423,6 +452,7 @@ fn every_kind_of_damaged_file_falls_back_to_defaults_and_is_set_aside() {
         ("unknown field", serde_json::to_vec(&unknown).unwrap()),
         ("unknown top field", serde_json::to_vec(&top).unwrap()),
         ("unknown word", serde_json::to_vec(&word).unwrap()),
+        ("unknown theme", serde_json::to_vec(&unknown_theme).unwrap()),
         ("missing section", serde_json::to_vec(&missing).unwrap()),
         (
             "missing schema v2 theme",

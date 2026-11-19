@@ -147,11 +147,7 @@ impl Values {
 }
 
 pub fn appearance(preferences: Preferences) -> Theme {
-    match preferences.interface.theme {
-        AppearanceTheme::Dark => Theme::Dark,
-        AppearanceTheme::Light => Theme::Light,
-        AppearanceTheme::HighContrast => Theme::HighContrast,
-    }
+    preferences.interface.theme
 }
 
 pub fn language(preferences: Preferences) -> Lang {
@@ -426,11 +422,22 @@ fn dropdown(texts: &[String]) -> gtk::DropDown {
     result
 }
 
-const THEMES: [AppearanceTheme; 3] = [
-    AppearanceTheme::Dark,
-    AppearanceTheme::Light,
-    AppearanceTheme::HighContrast,
-];
+fn theme_label(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Dark => t!("Dark"),
+        Theme::Light => t!("Light"),
+        Theme::HighContrast => t!("High contrast"),
+        Theme::CatppuccinMocha => t!("Catppuccin Mocha"),
+        Theme::Dracula => t!("Dracula"),
+        Theme::GruvboxDark => t!("Gruvbox Dark"),
+        Theme::Monokai => t!("Monokai"),
+        Theme::Nord => t!("Nord"),
+        Theme::RosePine => t!("Rosé Pine"),
+        Theme::SolarizedLight => t!("Solarized Light"),
+        Theme::TokyoNight => t!("Tokyo Night"),
+    }
+}
+
 const LANGUAGES: [Language; 2] = [Language::En, Language::Es];
 const CURSORS: [CursorStyle; 3] = [CursorStyle::Block, CursorStyle::Bar, CursorStyle::Underline];
 
@@ -457,7 +464,7 @@ impl Controls {
             );
         }
         let p = values.shared;
-        select(&self.theme, &THEMES, p.interface.theme);
+        select(&self.theme, &crate::theme::ALL, p.interface.theme);
         select(&self.language, &LANGUAGES, p.interface.language);
         select(&self.landing, &Landing::ALL, values.landing);
         select(&self.font, &self.fonts, p.terminal.font_size);
@@ -647,7 +654,7 @@ pub(super) fn build(
         Some(&tr("The view shown when Wyss Console starts.")),
     ));
 
-    let theme = dropdown(&[tr("Dark"), tr("Light"), tr("High contrast")]);
+    let theme = dropdown(&crate::theme::ALL.map(|theme| tr(theme_label(theme))));
     widths.add_widget(&field(
         &appearance_fields,
         t!("Color theme"),
@@ -766,7 +773,7 @@ pub(super) fn build(
     });
     page.display(view.storage, saved);
     let c = &page.controls;
-    connect_choice(&c.theme, &page, THEMES.to_vec(), Change::Theme);
+    connect_choice(&c.theme, &page, crate::theme::ALL.to_vec(), Change::Theme);
     connect_choice(&c.language, &page, LANGUAGES.to_vec(), Change::Language);
     connect_choice(&c.landing, &page, Landing::ALL.to_vec(), Change::Landing);
     connect_choice(&c.font, &page, c.fonts.clone(), Change::Font);
