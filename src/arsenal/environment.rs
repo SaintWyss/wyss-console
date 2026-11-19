@@ -221,10 +221,28 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn codex_mcp_and_account_settings_round_trip_and_default_for_old_data() {
+        let old: CodexHomeSpec =
+            serde_json::from_str(r#"{"instructions":false,"hooks_off":[]}"#).unwrap();
+        assert!(old.mcp.is_empty() && old.account_skills_off.is_empty());
+        let dir = std::env::temp_dir().join(format!("codex-environment-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let selected = CodexHomeSpec {
+            mcp: [("demo".to_owned(), false)].into(),
+            account_skills_off: vec!["pack/inner".into()],
+            ..old
+        };
+        codex::set(&dir, "selection", &selected).unwrap();
+        assert_eq!(codex::get(&dir, "selection").unwrap(), Some(selected));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn codex_spec(keys: &[&str], instructions: bool) -> CodexHomeSpec {
         CodexHomeSpec {
             instructions,
             hooks_off: keys.iter().map(|k| (*k).to_owned()).collect(),
+            ..Default::default()
         }
     }
 

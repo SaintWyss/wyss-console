@@ -28,6 +28,8 @@ use std::io;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -38,6 +40,8 @@ use crate::agentconfig::tomlspan;
 const CONFIG: &str = "config.toml";
 const HOOKS: &str = "hooks.json";
 const INSTRUCTIONS: &str = "AGENTS.md";
+const INSTRUCTIONS_OVERRIDE: &str = "AGENTS.override.md";
+const INSTRUCTION_FILES: [&str; 2] = [INSTRUCTIONS_OVERRIDE, INSTRUCTIONS];
 const AUTH: &str = "auth.json";
 const AUTH_LOCK: &str = "auth.lock";
 const SESSIONS: &str = "sessions";
@@ -57,6 +61,10 @@ pub struct CodexHomeSpec {
     /// Hooks of `~/.codex/hooks.json` left out, by [`launch_home::hook_key`].
     #[serde(default)]
     pub hooks_off: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp: BTreeMap<String, bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub account_skills_off: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -69,6 +77,8 @@ impl Default for CodexHomeSpec {
         Self {
             instructions: true,
             hooks_off: Vec::new(),
+            mcp: BTreeMap::new(),
+            account_skills_off: Vec::new(),
         }
     }
 }
@@ -77,7 +87,19 @@ impl CodexHomeSpec {
     /// `Err("home_invalid")` when a key is not a [`launch_home::hook_key`], is repeated, or there
     /// are more than [`MAX_NAMES`].
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.hooks_off.len() > MAX_NAMES
+        if self.mcp.len() + self.account_skills_off.len() + self.hooks_off.len() > MAX_NAMES
+            || !self.mcp.keys().all(|name| mcp_name_ok(name))
+            || !self.account_skills_off.iter().all(|name| {
+                name.len() <= 1024
+                    && name.split('/').all(launch_home::name_ok)
+                    && name.split('/').count() <= 12
+            })
+            || self
+                .account_skills_off
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.account_skills_off.len()
             || !self.hooks_off.iter().all(|k| key_ok(k))
             || self.hooks_off.iter().collect::<BTreeSet<_>>().len() != self.hooks_off.len()
         {
@@ -86,10 +108,25 @@ impl CodexHomeSpec {
         Ok(())
     }
 
+    pub fn mcp_enabled(&self, name: &str, inherited: bool) -> bool {
+        self.mcp.get(name).copied().unwrap_or(inherited)
+    }
+
+    pub(super) fn needs_launch_home(&self) -> bool {
+        !self.instructions || !self.hooks_off.is_empty() || !self.account_skills_off.is_empty()
+    }
+
     /// The preset changes nothing.
     pub fn is_default(&self) -> bool {
         self == &Self::default()
     }
+}
+
+fn mcp_name_ok(name: &str) -> bool {
+    (1..=128).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
 }
 
 pub struct CodexOwner {
@@ -410,7 +447,7 @@ pub fn build_with_skills(
     if own_sessions && sessions.is_some() {
         return Err(fail("codex_home_sessions_folder"));
     }
-    for name in [CONFIG, HOOKS, INSTRUCTIONS] {
+    for name in [CONFIG, HOOKS, INSTRUCTIONS, INSTRUCTIONS_OVERRIDE] {
         if fs::symlink_metadata(dir.join(name)).is_ok_and(|meta| meta.is_dir()) {
             return Err(fail("codex_home_unexpected_folder"));
         }
@@ -433,9 +470,11 @@ pub fn build_with_skills(
         Some(bytes) => store::write_atomic(&dir.join(HOOKS), &bytes)?,
         None => place(&dir.join(HOOKS), None)?,
     }
-    let instructions = owner.dir.join(INSTRUCTIONS);
-    let target = (spec.instructions && present(&instructions)?).then_some(instructions);
-    place(&dir.join(INSTRUCTIONS), target.as_deref())?;
+    for name in INSTRUCTION_FILES {
+        let path = owner.dir.join(name);
+        let target = (spec.instructions && present(&path)?).then_some(path);
+        place(&dir.join(name), target.as_deref())?;
+    }
     if signed_in {
         // Created once and never replaced: a running Codex holds its lock on this very file.
         match fs::OpenOptions::new()
@@ -462,7 +501,12 @@ pub fn build_with_skills(
     let mut skipped = Vec::new();
     for (name, target, own) in linked {
         if name == "skills" {
-            skipped = launch_home::place_skills(&dir.join(name), target.as_deref(), skills)?;
+            skipped = launch_home::place_selected_skills(
+                &dir.join(name),
+                target.as_deref(),
+                skills,
+                &spec.account_skills_off,
+            )?;
         } else if !own {
             place(&dir.join(name), target.as_deref())?;
         }
@@ -476,18 +520,30 @@ pub fn write_role(
     spec: &CodexHomeSpec,
     role: &str,
 ) -> io::Result<()> {
-    let source = owner.dir.join(INSTRUCTIONS);
-    let mut bytes = if spec.instructions && fs::metadata(&source).is_ok_and(|m| m.is_file()) {
-        let mut bytes = fs::read(source)?;
-        bytes.extend_from_slice(b"\n\n");
-        bytes
-    } else {
-        Vec::new()
-    };
+    let mut bytes = Vec::new();
+    if spec.instructions {
+        for name in INSTRUCTION_FILES {
+            let path = owner.dir.join(name);
+            if let Ok(meta) = fs::metadata(&path)
+                && meta.is_file()
+                && meta.len() > 0
+            {
+                if meta.len() > 128 * 1024 {
+                    return Err(fail("arsenal_role_too_long"));
+                }
+                bytes = fs::read(path)?;
+                if !bytes.is_empty() {
+                    bytes.extend_from_slice(b"\n\n");
+                    break;
+                }
+            }
+        }
+    }
     bytes.extend_from_slice(role.as_bytes());
     if bytes.len() > 128 * 1024 {
         return Err(fail("arsenal_role_too_long"));
     }
+    place(&dir.join(INSTRUCTIONS_OVERRIDE), None)?;
     place(&dir.join(INSTRUCTIONS), None)?;
     store::write_atomic(&dir.join(INSTRUCTIONS), &bytes)
 }
@@ -512,6 +568,12 @@ pub struct CodexOptions {
     pub config_hooks: Vec<ConfigHook>,
     /// Whether the owner has an `AGENTS.md` a preset can leave out.
     pub instructions: bool,
+    pub instruction_bytes: u64,
+    pub instruction_file: Option<&'static str>,
+    pub project_doc_max_bytes: Option<u64>,
+    pub mcp: BTreeMap<String, bool>,
+    pub account_skills: Vec<String>,
+    pub account_listing_bytes: BTreeMap<String, u64>,
 }
 
 /// The hooks a parsed `config.toml` declares under `hooks`, whatever is under `hooks.state`
@@ -572,17 +634,98 @@ pub fn options(owner: &CodexOwner) -> CodexOptions {
         .unwrap_or_default();
     let mut seen = BTreeSet::new();
     hooks.retain(|hook| seen.insert(hook.key.clone()));
-    let config_hooks = read_text(&owner.dir.join(CONFIG), "unreadable")
-        .ok()
-        .flatten()
-        .and_then(|text| toml::from_str::<toml::Table>(&text).ok())
-        .map(|config| config_hooks(&config))
+    let reader = crate::agentconfig::codex::local_reader(&owner.dir);
+    let read = |name| reader.as_ref()?.read_file(&owner.dir.join(name)).ok();
+    let config = read(CONFIG)
+        .and_then(|file| {
+            std::str::from_utf8(file.bytes())
+                .ok()?
+                .parse::<toml::Table>()
+                .ok()
+        })
         .unwrap_or_default();
+    let mcp = config
+        .get("mcp_servers")
+        .and_then(toml::Value::as_table)
+        .into_iter()
+        .flatten()
+        .filter(|(name, value)| mcp_name_ok(name) && value.is_table())
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                value.get("enabled").and_then(toml::Value::as_bool) != Some(false),
+            )
+        })
+        .collect();
+    let skills = owner.dir.join("skills");
+    let mut account_listing_bytes = BTreeMap::new();
+    for entry in fs::read_dir(&skills).into_iter().flatten().flatten() {
+        let root = entry.path();
+        if !entry.file_name().to_str().is_some_and(launch_home::name_ok) || !root.is_dir() {
+            continue;
+        }
+        let (nested, _) = crate::agentconfig::catalogue::nested_skill_files(&root);
+        for file in std::iter::once(root.join("SKILL.md")).chain(nested) {
+            let Some(parent) = file.parent() else {
+                continue;
+            };
+            let Some(name) = parent.strip_prefix(&skills).ok().and_then(Path::to_str) else {
+                continue;
+            };
+            if file.is_file() && name.split('/').all(launch_home::name_ok) {
+                account_listing_bytes.insert(name.to_owned(), launch_home::listed_bytes(parent));
+            }
+        }
+    }
+    let account_skills = account_listing_bytes.keys().cloned().collect();
+    let instructions = INSTRUCTION_FILES.iter().find_map(|&name| {
+        read(name)
+            .filter(|file| !file.bytes().is_empty())
+            .map(|file| (name, file.bytes().len() as u64))
+    });
     CodexOptions {
         hooks,
-        config_hooks,
-        instructions: fs::symlink_metadata(owner.dir.join(INSTRUCTIONS)).is_ok(),
+        config_hooks: config_hooks(&config),
+        instructions: INSTRUCTION_FILES
+            .iter()
+            .any(|name| fs::symlink_metadata(owner.dir.join(name)).is_ok()),
+        instruction_bytes: instructions.map_or(0, |(_, bytes)| bytes),
+        instruction_file: instructions.map(|(name, _)| name),
+        project_doc_max_bytes: config
+            .get("project_doc_max_bytes")
+            .and_then(toml::Value::as_integer)
+            .and_then(|bytes| u64::try_from(bytes).ok()),
+        mcp,
+        account_skills,
+        account_listing_bytes,
     }
+}
+
+/// Count AGENTS files from the project root down to the working directory.
+pub fn project_instruction_bytes(directory: &Path) -> u64 {
+    let Ok(directory) = directory.canonicalize() else {
+        return 0;
+    };
+    let root = directory
+        .ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .unwrap_or(&directory);
+    let Some(reader) = crate::agentconfig::codex::local_reader(root) else {
+        return 0;
+    };
+    directory
+        .ancestors()
+        .take_while(|dir| dir.starts_with(root))
+        .filter_map(|dir| {
+            INSTRUCTION_FILES.iter().find_map(|name| {
+                reader
+                    .read_file(&dir.join(name))
+                    .ok()
+                    .filter(|file| !file.bytes().is_empty())
+                    .map(|file| file.bytes().len() as u64)
+            })
+        })
+        .sum()
 }
 
 #[cfg(test)]
@@ -590,6 +733,55 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+
+    #[test]
+    fn codex_account_skills_and_mcp_inventory_come_from_the_selected_home() {
+        let f = fx("account-inventory");
+        let root = f.owner.dir.join("skills");
+        for name in ["pack", "pack/inner", ".system/ignored", "other"] {
+            fs::create_dir_all(root.join(name)).unwrap();
+            fs::write(
+                root.join(name).join("SKILL.md"),
+                "---\nname: demo\ndescription: test\n---\n",
+            )
+            .unwrap();
+        }
+        let config = r#"
+            [mcp_servers.alpha]
+            command = "fixture"
+            [mcp_servers.beta]
+            enabled = false
+            [mcp_servers."invalid.name"]
+            command = "fixture"
+        "#;
+        fs::write(f.owner.dir.join(CONFIG), config).unwrap();
+        let options = options(&f.owner);
+        assert_eq!(options.account_skills, ["other", "pack", "pack/inner"]);
+        assert_eq!(
+            options.mcp,
+            [("alpha".into(), true), ("beta".into(), false)].into()
+        );
+        assert!(options.account_listing_bytes["pack/inner"] > 0);
+        let mut spec = CodexHomeSpec {
+            account_skills_off: vec!["pack/inner".into(), "other".into()],
+            ..Default::default()
+        };
+        f.build(&spec).unwrap();
+        let installed = f.home.join("skills");
+        assert!(installed.join("pack/SKILL.md").is_file());
+        assert!(!installed.join("pack/inner/SKILL.md").exists());
+        assert!(!installed.join("other/SKILL.md").exists());
+        assert!(installed.join(".system/ignored/SKILL.md").is_file());
+        assert!(root.join("pack/inner/SKILL.md").is_file());
+        assert_eq!(
+            fs::read_to_string(f.owner.dir.join(CONFIG)).unwrap(),
+            config
+        );
+        spec.account_skills_off.clear();
+        f.build(&spec).unwrap();
+        assert!(installed.join("pack/inner/SKILL.md").is_file());
+        assert!(installed.join("other/SKILL.md").is_file());
+    }
 
     const FAKE_AUTH: &str = "FAKE-TOKEN-1";
     const OWNER_CONFIG: &str = "# top comment\nmodel = \"x\"\n\n[hooks.state.\"a:b\"]\ntrusted_hash = \"OWNER\"\n\n# keep\n[projects.\"/x\"]\ntrust_level = \"trusted\"\n";
@@ -708,6 +900,7 @@ mod tests {
         CodexHomeSpec {
             instructions: true,
             hooks_off: spec_keys.to_vec(),
+            ..Default::default()
         }
     }
 
@@ -1093,6 +1286,7 @@ mod tests {
         let spec = CodexHomeSpec {
             instructions: false,
             hooks_off: vec![],
+            ..Default::default()
         };
         f.build(&spec).unwrap();
         assert!(gone(&f.home.join(INSTRUCTIONS)));
@@ -1625,6 +1819,7 @@ mod tests {
         let spec = CodexHomeSpec {
             instructions: true,
             hooks_off: options.hooks.iter().map(|h| h.key.clone()).collect(),
+            ..Default::default()
         };
         assert_eq!(spec.validate(), Ok(()));
         fs::remove_file(f.owner.dir.join(INSTRUCTIONS)).unwrap();

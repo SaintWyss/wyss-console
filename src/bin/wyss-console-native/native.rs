@@ -66,6 +66,7 @@ pub struct Preview {
     pub can_start: bool,
     pub plan_token: Option<String>,
     pub provider_version: Option<String>,
+    pub bypass: Option<bool>,
 }
 
 pub fn parse_preview(v: &Value) -> Result<Preview, HostError> {
@@ -73,6 +74,7 @@ pub fn parse_preview(v: &Value) -> Result<Preview, HostError> {
         can_start: v["can_start"].as_bool().ok_or_else(|| bad("preview has no can_start"))?,
         plan_token: v["plan_token"].as_str().map(str::to_owned),
         provider_version: v["provider_version"].as_str().map(str::to_owned),
+        bypass: v["bypass"].as_bool(),
     })
 }
 
@@ -120,6 +122,7 @@ pub struct Started {
     pub terminal_id: String,
     /// Stored skills of the preset the host could not prepare: (name, reason code).
     pub skills_skipped: Vec<(String, String)>,
+    pub omitted_options: Vec<String>,
 }
 
 pub fn parse_started(v: &Value) -> Result<Started, HostError> {
@@ -134,7 +137,31 @@ pub fn parse_started(v: &Value) -> Result<Started, HostError> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Started { session, terminal_id, skills_skipped })
+    let omitted_options = v["omitted_options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|option| option.as_str().map(str::to_owned))
+        .collect();
+    Ok(Started {
+        session,
+        terminal_id,
+        skills_skipped,
+        omitted_options,
+    })
+}
+
+pub fn start_notes(started: &Started) -> Vec<String> {
+    let agent = started.session.agent_name.as_str();
+    started.omitted_options.iter().map(|option| {
+        if option == "bypass_preview_required" {
+            return tr(t!("Full access became available after preview. The session opened without it."));
+        }
+        trf(
+            t!("This version of {agent} does not offer {option}. The session opened without it."),
+            &[("agent", agent), ("option", option)],
+        )
+    }).chain(started.skills_skipped.iter().map(|(name, reason)| skipped_skill_note(name, reason))).collect()
 }
 
 /// What the owner reads about a stored skill the host could not prepare for the session.
@@ -294,7 +321,17 @@ pub fn prepare_restart(host: &Host, id: &str) -> Result<Restart, HostError> {
     }
     let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
     // The host restarts with the exclusion it stored, so the preview names that same one.
-    preview(host, agent, session.profile_id.as_deref(), session.arsenal.as_ref()).map(Restart::Confirm)
+    let preview = preview(
+        host,
+        agent,
+        session.profile_id.as_deref(),
+        session.arsenal.as_ref(),
+    )?;
+    if preview.can_start && preview.bypass == Some(false) {
+        restart(host, id, Some(&preview)).map(|started| Restart::Started(Box::new(started)))
+    } else {
+        Ok(Restart::Confirm(preview))
+    }
 }
 
 fn full_access(session: &Session) -> bool {
@@ -432,7 +469,26 @@ fn open_launch_with(
                 }
             };
             let arsenal = arsenal.as_ref();
-            let bypass = launch.full_access();
+            let profile = permission.map(|p| p.profile_id());
+            let pre = preview(host, agent.id(), profile, arsenal)?;
+            if !pre.can_start {
+                return Err(Refusal(trf(
+                    t!(
+                        "The launch “{name}” cannot start with this permission. No commands were run."
+                    ),
+                    &[("name", &launch.name)],
+                )));
+            }
+            let bypass = launch.full_access() && pre.bypass != Some(false);
+            // Approving before commands while bypass is unavailable must not approve bypass
+            // for a later invocation after a provider update.
+            let before_only;
+            let fingerprint = if launch.full_access() && !bypass {
+                before_only = wyss_console::launch::bind(fingerprint, "before-without-full-access");
+                &before_only
+            } else {
+                fingerprint
+            };
             if !before_cmds.is_empty() || bypass {
                 let Some(approvals) = approvals else {
                     return Err(Refusal(failure_text("store_unavailable")));
@@ -442,24 +498,28 @@ fn open_launch_with(
                     return Ok(Opened::NeedsApproval(*needed));
                 }
             }
-            let profile = permission.map(|p| p.profile_id());
-            let pre = preview(host, agent.id(), profile, arsenal)?;
-            if !pre.can_start {
-                return Err(Refusal(trf(t!("The launch “{name}” cannot start with this permission. No commands were run."), &[("name", &launch.name)])));
-            }
             let notes: Vec<String> = before(before_cmds, &directory, fingerprint)
                 .into_iter()
                 .filter(|(_, result)| result != "ok")
                 .map(|(_, result)| trf(t!("A command before the start did not succeed ({result}); the agent started anyway."), &[("result", &result)]))
                 .collect();
             // The `before` commands may take minutes: the start uses a token of its own, fresh.
-            let pre = if before_cmds.is_empty() { pre } else { preview(host, agent.id(), profile, arsenal)? };
+            let pre = if before_cmds.is_empty() {
+                pre
+            } else {
+                let new = preview(host, agent.id(), profile, arsenal)?;
+                if launch.full_access() && !bypass && new.bypass != Some(false) {
+                    pre
+                } else {
+                    new
+                }
+            };
             if !pre.can_start {
                 return Err(Refusal(trf(t!("The launch “{name}” cannot start with this permission. No commands were run."), &[("name", &launch.name)])));
             }
             let started = start(host, agent.id(), &directory, profile, arsenal, &pre)?;
             let mut notes = notes;
-            notes.extend(started.skills_skipped.iter().map(|(name, reason)| skipped_skill_note(name, reason)));
+            notes.extend(start_notes(&started));
             Ok(Opened::Agent { started, notes })
         }
     }
@@ -554,8 +614,20 @@ mod tests {
     #[test]
     fn previews_sessions_and_replies_are_read() {
         let p = parse_preview(&json!({"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok", "through_shell": true, "with_cost": []})).unwrap();
-        assert_eq!(p, Preview { can_start: true, plan_token: Some("tok".into()), provider_version: None });
-        assert!(!parse_preview(&json!({"can_start": false, "plan_token": null})).unwrap().can_start);
+        assert_eq!(
+            p,
+            Preview {
+                can_start: true,
+                plan_token: Some("tok".into()),
+                provider_version: None,
+                bypass: None
+            }
+        );
+        assert!(
+            !parse_preview(&json!({"can_start": false, "plan_token": null}))
+                .unwrap()
+                .can_start
+        );
         assert!(parse_preview(&json!({})).is_err());
 
         let s = parse_session(&session_answer("running")).unwrap();
@@ -837,7 +909,13 @@ mod tests {
 
     #[test]
     fn a_session_launch_whose_text_is_not_approved_shows_what_it_would_run_and_runs_nothing() {
-        let host = Host::new("/nonexistent/none.sock");
+        let (path, handle) = fake_host(vec![(
+            "native_preview",
+            json!({
+                "ok": { "can_start": true, "plan_token": "one", "bypass": true }
+            }),
+        )]);
+        let host = Host::new(&path);
         let before = |_: &[String], _: &str, _: &str| -> Vec<(String, String)> { panic!("no command may run") };
         let home = std::env::temp_dir().to_string_lossy().into_owned();
         let approvals = test_approvals();
@@ -845,5 +923,6 @@ mod tests {
         let out = open_launch(&host, &session_launch(Some(Permission::Bypass), None), &other, &home, &before, Some(&approvals)).unwrap();
         let Opened::NeedsApproval(needed) = out else { panic!("{out:?}") };
         assert_eq!((needed.before, needed.bypass, needed.fingerprint), (vec!["true".to_owned()], true, wyss_console::launch::bind(&other, &home)));
+        assert_eq!(handle.join().unwrap().len(), 1);
     }
 }

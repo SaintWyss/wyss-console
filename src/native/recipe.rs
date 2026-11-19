@@ -72,6 +72,7 @@ pub fn recipe(shell: &Path, words: &[String], direct: &Path) -> Recipe {
 const ENV: &str = "/usr/bin/env";
 
 const POSIX_GUARD: &str = "resolved=$(command -v \"$1\") || { printf '%s\\n' 'Wyss: provider command could not be resolved; no agent was started.' >&2; exit 127; }; actual=$(\"$resolved\" --version 2>/dev/null) || { printf '%s\\n' 'Wyss: provider version could not be checked; no agent was started.' >&2; exit 125; }; if [ \"$actual\" != \"$2\" ]; then printf '%s\\n' 'Wyss: provider build changed after preview; no profile was applied and no agent was started.' >&2; exit 125; fi; if [ -z \"${WYSS_NATIVE_VERSION_GUARD:-}\" ] || ! printf 'ok\\n' > \"$WYSS_NATIVE_VERSION_GUARD\"; then printf '%s\\n' 'Wyss: provider start could not be verified; no agent was started.' >&2; exit 125; fi; unset WYSS_NATIVE_VERSION_GUARD; ";
+const POSIX_MARKER: &str = "if [ -z \"${WYSS_NATIVE_VERSION_GUARD:-}\" ] || ! printf 'ok\\n' > \"$WYSS_NATIVE_VERSION_GUARD\"; then exit 125; fi; unset WYSS_NATIVE_VERSION_GUARD; ";
 const POSIX_EXEC: &str = "shift 2; exec \"$resolved\" \"$@\"";
 const POSIX_EXEC_PINNED: &str = "pin=$3; shift 3; exec /usr/bin/env \"$pin\" \"$resolved\" \"$@\"";
 const FISH_RESOLVE: &str = "set -l resolved (command -s -- \"$argv[1]\"); if test -z \"$resolved\"; printf '%s\\n' 'Wyss: provider command could not be resolved; no agent was started.' >&2; exit 127; end; ";
@@ -147,6 +148,25 @@ pub fn recipe_pinned_secret(
         return recipe(shell, words, direct);
     };
     let Some(expected_version) = expected_version else {
+        if secret {
+            let (command, label) = match family {
+                Family::Fish => (format!("{FISH_SECRET_READ}{FISH_MARKER}exec $argv"), "--"),
+                _ => (
+                    format!("{POSIX_SECRET_READ}{POSIX_MARKER}{POSIX_SECRET_EXPORT}exec \"$@\""),
+                    "wyss-launch",
+                ),
+            };
+            let mut args = vec!["-i".into(), "-c".into(), command, label.into()];
+            if let Some(pin) = pin {
+                args.extend([ENV.to_owned(), pin]);
+            }
+            args.extend_from_slice(words);
+            return Recipe {
+                program: shell.to_owned(),
+                args,
+                through_shell: true,
+            };
+        }
         let Some(pin) = pin else {
             return recipe(shell, words, direct);
         };

@@ -57,7 +57,10 @@ fn the_templates_are_one_per_permission_and_the_removed_one_is_unknown() {
     let (edits, version) = store.resolve("template-edits").unwrap();
     assert_eq!(version, 0);
     assert_eq!(edits.body.name, "Accept edits");
-    assert_eq!(edits.body.applies_to, vec![AgentId::ClaudeCode]);
+    assert_eq!(
+        edits.body.applies_to,
+        vec![AgentId::ClaudeCode, AgentId::Codex]
+    );
     // No template carries anything but a permission: model, effort, hooks and skills are not
     // the Console's to pass at a launch.
     for (id, body) in templates() {
@@ -119,10 +122,12 @@ fn each_permission_template_becomes_the_flags_its_agent_documents() {
         words(&flags("template-full-access", AgentId::Codex)),
         ["--dangerously-bypass-approvals-and-sandbox"]
     );
-    // Accept edits was not written for Codex: nothing is passed, and the start is refused.
     let codex_edits = flags("template-edits", AgentId::Codex);
-    assert!(words(&codex_edits).is_empty());
-    assert!(!codex_edits.not_applicable.is_empty());
+    assert_eq!(
+        words(&codex_edits),
+        ["-s", "workspace-write", "-a", "on-request"]
+    );
+    assert!(codex_edits.not_applicable.is_empty());
     fs::remove_dir_all(dir).unwrap();
 }
 

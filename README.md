@@ -13,6 +13,10 @@ Aplicación GTK4 para Linux. Consola abre terminales en pestañas y paneles. Wor
 | Personalización → Credenciales | Claves por proveedor. La clave se pide en un diálogo propio y nunca se muestra; la lista enseña nombre y huella. Borrar pide escribir el nombre. |
 | Ajustes | Apariencia, idioma, pantalla de inicio, terminal (fuente, historial, cursor), qué pasa con las terminales al cerrar la ventana, Acerca de y Restablecer. |
 
+En los lanzamientos de Codex, la pestaña **MCP** permite elegir qué servidores del `config.toml` se usan al arrancar. **Skills → Entorno → Cuenta de Codex** toma las skills de `$CODEX_HOME/skills` o `~/.codex/skills`. Workspace guarda ambos ajustes en el preset. **Ediciones** usa `workspace-write` con aprobación `on-request`.
+
+El host consulta la ayuda del ejecutable instalado de Codex o Claude Code. Si falta una opción del lanzamiento, la Consola avisa qué se omitió. **Acceso total** aparece cuando la ayuda anuncia su parámetro y conserva las comprobaciones de aprobación.
+
 ## Atajos de la Consola
 
 | Atajo | Acción |

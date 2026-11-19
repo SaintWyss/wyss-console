@@ -9,7 +9,7 @@ mod acl_tests;
 mod adapter_tests;
 pub mod catalogue;
 mod claude;
-mod codex;
+pub(crate) mod codex;
 mod declared;
 pub mod guide;
 mod inventory;

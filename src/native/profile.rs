@@ -305,7 +305,7 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
             );
             plan.with_cost.push(BYPASS_COST.to_owned());
         }
-        (AgentId::Codex, Some(Permission::Ask)) => {
+        (AgentId::Codex, Some(Permission::Ask | Permission::Edits)) => {
             literal(&mut plan, &["-s", "workspace-write", "-a", "on-request"]);
             plan.applied
                 .push("Codex: workspace-write sandbox, asks when it decides to.".to_owned());
@@ -315,9 +315,6 @@ pub fn plan(profile: &Resolved, agent: AgentId, applies: bool) -> LaunchPlan {
             plan.applied
                 .push("Codex: read-only sandbox, asks when it decides to.".to_owned());
         }
-        (AgentId::Codex, Some(Permission::Edits)) => plan
-            .not_applicable
-            .push("Codex has no separate mode that accepts edits without asking.".to_owned()),
         (AgentId::Opencode | AgentId::Hermes, Some(_)) => plan.not_applicable.push(
             "This provider's permission controls are not managed by Native profiles.".to_owned(),
         ),
@@ -398,9 +395,9 @@ pub fn templates() -> Vec<(&'static str, Body)> {
             "template-edits",
             Body {
                 name: "Accept edits".to_owned(),
-                applies_to: vec![AgentId::ClaudeCode],
+                applies_to: both.clone(),
                 permission: Some(Permission::Edits),
-                notes: "Edits are accepted without asking. Claude Code only.".to_owned(),
+                notes: "Accept edits in Claude Code; workspace-write with on-request approvals in Codex.".to_owned(),
                 ..Body::default()
             },
         ),

@@ -35,7 +35,7 @@ pub fn tabs(agent: &str) -> impl Iterator<Item = (&'static str, &'static str)> {
         ("summary", crate::t!("Summary")),
     ]
     .into_iter()
-    .filter(move |(id, _)| *id != "mcp" || agent == CLAUDE)
+    .filter(move |(id, _)| *id != "mcp" || matches!(agent, CLAUDE | CODEX))
 }
 
 pub fn permission_label(id: &str) -> &'static str {
@@ -117,7 +117,7 @@ fn groups_filter_cached_launches_without_changing_group_order() {
 pub fn permissions(agent: &str) -> impl Iterator<Item = &'static str> {
     launch::PERMISSIONS
         .into_iter()
-        .filter(move |permission| agent == CLAUDE || *permission != "edits")
+        .filter(move |permission| matches!(agent, CLAUDE | CODEX) || *permission != "edits")
 }
 
 pub fn project_choice(index: u32, text: String) -> Choice {
@@ -649,6 +649,23 @@ pub fn inventory(home: &Path) -> Inventory {
 }
 
 impl Draft {
+    pub fn account_skill_exclusions(&self) -> &[String] {
+        if self.agent == CLAUDE {
+            &self.claude.account_skills_off
+        } else {
+            &self.codex.account_skills_off
+        }
+    }
+
+    pub fn set_account_skill(&mut self, name: &str, on: bool) {
+        let off = if self.agent == CLAUDE {
+            &mut self.claude.account_skills_off
+        } else {
+            &mut self.codex.account_skills_off
+        };
+        set_off(off, name, on);
+    }
+
     pub fn hook_exclusions(&self) -> &[String] {
         if self.agent == CLAUDE {
             &self.claude.hooks_off
@@ -699,9 +716,9 @@ mod tests {
     }
 
     #[test]
-    fn general_permission_is_provider_specific() {
+    fn edits_is_available_for_both_providers() {
         assert!(permissions(CLAUDE).any(|p| p == "edits"));
-        assert!(!permissions(CODEX).any(|p| p == "edits"));
+        assert!(permissions(CODEX).any(|p| p == "edits"));
     }
 
     #[test]
@@ -774,7 +791,7 @@ mod tests {
             ids(CLAUDE),
             ["general", "skills", "mcp", "hooks", "summary"]
         );
-        assert_eq!(ids(CODEX), ["general", "skills", "hooks", "summary"]);
+        assert_eq!(ids(CODEX), ["general", "skills", "mcp", "hooks", "summary"]);
         assert_eq!(
             GENERAL_FIELDS,
             [
@@ -836,6 +853,36 @@ mod tests {
         assert_eq!(places.folder, root.join("config/wyss-console/launch"));
         std::fs::create_dir_all(&places.home).unwrap();
         places.os_release = root.join("os-release");
+        let codex_home = root.join("codex");
+        std::fs::create_dir_all(codex_home.join("skills/demo")).unwrap();
+        std::fs::write(
+            codex_home.join("skills/demo/SKILL.md"),
+            "---\nname: demo\ndescription: test\n---\n",
+        )
+        .unwrap();
+        std::fs::write(codex_home.join("AGENTS.md"), "global!!").unwrap();
+        std::fs::write(places.home.join("AGENTS.md"), "project!").unwrap();
+        let inventory = inventory(&places.home);
+        let mut codex = Draft::load(&places, None, CODEX, None).unwrap();
+        let skills = Skills {
+            library: vec![],
+            reasons: Default::default(),
+            copied: Default::default(),
+            project_bytes: 0,
+        };
+        let accounts = skills.groups(CODEX, &inventory.1.account_skills, "");
+        assert_eq!(accounts[0].categories[0].label, "Codex account");
+        assert_eq!(accounts[0].categories[0].entries, [("demo", "demo", true)]);
+        let listing = inventory.1.account_listing_bytes["demo"].div_ceil(4);
+        assert!(listing > 0);
+        assert_eq!(estimate(&codex, &inventory, &[]), 4 + listing);
+        codex.set_account_skill("demo", false);
+        assert_eq!(estimate(&codex, &inventory, &[]), 4);
+        codex.codex.instructions = false;
+        codex.project = Choice::Exclude {
+            role: String::new(),
+        };
+        assert_eq!(estimate(&codex, &inventory, &[]), 0);
         let mut estimate_draft = Draft::load(&places, None, CLAUDE, None).unwrap();
         estimate_draft.claude.rules_off.push("off".into());
         estimate_draft
@@ -857,9 +904,23 @@ mod tests {
             .into(),
             ..Options::default()
         };
-        assert_eq!(estimate(&estimate_draft, &options, &[]), 14_008);
+        assert_eq!(
+            estimate(
+                &estimate_draft,
+                &(options.clone(), CodexOptions::default()),
+                &[]
+            ),
+            14_008
+        );
         estimate_draft.claude.instructions = false;
-        assert_eq!(estimate(&estimate_draft, &options, &[]), 14_005);
+        assert_eq!(
+            estimate(
+                &estimate_draft,
+                &(options.clone(), CodexOptions::default()),
+                &[]
+            ),
+            14_005
+        );
         let missing = places.folder.join("missing-directory.toml");
         launch::list_for_editor(&places).unwrap();
         std::fs::write(
@@ -948,10 +1009,49 @@ mod tests {
     }
 }
 
-pub fn estimate(draft: &Draft, options: &Options, library: &[arsenal::store::Summary]) -> u64 {
-    estimate_with(&draft.claude, options, library, |id| {
+pub fn estimate(draft: &Draft, inventory: &Inventory, library: &[arsenal::store::Summary]) -> u64 {
+    estimate_for(draft, inventory, library, project_bytes(draft), |id| {
         draft.items.iter().any(|selected| selected.capability == id)
     })
+}
+
+fn project_bytes(draft: &Draft) -> u64 {
+    if draft.agent == CODEX {
+        launch_home_codex::project_instruction_bytes(Path::new(&draft.directory))
+    } else {
+        0
+    }
+}
+
+fn estimate_for(
+    draft: &Draft,
+    (claude, codex): &Inventory,
+    library: &[arsenal::store::Summary],
+    project_bytes: u64,
+    active: impl Fn(&str) -> bool,
+) -> u64 {
+    if draft.agent == CLAUDE {
+        return estimate_with(&draft.claude, claude, library, active);
+    }
+    let instructions = u64::from(draft.codex.instructions) * codex.instruction_bytes;
+    let project = match &draft.project {
+        Choice::Load => project_bytes.min(codex.project_doc_max_bytes.unwrap_or(u64::MAX)),
+        Choice::Exclude { .. } => 0,
+        Choice::Role { role } => role.len() as u64,
+    };
+    instructions.div_ceil(4)
+        + project.div_ceil(4)
+        + codex
+            .account_listing_bytes
+            .iter()
+            .filter(|(name, _)| !draft.account_skill_exclusions().contains(name))
+            .map(|(_, bytes)| bytes.div_ceil(4))
+            .sum::<u64>()
+        + library
+            .iter()
+            .filter(|item| item.provider == CODEX && item.kind == "skill" && active(&item.id))
+            .map(listing_tokens)
+            .sum::<u64>()
 }
 
 pub fn estimate_ceiling(options: &Options, library: &[arsenal::store::Summary]) -> u64 {
@@ -1014,6 +1114,17 @@ pub fn k_tokens(tokens: u64) -> String {
     }
 }
 
+pub fn codex_mcp_counts(spec: &CodexHomeSpec, options: &CodexOptions) -> (usize, usize) {
+    (
+        options
+            .mcp
+            .iter()
+            .filter(|(name, inherited)| spec.mcp_enabled(name, **inherited))
+            .count(),
+        options.mcp.len(),
+    )
+}
+
 pub fn mcp_counts(spec: &HomeSpec, options: &Options) -> (usize, usize) {
     (
         options
@@ -1031,6 +1142,7 @@ pub struct Skills {
     pub reasons: BTreeMap<String, String>,
     /// Stored skills a session gets from the library, copied into its own folder.
     pub copied: std::collections::BTreeSet<String>,
+    project_bytes: u64,
 }
 
 type SkillEntry<'a> = (&'a str, &'a str, bool);
@@ -1064,6 +1176,7 @@ pub fn skill_category_rank(category: &str) -> usize {
         "Study and knowledge",
         "Other",
         "Claude account",
+        "Codex account",
     ]
     .iter()
     .position(|name| *name == category)
@@ -1109,18 +1222,16 @@ impl Skills {
                 .or_default()
                 .push((&item.name, &item.id, false));
         }
-        if provider == CLAUDE {
-            for name in account_skills
-                .iter()
-                .filter(|name| name.to_lowercase().contains(needle))
-            {
-                groups
-                    .entry(crate::t!("Environment"))
-                    .or_default()
-                    .entry(crate::t!("Claude account"))
-                    .or_default()
-                    .push((name, name, true));
-            }
+        for name in account_skills
+            .iter()
+            .filter(|name| name.to_lowercase().contains(needle))
+        {
+            groups
+                .entry(crate::t!("Environment"))
+                .or_default()
+                .entry(account_category(provider))
+                .or_default()
+                .push((name, name, true));
         }
         let searching = !needle.is_empty();
         ordered_skill_groups(groups)
@@ -1192,6 +1303,7 @@ impl Skills {
             library: library.to_vec(),
             reasons,
             copied,
+            project_bytes: project_bytes(draft),
         }
     }
 
@@ -1199,17 +1311,26 @@ impl Skills {
         !self.reasons.contains_key(id) && draft.items.iter().any(|item| item.capability == id)
     }
 
-    pub fn estimate(&self, draft: &Draft, options: &Options) -> u64 {
-        estimate_with(&draft.claude, options, &self.library, |id| {
+    pub fn estimate(&self, draft: &Draft, inventory: &Inventory) -> u64 {
+        estimate_for(draft, inventory, &self.library, self.project_bytes, |id| {
             self.active(draft, id)
         })
+    }
+
+    pub fn estimate_ceiling(&self, draft: &Draft, inventory: &Inventory) -> u64 {
+        if draft.agent == CLAUDE {
+            return estimate_ceiling(&inventory.0, &self.library);
+        }
+        let mut all = draft.clone();
+        all.codex = CodexHomeSpec::default();
+        estimate_for(&all, inventory, &self.library, self.project_bytes, |_| true).max(1)
     }
 
     pub fn listings(&self, draft: &Draft) -> u64 {
         self.library
             .iter()
             .filter(|item| {
-                item.provider == CLAUDE && item.kind == "skill" && self.active(draft, &item.id)
+                item.provider == draft.agent && item.kind == "skill" && self.active(draft, &item.id)
             })
             .map(listing_tokens)
             .sum()
@@ -1220,29 +1341,39 @@ fn listing_tokens(item: &arsenal::store::Summary) -> u64 {
     (item.name.len() as u64 + item.description.len() as u64 + 24).div_ceil(4)
 }
 
-pub fn skill_counts(draft: &Draft, options: &Options, skills: &Skills) -> (usize, usize) {
+pub fn account_category(agent: &str) -> &'static str {
+    if agent == CLAUDE {
+        crate::t!("Claude account")
+    } else {
+        crate::t!("Codex account")
+    }
+}
+
+pub fn account_skills<'a>(agent: &str, inventory: &'a Inventory) -> &'a [String] {
+    if agent == CLAUDE {
+        &inventory.0.account_skills
+    } else {
+        &inventory.1.account_skills
+    }
+}
+
+pub fn skill_counts(draft: &Draft, inventory: &Inventory, skills: &Skills) -> (usize, usize) {
     let library = skills
         .library
         .iter()
         .filter(|item| item.provider == draft.agent && item.kind == "skill");
-    let active = library
-        .clone()
-        .filter(|item| skills.active(draft, &item.id))
-        .count();
-    let total = library.count();
-    if draft.agent == CLAUDE {
-        let account = &options.account_skills;
-        (
-            active
-                + account
-                    .iter()
-                    .filter(|name| !draft.claude.account_skills_off.contains(name))
-                    .count(),
-            total + account.len(),
-        )
-    } else {
-        (active, total)
-    }
+    let account = account_skills(&draft.agent, inventory);
+    (
+        library
+            .clone()
+            .filter(|item| skills.active(draft, &item.id))
+            .count()
+            + account
+                .iter()
+                .filter(|name| !draft.account_skill_exclusions().contains(name))
+                .count(),
+        library.count() + account.len(),
+    )
 }
 
 pub fn hook_tab_counts(draft: &Draft, options: &Options, codex: &CodexOptions) -> (usize, usize) {
@@ -1293,6 +1424,7 @@ mod estimate_tests {
             library,
             reasons: BTreeMap::new(),
             copied: Default::default(),
+            project_bytes: 0,
         };
 
         let groups = skills.groups(CLAUDE, &[], "");
@@ -1329,4 +1461,11 @@ mod estimate_tests {
         assert_eq!(k_tokens(999), "<1k");
         assert_eq!(k_tokens(34_500), "35k");
     }
+}
+
+#[cfg(test)]
+#[test]
+fn codex_workspace_offers_mcp_and_edits() {
+    assert!(tabs(CODEX).any(|(id, _)| id == "mcp"));
+    assert!(permissions(CODEX).any(|id| id == "edits"));
 }

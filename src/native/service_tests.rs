@@ -27,8 +27,36 @@ pub(crate) struct World {
     service: NativeService,
 }
 
+const CODEX_HELP: &str = "Options:
+  -m, --model <MODEL>
+  -c, --config <KEY=VALUE>
+  -s, --sandbox <MODE>
+          [possible values: read-only, workspace-write, danger-full-access]
+  -a, --ask-for-approval <POLICY>
+          [possible values: untrusted, on-request, never]
+  --no-daemon
+  --dangerously-bypass-approvals-and-sandbox";
+const CLAUDE_HELP: &str = "Options:
+  --model <model>
+  --effort <effort> (choices: low, medium, high, xhigh, max)
+  --permission-mode <mode> (choices: manual, plan, acceptEdits)
+  --settings <file>
+  --mcp-config <file>
+  --strict-mcp-config
+  --dangerously-skip-permissions";
+
 pub(crate) fn script(path: &Path, body: &str) {
-    fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    let help = match path.file_name().and_then(|name| name.to_str()) {
+        Some("claude") => Some(CLAUDE_HELP),
+        Some("codex") => Some(CODEX_HELP),
+        _ => None,
+    };
+    let probe = help
+        .filter(|_| !body.contains("--help"))
+        .map_or_else(String::new, |help| {
+            format!("[ \"$1\" = --help ] && {{ printf '%s\\n' '{help}'; exit 0; }}\n")
+        });
+    fs::write(path, format!("#!/bin/sh\n{probe}{body}\n")).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
@@ -386,7 +414,7 @@ fn a_running_native_session_is_stopped_only_after_its_replacement_starts() {
 }
 
 #[test]
-fn a_shell_version_mismatch_during_restart_keeps_the_previous_session_running() {
+fn a_shell_path_change_cannot_redirect_the_probed_provider_on_restart() {
     let world = World::new();
     let profile_id = world
         .service
@@ -424,7 +452,7 @@ fn a_shell_version_mismatch_during_restart_keeps_the_previous_session_running() 
         ),
     );
 
-    let error = world
+    let restarted = world
         .service
         .restart(
             &world.terminal,
@@ -433,27 +461,13 @@ fn a_shell_version_mismatch_during_restart_keeps_the_previous_session_running() 
             preview.plan_token,
             Some("2.1.309 (Claude Code)".to_owned()),
         )
-        .unwrap_err();
-    assert_eq!(error.code, "provider_version_unverified");
-    assert!(
-        !started.exists(),
-        "mismatched CLI must not receive profile flags"
-    );
-    let old = world
-        .service
-        .sessions(&world.terminal, false)
-        .into_iter()
-        .find(|session| session.session.id == id)
         .unwrap();
-    assert_eq!(old.session.state, State::Running);
+    let argv = world.output_until(&restarted.terminal.terminal_id, "SESSION=");
     assert!(
-        world
-            .terminal
-            .status(&first.terminal.terminal_id)
-            .unwrap()
-            .state
-            == wyss_console::terminal::contracts::TerminalState::Running
+        argv.contains("[--model]") && argv.contains("[sonnet]"),
+        "{argv}"
     );
+    assert!(!started.exists());
 }
 
 #[test]
@@ -970,6 +984,7 @@ fn a_codex_launch_home_is_built_for_a_changed_environment_only_and_a_failed_buil
     let chosen = with(CodexHomeSpec {
         instructions: false,
         hooks_off: vec![key],
+        ..Default::default()
     });
     let reply = codex_start(&chosen).unwrap();
     let out = world.output_until(&reply.terminal.terminal_id, "CODEX-READY");
@@ -1178,6 +1193,7 @@ fn a_codex_launch_pins_its_home_only_when_it_has_one() {
     let (launch, argv) = run(CodexHomeSpec {
         instructions: false,
         hooks_off: Vec::new(),
+        ..Default::default()
     });
     let dir = world
         .base
@@ -1255,6 +1271,7 @@ fn codex_own_home() -> super::arsenal::ArsenalLaunch {
         codex_home: Some(super::launch_home_codex::CodexHomeSpec {
             instructions: false,
             hooks_off: Vec::new(),
+            ..Default::default()
         }),
         ..arsenal_launch(&[])
     }
@@ -1610,90 +1627,200 @@ fn a_full_access_restart_goes_on_with_a_fresh_preview_token_used_once() {
     assert_eq!(again.code, "profile_preview_stale");
 }
 
-fn version_fixture() -> (World, NativeService, PathBuf, String) {
+fn provider_with_help(file: &Path, version: &str, help: &str) {
+    script(
+        file,
+        &format!(
+            "case \"$1\" in --version) echo '{version}'; exit 0;; --help) printf '%s\\n' '{help}'; exit 0;; esac\nfor a in \"$@\"; do echo \"[$a]\"; done; echo READY; exec cat"
+        ),
+    );
+}
+
+#[test]
+fn codex_new_help_applies_edits_and_mcp_without_a_version_record() {
     let world = World::new();
-    let service = NativeService::open_with_env(
-        world.base.clone(),
-        world.home.clone(),
-        Some(world.bin.as_os_str().to_owned()),
-        vec![],
-        world.bin.join("shell-without-a-recipe"),
-    )
-    .unwrap();
-    let profile = service
-        .profiles()
-        .create(Body {
-            name: "Version check".into(),
-            applies_to: vec![AgentId::Codex],
-            permission: Some(Permission::ReadOnly),
-            ..Body::default()
-        })
+    provider_with_help(&world.bin.join("codex"), "codex-cli 0.999.0", CODEX_HELP);
+    let selection = super::arsenal::ArsenalLaunch {
+        codex_home: Some(super::launch_home_codex::CodexHomeSpec {
+            mcp: [("notes-server".to_owned(), false)].into(),
+            ..Default::default()
+        }),
+        ..arsenal_launch(&[])
+    };
+    let profile = Some("template-edits");
+    let preview = world
+        .service
+        .preview(AgentId::Codex, profile, Some(&selection))
         .unwrap();
-    let executable = world.bin.join("codex");
-    script(&executable, "echo 'codex-cli 0.159.0'");
-    (world, service, executable, profile)
-}
-
-fn replace_version_preserving_cache_key(executable: &Path) {
-    let before = fs::metadata(executable).unwrap();
-    script(executable, "echo 'codex-cli 0.160.0'");
-    fs::File::options()
-        .write(true)
-        .open(executable)
-        .unwrap()
-        .set_modified(before.modified().unwrap())
-        .unwrap();
-    let after = fs::metadata(executable).unwrap();
-    assert_eq!(before.len(), after.len());
-    assert_eq!(before.modified().unwrap(), after.modified().unwrap());
-}
-
-#[test]
-fn final_review_preview_reads_version_fresh() {
-    let (_world, service, executable, profile) = version_fixture();
+    assert!(preview.can_start, "{:?}", preview.not_applicable);
     assert_eq!(
-        service.launcher().agents[1].version.as_deref(),
-        Some("codex-cli 0.159.0")
+        preview.provider_version.as_deref(),
+        Some("codex-cli 0.999.0")
     );
-    replace_version_preserving_cache_key(&executable);
-    let preview = service.preview(AgentId::Codex, Some(&profile), None).unwrap();
-    assert!(preview.can_start);
-    let value = serde_json::to_value(preview).unwrap();
-    assert_eq!(value["provider_version"], "codex-cli 0.160.0");
-    assert_eq!(
-        service.launcher().agents[1].version.as_deref(),
-        Some("codex-cli 0.159.0"),
-        "the display cache still uses the original file identity"
-    );
-}
-
-#[test]
-fn final_review_direct_start_rejects_changed_version_with_same_cache_key() {
-    let (world, service, executable, profile) = version_fixture();
-    assert_eq!(
-        service.launcher().agents[1].version.as_deref(),
-        Some("codex-cli 0.159.0")
-    );
-    let preview = service.preview(AgentId::Codex, Some(&profile), None).unwrap();
-    replace_version_preserving_cache_key(&executable);
-    let error = service
+    let started = world
+        .service
         .start(
             &world.terminal,
             StartRequest {
-                arsenal: None,
-                // Prevents launching anything if the version check wrongly passes.
-                delegation: true,
                 agent_id: AgentId::Codex,
                 project: world.home.to_string_lossy().into_owned(),
-                profile_id: Some(profile),
                 size: SIZE,
+                profile_id: profile.map(str::to_owned),
                 brief: None,
                 plan_token: preview.plan_token,
                 expected_cli_version: Some("codex-cli 0.159.0".into()),
+                arsenal: Some(selection),
+                delegation: false,
             },
         )
-        .unwrap_err();
-    assert_eq!(error.code, "provider_version_unverified");
+        .unwrap();
+    let argv = world.output_until(&started.terminal.terminal_id, "READY");
+    for arg in [
+        "-s",
+        "workspace-write",
+        "-a",
+        "on-request",
+        "-c",
+        "mcp_servers.notes-server.enabled=false",
+    ] {
+        assert!(argv.contains(&format!("[{arg}]")), "{argv}");
+    }
+    assert!(started.omitted_options.is_empty());
+}
+
+#[test]
+fn codex_updated_or_unreadable_help_starts_without_unannounced_permission_options() {
+    for (help, expected) in [
+        (
+            CODEX_HELP.replace("  -a, --ask-for-approval", "  --other-approval"),
+            "--ask-for-approval on-request",
+        ),
+        ("unreadable options".to_owned(), "--sandbox read-only"),
+    ] {
+        let world = World::new();
+        let cli = world.bin.join("codex");
+        provider_with_help(&cli, "codex-cli 0.998.0", CODEX_HELP);
+        let profile = Some("template-review");
+        let preview = world
+            .service
+            .preview(AgentId::Codex, profile, None)
+            .unwrap();
+        assert!(preview.omitted_options.is_empty());
+        provider_with_help(&cli, "codex-cli 0.999.0", &help);
+        let started = world
+            .service
+            .start(
+                &world.terminal,
+                StartRequest {
+                    agent_id: AgentId::Codex,
+                    project: world.home.to_string_lossy().into_owned(),
+                    size: SIZE,
+                    profile_id: profile.map(str::to_owned),
+                    brief: None,
+                    plan_token: preview.plan_token,
+                    expected_cli_version: preview.provider_version,
+                    arsenal: None,
+                    delegation: false,
+                },
+            )
+            .unwrap();
+        let argv = world.output_until(&started.terminal.terminal_id, "READY");
+        assert!(!argv.contains("[-s]") && !argv.contains("[-a]"), "{argv}");
+        assert_eq!(started.omitted_options, [expected]);
+    }
+}
+
+#[test]
+fn claude_help_controls_flags_on_an_unrecorded_version() {
+    let world = World::new();
+    let cli = world.bin.join("claude");
+    let help = CLAUDE_HELP.replace("manual, plan, acceptEdits", "plan, acceptEdits");
+    provider_with_help(&cli, "8.8.8 (Claude Code)", &help);
+    let profile = world
+        .service
+        .profiles()
+        .create(Body {
+            name: "Requested options".into(),
+            applies_to: vec![AgentId::ClaudeCode],
+            model: Some("sonnet".into()),
+            effort: Some("high".into()),
+            permission: Some(Permission::Ask),
+            ..Body::default()
+        })
+        .unwrap();
+    let preview = world
+        .service
+        .preview(AgentId::ClaudeCode, Some(&profile), None)
+        .unwrap();
+    assert!(preview.can_start);
+    assert_eq!(preview.omitted_options, ["--permission-mode manual"]);
+    let start = world
+        .service
+        .start(
+            &world.terminal,
+            StartRequest {
+                agent_id: AgentId::ClaudeCode,
+                project: world.home.to_string_lossy().into_owned(),
+                size: SIZE,
+                profile_id: Some(profile),
+                brief: None,
+                plan_token: preview.plan_token,
+                expected_cli_version: None,
+                arsenal: None,
+                delegation: false,
+            },
+        )
+        .unwrap();
+    let argv = world.output_until(&start.terminal.terminal_id, "READY");
+    for arg in ["--model", "sonnet", "--effort", "high"] {
+        assert!(argv.contains(&format!("[{arg}]")), "{argv}");
+    }
+    assert!(!argv.contains("[--permission-mode]"), "{argv}");
+    assert_eq!(start.omitted_options, ["--permission-mode manual"]);
+}
+
+#[test]
+fn a_preview_without_bypass_does_not_authorize_it_after_an_upgrade() {
+    let world = World::new();
+    let cli = world.bin.join("codex");
+    let without_bypass = CODEX_HELP.replace("--dangerously-bypass-approvals-and-sandbox", "");
+    provider_with_help(&cli, "codex-cli 0.998.0", &without_bypass);
+    let profile = Some("template-full-access");
+    let preview = world
+        .service
+        .preview(AgentId::Codex, profile, None)
+        .unwrap();
+    assert!(preview.can_start && !preview.bypass);
+    provider_with_help(&cli, "codex-cli 0.999.0", CODEX_HELP);
+    let request = StartRequest {
+        agent_id: AgentId::Codex,
+        project: world.home.to_string_lossy().into_owned(),
+        size: SIZE,
+        profile_id: profile.map(str::to_owned),
+        brief: None,
+        plan_token: preview.plan_token,
+        expected_cli_version: preview.provider_version,
+        arsenal: None,
+        delegation: false,
+    };
+    let started = world
+        .service
+        .start(&world.terminal, request.clone())
+        .unwrap();
+    assert_eq!(started.omitted_options, ["bypass_preview_required"]);
+    let argv = world.output_until(&started.terminal.terminal_id, "READY");
+    assert!(
+        !argv.contains("--dangerously-bypass-approvals-and-sandbox"),
+        "{argv}"
+    );
+    assert_eq!(
+        world
+            .service
+            .start(&world.terminal, request)
+            .unwrap_err()
+            .code,
+        "profile_preview_stale"
+    );
 }
 
 #[test]

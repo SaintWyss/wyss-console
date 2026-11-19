@@ -246,3 +246,9 @@ fn skill_name(path: &str) -> String {
         |name| name.to_string_lossy().into_owned(),
     )
 }
+
+/// Bounded reads of files in the selected Codex owner or project directory.
+pub(crate) fn local_reader(dir: &Path) -> Option<ConfigReader> {
+    let roots = ApprovedRoots::new([dir.to_owned()]).ok()?;
+    ConfigReader::new(roots, Bounds::default()).ok()
+}
