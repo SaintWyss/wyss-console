@@ -283,6 +283,10 @@ struct State {
     /// Text of the selection as of the last drag step: a redraw under the pointer may drop the
     /// selection before the button is released, and release still has to copy.
     drag_text: RefCell<Option<String>>,
+    /// Row of the cursor as last painted: where the input line is.
+    cursor_row: std::cell::Cell<Option<usize>>,
+    /// The selection is the whole input line (Ctrl+Shift+A): Backspace/Delete then erase it.
+    input_sel: std::cell::Cell<bool>,
     /// Last pointer position over the area, for mouse wheel reports.
     pointer: StdCell<(f64, f64)>,
 }
@@ -312,6 +316,7 @@ impl State {
     fn clear_selection(&self) {
         *self.sel.borrow_mut() = None;
         *self.drag.borrow_mut() = None;
+        self.input_sel.set(false);
     }
 
     /// User input: snaps the view back to the bottom, then goes to the child.
@@ -579,6 +584,8 @@ impl Terminal {
             found: RefCell::new(ghostty::Found::default()),
             drag: RefCell::new(None),
             drag_text: RefCell::new(None),
+            cursor_row: std::cell::Cell::new(None),
+            input_sel: std::cell::Cell::new(false),
         });
 
         let area = {
@@ -622,6 +629,13 @@ impl Terminal {
         {
             let state = state.clone();
             keyc.connect_key_pressed(move |_, key, _, mods| {
+                // With the input line selected (Ctrl+Shift+A), Backspace/Delete erase it: End, then
+                // kill-to-start (readline, zsh and Claude Code's box all take Ctrl+E / Ctrl+U).
+                if state.input_sel.replace(false) && state.sel.borrow().is_some() && matches!(key, gtk::gdk::Key::BackSpace | gtk::gdk::Key::Delete) {
+                    state.clear_selection();
+                    state.write(&[0x05, 0x15]);
+                    return glib::Propagation::Stop;
+                }
                 let app_cursor = state.shared.lock().app_cursor();
                 if let Some(bytes) = keys::encode(key, mods, app_cursor) {
                     state.write(&bytes);
@@ -647,6 +661,7 @@ impl Terminal {
             click.connect_pressed(move |g, n, x, y| {
                 let Some(w) = g.widget() else { return };
                 w.grab_focus();
+                state.input_sel.set(false);
                 match g.current_button() {
                     1 => {
                         let Some(pos) = state.cell_at(x, y) else { return };
@@ -775,6 +790,24 @@ impl Terminal {
                     // Without a selection Ctrl+C does nothing: it must never reach the PTY.
                     if let (Some(a), Some(t)) = (area_w.upgrade(), state.selected_text()) {
                         a.clipboard().set_text(&t);
+                    }
+                    glib::Propagation::Stop
+                })),
+            ));
+        }
+        {
+            // Ctrl+A stays "start of line" for the program; Ctrl+Shift+A selects the input line.
+            let state = state.clone();
+            let area_w = area.downgrade();
+            paste.add_shortcut(gtk::Shortcut::new(
+                gtk::ShortcutTrigger::parse_string("<Control><Shift>a"),
+                Some(gtk::CallbackAction::new(move |_, _| {
+                    if let (Some(a), Some(row)) = (area_w.upgrade(), state.cursor_row.get()) {
+                        let cols = state.size.get().0 as usize;
+                        let (c0, c1) = selection::line_span(cols);
+                        *state.sel.borrow_mut() = Some(Selection { anchor: Pos { row, col: c0 }, head: Pos { row, col: c1 }, mode: Mode::Line });
+                        state.input_sel.set(true);
+                        a.queue_draw();
                     }
                     glib::Propagation::Stop
                 })),
@@ -1115,6 +1148,7 @@ fn draw(snap: &gtk::Snapshot, state: &State, w: f32, h: f32) {
             if all || dirty.iter().enumerate().any(|(r, d)| *d && r >= a.row && r <= b.row) {
                 *sel = None;
                 *state.drag.borrow_mut() = None;
+                state.input_sel.set(false);
             }
         }
         sel.map(|s| s.bounds(grid))
@@ -1166,6 +1200,7 @@ fn draw(snap: &gtk::Snapshot, state: &State, w: f32, h: f32) {
     // Cursor, in the style the application asked for.
     let cur = rs.cursor();
     state.cursor_blinks.set(cur.visible && cur.pos.is_some() && cur.blinking);
+    state.cursor_row.set(cur.pos.map(|(_, y)| y as usize));
     if let (true, Some((cx, cy))) = (cur.visible && (!cur.blinking || state.blink_visible.get()), cur.pos) {
         let (cx, span) = if cur.wide_tail { (cx.saturating_sub(1), 2.0) } else { (cx, 1.0) };
         let (x, y, cwid) = (PAD + cx as f32 * cw, PAD + cy as f32 * ch, cw * span);
