@@ -13,7 +13,7 @@
 }
 .personal-rail button { padding: 5px 8px; }
 .personal-rail label { min-width: 126px; }
-.personal-rail button:checked { background: @surface; border-color: @line; }
+.personal-rail button:checked { background: @accent_soft; border-color: @accent; }
 .distributor-list { border-top: 1px solid @line; }
 .distributor-row { border-bottom: 1px solid @line; padding: 10px 0; }
 .distributor-row .title, .distributor-row .installed { font-weight: bold; }

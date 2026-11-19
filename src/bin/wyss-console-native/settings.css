@@ -20,25 +20,16 @@
 .settings-panel .lbl { color: @text; font-weight: 600; }
 .settings-panel .hint { color: @muted; font-size: 14px; }
 .settings-status { margin-bottom: 3px; }
-.settings-panel dropdown > button,
-.settings-reset button {
+.settings-panel dropdown > button {
     min-height: 38px;
     padding: 0 12px;
+    border-color: @line_strong;
 }
-.settings-panel dropdown > button { border-color: @line_strong; }
 .settings-panel dropdown:focus-visible > button {
     outline: 2px solid @accent;
     outline-offset: -2px;
 }
 .settings-reset { padding-top: 18px; }
-.settings-reset button.danger {
-    color: @error;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-}
-.settings-reset button.danger:hover { background: @surface_hover; }
-.settings-view .personal-rail button:hover:not(:checked) { background: @surface_hover; }
 
 .settings-notice {
     color: @text;

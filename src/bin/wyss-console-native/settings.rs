@@ -4,7 +4,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use crate::personalization::{horizontal, label, rail_item, scroll, vertical};
+use crate::personalization::{button, horizontal, label, rail_item, scroll, vertical};
 
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -299,7 +299,7 @@ const CATEGORIES: [Category; 5] = [
     },
     Category {
         title: t!("Appearance"),
-        icon: "preferences-desktop-appearance-symbolic",
+        icon: "applications-graphics-symbolic",
         description: t!("The interface theme. It does not change agent or provider permissions."),
     },
     Category {
@@ -441,7 +441,7 @@ struct Controls {
     font: gtk::DropDown,
     history: gtk::DropDown,
     cursor: gtk::DropDown,
-    blink: gtk::CheckButton,
+    blink: gtk::Switch,
     history_values: Vec<u32>,
     fonts: Vec<u8>,
 }
@@ -598,7 +598,6 @@ pub(super) fn build(
 ) -> (gtk::Box, Landing) {
     let Snapshot { view, values, saved } = snapshot;
     let root = horizontal(0);
-    root.add_css_class("settings-view");
     let content = vertical(0);
     content.set_hexpand(true);
     let notice = label("", "settings-notice");
@@ -684,7 +683,9 @@ pub(super) fn build(
             .collect::<Vec<_>>(),
     );
     let cursor = dropdown(&[tr("Block"), tr("Bar"), tr("Underline")]);
-    let blink = gtk::CheckButton::new();
+    let blink = gtk::Switch::new();
+    blink.set_halign(gtk::Align::End);
+    blink.add_css_class("sw");
     widths.add_widget(&field(&terminal_fields, t!("Font size"), &font, None));
     widths.add_widget(&field(
         &terminal_fields,
@@ -695,7 +696,7 @@ pub(super) fn build(
         )),
     ));
     widths.add_widget(&field(&terminal_fields, t!("Cursor"), &cursor, None));
-    widths.add_widget(&field(&terminal_fields, t!("Blinking cursor"), &blink, None));
+    field(&terminal_fields, t!("Blinking cursor"), &blink, None);
 
     let lifecycle_input = Cell::new(Some(host));
     sessions.connect_map(move |panel| {
@@ -725,10 +726,8 @@ pub(super) fn build(
         facts_widths.add_widget(&field(&about, name, &value, None));
     }
 
-    let reset = gtk::Button::new();
-    reset.set_child(Some(&label(&tr("Reset preferences…"), "")));
+    let reset = button(t!("Reset preferences…"), "danger");
     reset.set_halign(gtk::Align::Start);
-    reset.add_css_class("danger");
     let reset_section = vertical(3);
     reset_section.add_css_class("settings-reset");
     reset_section.append(&label(&tr("Reset"), "lbl"));
@@ -773,13 +772,13 @@ pub(super) fn build(
     connect_choice(&c.font, &page, c.fonts.clone(), Change::Font);
     connect_choice(&c.history, &page, c.history_values.clone(), Change::History);
     connect_choice(&c.cursor, &page, CURSORS.to_vec(), Change::Cursor);
-    c.blink.connect_toggled({
+    c.blink.connect_active_notify({
         let page = Rc::downgrade(&page);
-        move |button| {
+        move |control| {
             if let Some(page) = page.upgrade()
                 && !page.saving.get()
             {
-                page.request(Change::Blink(button.is_active()));
+                page.request(Change::Blink(control.is_active()));
             }
         }
     });

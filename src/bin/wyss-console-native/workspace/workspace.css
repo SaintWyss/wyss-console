@@ -114,7 +114,8 @@
     font-weight: 600;
     padding: 14px 6px 6px;
 }
-.workspace .sw {
+.workspace .sw,
+.settings-panel .sw {
     min-width: 34px;
     min-height: 18px;
     border-radius: 99px;
@@ -123,8 +124,10 @@
     border: 1px solid @line_strong;
     box-shadow: none;
 }
-.workspace .sw image { opacity: 0; }
-.workspace .sw slider {
+.workspace .sw image,
+.settings-panel .sw image { opacity: 0; }
+.workspace .sw slider,
+.settings-panel .sw slider {
     min-width: 14px;
     min-height: 14px;
     margin: 2px;
@@ -133,9 +136,12 @@
     background: @muted;
     box-shadow: none;
 }
-.workspace .sw:checked { background: @accent_soft; border-color: @accent; }
-.workspace .sw:checked slider { background: @accent; }
-.workspace .sw:disabled { opacity: 0.55; }
+.workspace .sw:checked,
+.settings-panel .sw:checked { background: @accent; border-color: @accent; }
+.workspace .sw:checked slider,
+.settings-panel .sw:checked slider { background: @text_on_accent; }
+.workspace .sw:disabled,
+.settings-panel .sw:disabled { opacity: 0.55; }
 .workspace .notice {
     color: @warn;
     background: @warn_soft;
@@ -149,13 +155,18 @@
 .workspace textview { padding: 8px; }
 .workspace .context { padding-right: 22px; }
 .workspace label.warning { color: @warn; background: transparent; }
-.workspace .foot button.danger {
+.workspace .foot button.danger,
+.settings-reset button.danger {
+    min-height: 38px;
+    padding: 0;
+    border-width: 1px 0;
     color: @error;
     background: transparent;
     border-color: transparent;
     box-shadow: none;
 }
-.workspace .foot button.danger:hover { background: @surface_hover; }
+.workspace .foot button.danger:hover,
+.settings-reset button.danger:hover { background: @surface_hover; }
 .workspace .context progress { background: @accent; box-shadow: none; }
 .workspace .context trough { background: @line; box-shadow: none; }
 .workspace .context trough, .workspace .context progress { min-height: 4px; }
@@ -206,8 +217,6 @@
     padding: 0;
 }
 .workspace .instruction-link:hover { background: @surface_hover; }
-.workspace .sw:checked { background: @accent; border-color: @accent; }
-.workspace .sw:checked slider { background: @text_on_accent; }
 .workspace .summary-note {
     background: @surface;
     color: @text;
