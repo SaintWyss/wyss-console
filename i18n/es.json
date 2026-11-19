@@ -98,6 +98,12 @@
     "your own environment, with the skills copied from Arsenal": "tu propio entorno, con las skills copiadas desde Arsenal"
   },
   "sentences": {
+    "Full access became available after preview. The session opened without it.": "El acceso total se habilitó después de la vista previa. La sesión se abrió sin aplicarlo.",
+    "Codex account": "Cuenta de Codex",
+    "This version of {agent} does not offer {option}. The session opened without it.": "Esta versión de {agent} no ofrece {option}. La sesión se abrió sin aplicarlo.",
+    "Works inside the project and asks for approval for access outside the sandbox.": "Trabaja dentro del proyecto y pide permiso para acceder fuera del entorno aislado.",
+    "Runs with a read-only sandbox and asks for approval for access outside it.": "Se ejecuta en un entorno aislado de solo lectura y pide permiso para acceder fuera de él.",
+    "Full access is unavailable because this version does not advertise its flag.": "El acceso total no está disponible porque esta versión no anuncia el parámetro necesario.",
     "(Syncthing carries it)": "(Syncthing lo transporta)",
     "+ New": "+ Nuevo",
     "A command before the start did not succeed ({result}); the agent started anyway.": "Un comando previo al inicio no tuvo éxito ({result}); el agente arrancó igual.",
@@ -256,7 +262,6 @@
     "Include AUR -git packages": "Incluir paquetes -git del AUR",
     "Initial context": "Contexto inicial",
     "Initial context estimated": "Contexto inicial estimado",
-    "Initial context: no estimate for Codex": "Contexto inicial: sin estimación para Codex",
     "Installed": "Instalada",
     "Instructions": "Instrucciones",
     "Interrupt the program (Ctrl+C in a normal terminal)": "Interrumpe el programa (el Ctrl+C de una terminal común)",
@@ -323,7 +328,6 @@
     "None": "Ninguna",
     "Not available": "No disponible",
     "Not certain here": "No está claro acá",
-    "Not estimated": "Sin estimar",
     "Note": "Nota",
     "Nothing here is used or applied to Claude Code or Codex until you accept it.": "Nada de esto se usa ni se aplica a Claude Code o Codex hasta que lo aceptes.",
     "Nothing of this kind.": "No hay nada de este tipo.",

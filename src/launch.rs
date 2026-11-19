@@ -213,7 +213,7 @@ pub const DEFAULTS: [(&str, &str); 3] = [
     (
         "claude-code.toml",
         r#"# Starts Claude Code as a Native session with the permission named here:
-# "ask", "read_only", "edits" (Claude Code only) or "bypass"; without it, as it is configured.
+# "ask", "read_only", "edits" or "bypass"; without it, as it is configured.
 name = "Claude Code"
 directory = "~"
 
@@ -224,7 +224,7 @@ agent = "claude_code"
     (
         "codex.toml",
         r#"# Starts Codex as a Native session with the permission named here:
-# "ask", "read_only" or "bypass"; without it, as it is configured.
+# "ask", "read_only", "edits" or "bypass"; without it, as it is configured.
 name = "Codex"
 directory = "~"
 
@@ -310,13 +310,13 @@ pub fn commands_ok(commands: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// What a session may do without asking, as a launch file names it. `edits` is Claude Code's.
+/// What a session may do without asking, as a launch file names it.
 pub const PERMISSIONS: [&str; 4] = ["ask", "read_only", "edits", "bypass"];
 
 /// Resolves a session launch's permission from `permission` or a recognized `profile`
 /// template ID. Unknown IDs are refused with guidance. This does not rewrite the file.
 pub fn session_permission(
-    agent: &str,
+    _agent: &str,
     permission: Option<&str>,
     profile: Option<&str>,
 ) -> Result<Option<String>, String> {
@@ -346,9 +346,6 @@ pub fn session_permission(
             );
         }
     };
-    if permission == Some("edits") && agent != "claude_code" {
-        return Err("permission = \"edits\" is only for claude_code".into());
-    }
     Ok(permission.map(str::to_owned))
 }
 

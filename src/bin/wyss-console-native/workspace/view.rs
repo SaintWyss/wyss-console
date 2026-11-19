@@ -263,6 +263,7 @@ struct Catalog {
     store: Option<Mutex<Store>>,
     library: Vec<Summary>,
     inventory: model::Inventory,
+    bypass: [bool; 2],
     distributors: Option<distributors::List>,
 }
 
@@ -285,10 +286,26 @@ impl Catalog {
             let _timing = Timing::new("editor:disk:distributors");
             distributors::Places::from_env().and_then(|places| distributors::list(&places).ok())
         };
+        #[cfg(test)]
+        let bypass = [true; 2];
+        #[cfg(not(test))]
+        let bypass = [
+            wyss_console::native::catalogue::AgentId::ClaudeCode,
+            wyss_console::native::catalogue::AgentId::Codex,
+        ]
+        .map(|agent| {
+            use wyss_console::native::catalogue::{AGENTS, cached_cli_help, discover};
+            AGENTS
+                .iter()
+                .find(|spec| spec.id == agent)
+                .and_then(|spec| discover(spec, std::env::var_os("PATH"), &places.home))
+                .is_some_and(|path| cached_cli_help(&path).bypass(agent))
+        });
         Self {
             store: store.map(Mutex::new),
             library,
             inventory,
+            bypass,
             distributors,
         }
     }
@@ -330,12 +347,10 @@ impl Details {
         let mut badges = BTreeMap::new();
         let mut agents = BTreeMap::new();
         for entry in entries {
-            if let Kind::Session { agent, .. } = &entry.kind {
+            if let Kind::Session { .. } = &entry.kind {
                 let prepared = catalog.prepare(places, Some(entry));
-                if agent == CLAUDE
-                    && let Ok(draft) = &prepared
-                {
-                    let tokens = model::estimate(draft, &catalog.inventory.0, &catalog.library);
+                if let Ok(draft) = &prepared {
+                    let tokens = model::estimate(draft, &catalog.inventory, &catalog.library);
                     badges.insert(entry.id.clone(), format!("~{}", model::k_tokens(tokens)));
                 }
                 agents.insert(entry.id.clone(), prepared);
@@ -1628,30 +1643,31 @@ fn agent_editor(
             let (claude, codex) = &catalog.inventory;
             let data = data.borrow();
             let draft = draft.borrow();
-            let is_claude = draft.agent == CLAUDE;
-            meter.set_visible(is_claude && data.is_some());
-            if is_claude && let Some(data) = data.as_ref() {
-                let tokens = data.estimate(&draft, claude);
+            meter.set_visible(data.is_some());
+            if let Some(data) = data.as_ref() {
+                let tokens = data.estimate(&draft, &catalog.inventory);
                 context_label.set_text(&format!(
                     "{} {}",
                     tr("Initial context estimated"),
                     model::k_tokens(tokens)
                 ));
-                let ceiling = model::estimate_ceiling(claude, &data.library);
+                let ceiling = data.estimate_ceiling(&draft, &catalog.inventory);
                 let percentage = (100. * tokens as f64 / ceiling as f64).round();
                 meter.set_fraction(percentage.min(100.) / 100.);
-            } else if is_claude {
-                context_label.set_text("");
             } else {
-                context_label.set_text(&tr("Initial context: no estimate for Codex"));
+                context_label.set_text("");
             }
             for (id, title, button) in &counters {
                 if let Some(button) = button.upgrade() {
                     let text = match *id {
                         "skills" => data
                             .as_ref()
-                            .map(|data| model::skill_counts(&draft, claude, data)),
-                        "mcp" => Some(model::mcp_counts(&draft.claude, claude)),
+                            .map(|data| model::skill_counts(&draft, &catalog.inventory, data)),
+                        "mcp" => Some(if draft.agent == CLAUDE {
+                            model::mcp_counts(&draft.claude, claude)
+                        } else {
+                            model::codex_mcp_counts(&draft.codex, codex)
+                        }),
                         "hooks" => Some(model::hook_tab_counts(&draft, claude, codex)),
                         _ => None,
                     };
@@ -1834,7 +1850,8 @@ fn agent_tab(
             let (claude, codex) = &catalog.inventory;
             let is_claude = draft.borrow().agent == CLAUDE;
             match id {
-                "mcp" => mcp(parent, draft, claude),
+                "mcp" if is_claude => mcp(parent, draft, claude),
+                "mcp" => codex_mcp(parent, draft, codex),
                 "hooks" => {
                     let entries = if is_claude {
                         &claude.hooks
@@ -1848,7 +1865,7 @@ fn agent_tab(
                     };
                     hooks(parent, draft, entries, &fixed);
                 }
-                "summary" => summary(parent, &draft.borrow(), claude, codex, &data.unwrap()),
+                "summary" => summary(parent, &draft.borrow(), &catalog.inventory, &data.unwrap()),
                 _ => {}
             }
         }
@@ -2000,8 +2017,10 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: Option<
         }
     });
 
+    let agent = current.agent.clone();
+    let bypass_offered = catalog.is_some_and(|catalog| catalog.bypass[usize::from(agent == CODEX)]);
     let items: Vec<_> = std::iter::once("")
-        .chain(model::permissions(&current.agent))
+        .chain(model::permissions(&agent).filter(|id| *id != "bypass" || bypass_offered))
         .map(|id| (id, tr(model::permission_label(id))))
         .collect();
     let items: Vec<_> = items
@@ -2013,7 +2032,15 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: Option<
     controls.append(&permissions.widget);
     let advice = label("", "hint");
     controls.append(&advice);
-    permission_help(&advice, permissions.selected_id().unwrap_or(""));
+    if catalog.is_some() && !bypass_offered {
+        controls.append(&label(
+            &tr(t!(
+                "Full access is unavailable because this version does not advertise its flag."
+            )),
+            "hint",
+        ));
+    }
+    permission_help(&advice, permissions.selected_id().unwrap_or(""), &agent);
     row(
         parent,
         &tr(model::GENERAL_FIELDS[2]),
@@ -2025,7 +2052,7 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: Option<
         let widget = permissions.widget.downgrade();
         move |id| {
             draft.borrow_mut().permission = (!id.is_empty()).then(|| id.into());
-            permission_help(&advice, id);
+            permission_help(&advice, id, &agent);
             if let Some(widget) = widget.upgrade() {
                 refresh_save(&widget);
             }
@@ -2058,7 +2085,7 @@ fn general(screen: &Screen, parent: &gtk::Box, draft: &Editing, catalog: Option<
     });
     drop(current);
     let (claude, codex) = &catalog.inventory;
-    instructions(screen, parent, draft, claude, codex.instructions);
+    instructions(screen, parent, draft, claude, codex);
 }
 
 fn directory_choices(
@@ -2099,7 +2126,7 @@ fn instructions(
     parent: &gtk::Box,
     draft: &Editing,
     options: &wyss_console::native::launch_home::Options,
-    codex_instructions: bool,
+    codex: &wyss_console::native::launch_home_codex::CodexOptions,
 ) {
     let _timing = Timing::new("editor:instructions");
     use arsenal::role_instructions::Choice;
@@ -2179,8 +2206,11 @@ fn instructions(
     if is_claude {
         files.extend(options.rules.iter().map(|rule| format!("rules/{rule}")));
     }
-    if !is_claude && codex_instructions {
-        files.push("codex/AGENTS.md".to_owned());
+    if !is_claude && codex.instructions {
+        files.push(format!(
+            "codex/{}",
+            codex.instruction_file.unwrap_or("AGENTS.md")
+        ));
     }
     let rules = vertical(0);
     let mut rule_switches = Vec::<(gtk::glib::WeakRef<gtk::Switch>, String)>::new();
@@ -2302,7 +2332,7 @@ fn instructions(
                 .map(|bytes| format!("~{}", model::k_tokens(bytes.div_ceil(4))))
                 .unwrap_or_default()
         } else {
-            String::new()
+            format!("~{}", model::k_tokens(codex.instruction_bytes.div_ceil(4)))
         };
         let estimate = label(&size, "hint");
         estimate.set_hexpand(true);
@@ -2501,17 +2531,19 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
                 move || {
                     let Some(count) = count.upgrade() else { return };
                     let draft = draft.borrow();
-                    let (on, total) = model::skill_counts(&draft, &catalog.inventory.0, &data);
+                    let (on, total) = model::skill_counts(&draft, &catalog.inventory, &data);
                     let mut text = count_text(on, total);
-                    if draft.agent == CLAUDE {
-                        text.push_str(&format!(" · ~{}", model::k_tokens(data.listings(&draft))));
-                    }
+                    text.push_str(&format!(" · ~{}", model::k_tokens(data.listings(&draft))));
                     count.set_text(&text);
                 }
             });
             update();
             let current = draft.borrow();
-            for group in data.groups(&current.agent, &catalog.inventory.0.account_skills, &needle) {
+            for group in data.groups(
+                &current.agent,
+                model::account_skills(&current.agent, &catalog.inventory),
+                &needle,
+            ) {
                 let (heading, rows) = fold(&list, &tr(group.label), group.open, false);
                 let mut all = Vec::new();
                 let mut group_total = 0;
@@ -2534,8 +2566,7 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
                         }
                         let on = if account {
                             !current
-                                .claude
-                                .account_skills_off
+                                .account_skill_exclusions()
                                 .iter()
                                 .any(|key| key == id)
                         } else {
@@ -2548,7 +2579,7 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
                             move |on| {
                                 let mut current = draft.borrow_mut();
                                 if account {
-                                    model::set_off(&mut current.claude.account_skills_off, &id, on);
+                                    current.set_account_skill(&id, on);
                                 } else {
                                     current.set_skill(&id, on);
                                 }
@@ -2577,6 +2608,37 @@ fn skills(parent: &gtk::Box, draft: &Editing, data: Arc<model::Skills>, catalog:
     };
     render(&query);
     query.connect_search_changed(render);
+}
+
+fn codex_mcp(
+    parent: &gtk::Box,
+    draft: &Editing,
+    options: &wyss_console::native::launch_home_codex::CodexOptions,
+) {
+    let (header, rows) = fold(parent, &tr("Your servers"), true, false);
+    let mut switches = Vec::new();
+    for (name, inherited) in &options.mcp {
+        let initial = draft.borrow().codex.mcp_enabled(name, *inherited);
+        let control = switch(name, initial, {
+            let draft = draft.clone();
+            let name = name.clone();
+            let inherited = *inherited;
+            move |on| {
+                let mut draft = draft.borrow_mut();
+                if on == inherited {
+                    draft.codex.mcp.remove(&name);
+                } else {
+                    draft.codex.mcp.insert(name.clone(), on);
+                }
+            }
+        });
+        toggle_row(&rows, name, "", "value", Some(&control));
+        switches.push(control);
+    }
+    if switches.is_empty() {
+        rows.append(&label(&tr("Nothing of this kind."), "hint"));
+    }
+    header.append(&switch_count(&switches, switches.len()));
 }
 
 fn mcp(parent: &gtk::Box, draft: &Editing, options: &wyss_console::native::launch_home::Options) {
@@ -2775,13 +2837,8 @@ fn fact(parent: &gtk::Box, title: &str, text: &str, class: &str) {
     parent.append(&line);
 }
 
-fn summary(
-    parent: &gtk::Box,
-    draft: &Draft,
-    claude: &wyss_console::native::launch_home::Options,
-    codex: &wyss_console::native::launch_home_codex::CodexOptions,
-    data: &model::Skills,
-) {
+fn summary(parent: &gtk::Box, draft: &Draft, inventory: &model::Inventory, data: &model::Skills) {
+    let (claude, codex) = inventory;
     let is_claude = draft.agent == CLAUDE;
     if if is_claude {
         draft.claude.is_default()
@@ -2813,15 +2870,11 @@ fn summary(
         )),
         "value",
     );
-    let estimate = if is_claude {
-        format!(
-            "~{} {}",
-            model::k_tokens(data.estimate(draft, claude)),
-            tr("tokens")
-        )
-    } else {
-        tr("Not estimated")
-    };
+    let estimate = format!(
+        "~{} {}",
+        model::k_tokens(data.estimate(draft, inventory)),
+        tr("tokens")
+    );
     fact(&start, &tr("Initial context"), &estimate, "value");
 
     let (_, first) = fold(parent, &tr("Reads first"), false, false);
@@ -2838,7 +2891,7 @@ fn summary(
                 .map(|name| format!("rules/{name}")),
         );
     } else if !is_claude && draft.codex.instructions && codex.instructions {
-        files.push("AGENTS.md".into());
+        files.push(codex.instruction_file.unwrap_or("AGENTS.md").into());
     }
     for (i, file) in files.iter().enumerate() {
         fact(&first, &(i + 1).to_string(), file, "mono");
@@ -2871,14 +2924,13 @@ fn summary(
             names.push((category, item.name.as_str()));
         }
     }
-    if is_claude && !claude.account_skills.is_empty() {
-        let account = groups.entry(t!("Environment")).or_default();
-        account.extend(
-            claude
-                .account_skills
+    let account_skills = model::account_skills(&draft.agent, inventory);
+    if !account_skills.is_empty() {
+        groups.entry(t!("Environment")).or_default().extend(
+            account_skills
                 .iter()
-                .filter(|name| !draft.claude.account_skills_off.contains(name))
-                .map(|name| (t!("Claude account"), name.as_str())),
+                .filter(|name| !draft.account_skill_exclusions().contains(name))
+                .map(|name| (model::account_category(&draft.agent), name.as_str())),
         );
     }
     for (group, mut names) in model::ordered_skill_groups(groups) {
@@ -2897,15 +2949,24 @@ fn summary(
         );
     }
 
-    if is_claude {
-        let (_, mcp) = fold(parent, "MCP", false, false);
-        let servers = claude
+    let (_, mcp) = fold(parent, "MCP", false, false);
+    let servers = if is_claude {
+        claude
             .mcp
             .iter()
             .filter(|name| draft.claude.mcp_enabled(name))
             .map(String::as_str)
-            .collect::<Vec<_>>();
-        fact(&mcp, &tr("Your servers"), &servers.join(", "), "value");
+            .collect::<Vec<_>>()
+    } else {
+        codex
+            .mcp
+            .iter()
+            .filter(|(name, inherited)| draft.codex.mcp_enabled(name, **inherited))
+            .map(|(name, _)| name.as_str())
+            .collect()
+    };
+    fact(&mcp, &tr("Your servers"), &servers.join(", "), "value");
+    if is_claude {
         fact(
             &mcp,
             &tr("Account connectors"),
@@ -2943,8 +3004,14 @@ fn summary(
     }
 }
 
-fn permission_help(advice: &gtk::Label, id: &str) {
+fn permission_help(advice: &gtk::Label, id: &str, agent: &str) {
     let key = match id {
+        "ask" | "edits" if agent == CODEX => {
+            t!("Works inside the project and asks for approval for access outside the sandbox.")
+        }
+        "read_only" if agent == CODEX => {
+            t!("Runs with a read-only sandbox and asks for approval for access outside it.")
+        }
         "ask" => t!("Asks for approval before every action."),
         "read_only" => t!("Does not change files or run commands."),
         "edits" => t!("Edits without asking; asks before running commands."),

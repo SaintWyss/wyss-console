@@ -415,10 +415,6 @@ fn a_save_is_checked_against_the_desktop_and_writes_nothing_when_refused() {
             "not found",
         ),
         (
-            json!({"name": "x", "directory": work, "agent": "codex", "permission": "edits"}),
-            "only for claude_code",
-        ),
-        (
             json!({"name": "x", "directory": work, "agent": "claude_code", "preset": "Codex base"}),
             "no preset named",
         ),
@@ -765,7 +761,7 @@ fn permission_of(places: &Places, id: &str) -> Option<String> {
 }
 
 #[test]
-fn a_session_names_its_permission_and_edits_is_only_for_claude_code() {
+fn a_session_accepts_all_four_permissions_for_both_providers() {
     let places = places();
     fs::create_dir_all(&places.folder).unwrap();
     for (agent, word) in [
@@ -775,6 +771,7 @@ fn a_session_names_its_permission_and_edits_is_only_for_claude_code() {
         ("claude_code", "bypass"),
         ("codex", "ask"),
         ("codex", "read_only"),
+        ("codex", "edits"),
         ("codex", "bypass"),
     ] {
         write(
@@ -792,10 +789,6 @@ fn a_session_names_its_permission_and_edits_is_only_for_claude_code() {
     write(&places, "s.toml", &session_file("agent = \"codex\""));
     assert_eq!(permission_of(&places, "s"), None);
     for (session, why) in [
-        (
-            "agent = \"codex\"\npermission = \"edits\"",
-            "only for claude_code",
-        ),
         (
             "agent = \"claude_code\"\npermission = \"Bypass\"",
             "permission must be",

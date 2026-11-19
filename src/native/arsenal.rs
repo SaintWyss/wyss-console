@@ -303,9 +303,12 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             // Only on a plan that applies: a refused one names no home.
             if plan.not_applicable.is_empty()
                 && let Some(spec) = codex_home
+                && (own_role || copies || spec.needs_launch_home())
             {
-                plan.applied.push(codex_home_summary(spec, copies));
-                plan.codex_home = Some(spec.clone());
+                let mut spec = spec.clone();
+                spec.mcp.clear();
+                plan.applied.push(codex_home_summary(&spec, copies));
+                plan.codex_home = Some(spec);
                 copies_summary(plan, launch);
             }
             return;
@@ -431,6 +434,12 @@ fn codex_home_summary(home: &super::launch_home_codex::CodexHomeSpec, copies: bo
     if !home.hooks_off.is_empty() {
         parts.push(format!("{} hook(s) left out", home.hooks_off.len()));
     }
+    if !home.account_skills_off.is_empty() {
+        parts.push(format!(
+            "{} account skill(s) off",
+            home.account_skills_off.len()
+        ));
+    }
     if parts.is_empty() && copies {
         parts.push(SAME_ENVIRONMENT.to_owned());
     }
@@ -471,6 +480,12 @@ fn apply_codex(plan: &mut LaunchPlan, launch: &ArsenalLaunch) {
     if launch.launch_instructions.is_some() {
         literal(plan, "-c".to_owned());
         literal(plan, "project_doc_max_bytes=0".to_owned());
+    }
+    if let Some(home) = &launch.codex_home {
+        for (name, enabled) in &home.mcp {
+            literal(plan, "-c".to_owned());
+            literal(plan, format!("mcp_servers.{name}.enabled={enabled}"));
+        }
     }
     if !launch.skill_files_off.is_empty() {
         literal(plan, "-c".to_owned());
@@ -810,6 +825,7 @@ mod tests {
         crate::native::launch_home_codex::CodexHomeSpec {
             instructions,
             hooks_off: keys.iter().map(|k| (*k).to_owned()).collect(),
+            ..Default::default()
         }
     }
 

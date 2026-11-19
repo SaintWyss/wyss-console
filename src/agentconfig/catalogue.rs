@@ -279,7 +279,7 @@ const MAX_NESTED_DEPTH: usize = 12;
 /// entering hidden folders or `node_modules`. Returns them and whether the walk is complete: a folder
 /// that cannot be read, one past the depth or entry bounds, or a nested `SKILL.md` that is a link
 /// (it could name a file elsewhere) make it incomplete, and an incomplete walk is never applied.
-fn nested_skill_files(folder: &Path) -> (Vec<PathBuf>, bool) {
+pub(crate) fn nested_skill_files(folder: &Path) -> (Vec<PathBuf>, bool) {
     let mut found = Vec::new();
     let mut seen = 0_usize;
     let mut stack = vec![(folder.to_path_buf(), 0_usize)];

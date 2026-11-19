@@ -2,9 +2,8 @@
 //! build, in one project, against the skills installed right now. It is computed, never assumed:
 //! a selected capability is `prepared` when the provider already has exactly that revision
 //! installed, and `from_arsenal` (copied into the session's own folder) when it is not installed or
-//! its installed copy differs. Every other installed skill is named for exclusion, and the exclusion
-//! is applied only where the exact build has its own evidence. Nothing here writes a file or starts
-//! a process.
+//! its installed copy differs. Unselected, switchable skills are named for exclusion. Native
+//! checks the installed CLI before passing flags. Nothing here writes a file or starts a process.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -253,6 +252,8 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
     // Skills the provider installs and replaces itself stay as they are.
     let switchable = |skill: &crate::agentconfig::catalogue::Candidate| {
         skill.source != SYSTEM_SKILLS && skill.blocked != Some("no_skill_file")
+            // The launch home handles these independently of Arsenal library selection.
+            && skill.source != "codex_home_skills"
     };
     let installed_names: BTreeSet<&str> = installed
         .iter()
@@ -410,39 +411,18 @@ fn enforcement(input: &Input<'_>, provider: &str, excluded: usize) -> Enforcemen
             evidence: None,
         };
     }
-    if version.is_none() {
-        return Enforcement {
-            state: "version_unknown",
-            reason: "The installed provider build could not be identified. Nothing is applied."
-                .into(),
-            evidence: None,
-        };
-    }
-    match (provider, input.evidence) {
-        (_, Some(evidence)) => Enforcement {
+    if matches!(provider, "claude_code" | "codex") {
+        Enforcement {
             state: "available",
-            reason: format!(
-                "Skill exclusion is qualified for {}. Start applies it to this terminal only.",
-                evidence.qualified_version
-            ),
-            evidence: Some(evidence),
-        },
-        ("codex", None) => Enforcement {
+            reason: "Native checks the installed CLI before applying the selection.".into(),
+            evidence: input.evidence,
+        }
+    } else {
+        Enforcement {
             state: "unqualified",
-            reason: format!(
-                "{} has no qualified per-session skill switch: the session layer of [[skills.config]] and the shared app-server daemon are not proven. The selection can be recorded, not applied.",
-                version_text(version)
-            ),
+            reason: format!("{} has no session skill switch.", version_text(version)),
             evidence: None,
-        },
-        _ => Enforcement {
-            state: "unqualified",
-            reason: format!(
-                "Skill exclusion is not qualified for Claude Code {}. The selection can be recorded, not applied.",
-                version_text(version)
-            ),
-            evidence: None,
-        },
+        }
     }
 }
 
@@ -826,17 +806,24 @@ mod tests {
     }
 
     #[test]
-    fn codex_without_its_own_record_is_not_applied_and_says_why() {
-        let installed = scan(Vec::new(), Vec::new());
+    fn codex_account_skills_and_unknown_versions_leave_application_to_native() {
+        let installed = scan(
+            vec![codex_skill("account", "codex_home_skills", b"keep")],
+            Vec::new(),
+        );
         let mut sel = selection(&[]);
         sel.provider = "codex".into();
         let mut inp = input(&sel, Vec::new(), &installed, None);
         inp.provider = "codex";
         inp.version = Some("codex-cli 0.160.0".into());
         let plan = plan(inp);
-        assert_eq!(plan.enforcement.state, "unqualified");
-        assert!(plan.enforcement.reason.contains("skills.config"));
-        assert!(!plan.can_apply);
+        assert_eq!(plan.enforcement.state, "available");
+        assert!(plan.enforcement.evidence.is_none());
+        assert!(plan.can_apply);
+        assert!(
+            plan.excluded.is_empty(),
+            "account skills are controlled in the launch home"
+        );
     }
 
     fn codex_skill(name: &str, source: &str, body: &[u8]) -> Candidate {

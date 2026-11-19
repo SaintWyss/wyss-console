@@ -539,10 +539,17 @@ commands = ["sudo apt update", "sudo apt full-upgrade"]
         let bad = |text: &str| parse("x", text, &System::default()).unwrap_err();
         assert!(bad("").contains("name"));
         assert!(bad("name = \"a\"").contains("needs commands or a session"));
-        assert!(bad("name = \"a\"\ncommands = [\"x\"]\n[session]\nagent = \"codex\"").contains("not both"));
-        assert!(bad("name = \"a\"\n[session]\nagent = \"gemini\"").contains("claude_code or codex"));
-        assert!(bad("name = \"a\"\n[session]\nagent = \"codex\"\npermission = \"edits\"").contains("only for claude_code"));
-        assert!(bad("name = \"a\"\n[session]\nagent = \"codex\"\npermission = \"root\"").contains("permission must be"));
+        assert!(
+            bad("name = \"a\"\ncommands = [\"x\"]\n[session]\nagent = \"codex\"")
+                .contains("not both")
+        );
+        assert!(
+            bad("name = \"a\"\n[session]\nagent = \"gemini\"").contains("claude_code or codex")
+        );
+        assert!(
+            bad("name = \"a\"\n[session]\nagent = \"codex\"\npermission = \"root\"")
+                .contains("permission must be")
+        );
         assert!(bad("name = \"a\"\n[session]\nagent = \"codex\"\npermission = \"ask\"\nprofile = \"Strict\"").contains("not both"));
         assert!(bad("name = \"a\"\nbefore = [\"x\"]\ncommands = [\"y\"]").contains("before belongs to a session"));
         assert!(bad("name = \"a\"\ncommands = [\"a\\u0007b\"]").contains("one line"), "a control character would type more than the file says");

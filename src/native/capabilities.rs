@@ -1,6 +1,6 @@
-//! Versioned evidence for Native profile override syntax. Builds with a record keep it; any other
-//! observed build of an agent that has override syntax uses that agent's newest record. It never
-//! claims account entitlement, provider resolution, session reload, or effective use.
+//! Historical qualification records and live CLI declarations for Native launches.
+//! Claude and Codex use live declarations to decide which flags to pass. The records
+//! preserve what was observed without establishing support for a newer installation.
 use super::catalogue::AgentId;
 use serde::Serialize;
 
@@ -154,12 +154,7 @@ const UNKNOWN: Evidence = Evidence {
     limitation: "this exact CLI build has no M2 profile-override evidence",
 };
 
-/// Returns the recorded evidence for the exact CLI version line when there is one. Any other
-/// observed build of Claude Code, Codex or OpenCode uses the newest record of its agent: the
-/// owner asked that a provider update never block a profile. A launch is still bound to the
-/// version observed immediately before it (see `NativeService::start`), so a CLI that changes
-/// between the preview and the start is refused whatever its evidence. Without an observed
-/// version nothing can be bound, so there is no evidence.
+/// Historical evidence, with the newest related record as a reference for other observed builds.
 pub fn evidence(agent: AgentId, version: Option<&str>) -> Evidence {
     match (agent, version) {
         (AgentId::ClaudeCode, Some(v)) if v == CLAUDE.qualified_version.unwrap() => CLAUDE,
@@ -202,9 +197,7 @@ pub struct ArsenalEvidence {
     pub limitation: &'static str,
 }
 
-/// Claude Code builds whose skill exclusion passed a focused qualification. The A0 runs on 2.1.312
-/// were judged NO-GO by the independent review and are not listed; any build without a record here
-/// is previewed and recorded, never applied.
+/// Claude Code builds whose skill exclusion passed a focused qualification.
 const ARSENAL_CLAUDE: &[ArsenalEvidence] = &[
     ArsenalEvidence {
         qualified_version: "2.1.314 (Claude Code)",
@@ -284,7 +277,7 @@ pub fn arsenal_exclusion(agent: AgentId, version: Option<&str>) -> Option<Arsena
         .iter()
         .find(|record| record.qualified_version == version)
         .copied();
-    // Claude Code can use the fallback record. Codex requires an exact build match.
+    // The Claude fallback documents a historical policy, independently of live CLI help.
     match agent {
         AgentId::ClaudeCode => exact.or(Some(CLAUDE_ANY_BUILD)),
         _ => exact,
@@ -300,14 +293,201 @@ const CLAUDE_ANY_BUILD: ArsenalEvidence = ArsenalEvidence {
     limitation: "this build was not checked; plugin and built-in skills are not switched off; provider use of each skill is not observed",
 };
 
-pub fn permits_arsenal_exclusion(agent: AgentId, version: Option<&str>) -> bool {
-    arsenal_exclusion(agent, version).is_some()
+/// Live CLI declarations, separate from the historical qualification records above.
+#[derive(Debug, Default, Clone)]
+pub struct CliHelp(std::collections::BTreeMap<String, String>);
+
+impl CliHelp {
+    pub(super) fn parse(help: &str) -> Self {
+        let mut declarations = std::collections::BTreeMap::new();
+        let mut current: Vec<String> = Vec::new();
+        for line in help.lines() {
+            let line = line.trim();
+            if !line.starts_with('-') {
+                if line.ends_with(':') && !line.starts_with('[') {
+                    current.clear();
+                }
+                for flag in &current {
+                    if let Some(text) = declarations.get_mut(flag) {
+                        let text: &mut String = text;
+                        text.push(' ');
+                        text.push_str(line);
+                    }
+                }
+                continue;
+            }
+            current.clear();
+            for word in line.split_whitespace() {
+                let flag = word.trim_end_matches(',');
+                let long = flag.strip_prefix("--").is_some_and(|name| {
+                    !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                });
+                let short = flag.len() == 2
+                    && flag.as_bytes()[1].is_ascii_alphanumeric()
+                    && flag.starts_with('-');
+                if !long && !short {
+                    break;
+                }
+                declarations.insert(flag.to_owned(), line.to_owned());
+                current.push(flag.to_owned());
+                if !word.ends_with(',') {
+                    break;
+                }
+            }
+        }
+        Self(declarations)
+    }
+
+    pub fn has(&self, option: &str) -> bool {
+        self.0.contains_key(option)
+    }
+
+    fn option(&self, spellings: &[&'static str], value: Option<&str>) -> Option<&'static str> {
+        spellings.iter().copied().find(|flag| {
+            self.0.get(*flag).is_some_and(|declaration| {
+                value.is_none_or(|value| {
+                    declaration
+                        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                        .any(|word| word == value)
+                })
+            })
+        })
+    }
+
+    pub fn bypass(&self, agent: AgentId) -> bool {
+        match agent {
+            AgentId::ClaudeCode => self.has("--dangerously-skip-permissions"),
+            AgentId::Codex => self.has("--dangerously-bypass-approvals-and-sandbox"),
+            _ => false,
+        }
+    }
 }
 
-/// A Claude Code launch home requires a nonempty reported version.
-/// Codex launch homes are validated separately.
-pub fn permits_arsenal_home(agent: AgentId, version: Option<&str>) -> bool {
-    agent == AgentId::ClaudeCode && version.is_some_and(|v| !v.trim().is_empty())
+/// Filters the resolved plan against the executable that will actually be started. Treat the
+/// two Codex permission flags as one option so a missing flag can't weaken a requested mode.
+pub(super) fn apply_help(
+    plan: &mut super::profile::LaunchPlan,
+    agent: AgentId,
+    help: &CliHelp,
+    bypass_authorized: bool,
+    arsenal: Option<&super::arsenal::ArsenalLaunch>,
+) -> Vec<String> {
+    use super::profile::{BYPASS_COST, Word};
+    let mut omitted = Vec::new();
+    let use_own_codex = help.has("--no-daemon");
+    let mut words = std::mem::take(&mut plan.words).into_iter();
+    while let Some(word) = words.next() {
+        let Word::Literal(flag) = &word else { continue };
+        let args = match flag.as_str() {
+            "-s" => 3,
+            "-m" | "--model" | "--effort" | "--permission-mode" | "--settings" | "-c" => 1,
+            _ => 0,
+        };
+        let mut args: Vec<_> = words.by_ref().take(args).collect();
+        let value = args
+            .first()
+            .and_then(|word| match word {
+                Word::Literal(value) => Some(value.as_str()),
+                Word::Overlay => None,
+            })
+            .unwrap_or("");
+        let requested = format!("{flag} {value}");
+        let sandbox_label = format!("--sandbox {value}");
+        let (option, reason) = match flag.as_str() {
+            "-s" if args.len() == 3 => {
+                let sandbox = help.option(&["-s", "--sandbox"], Some(value));
+                let approval = help.option(&["-a", "--ask-for-approval"], Some("on-request"));
+                if let Some(approval) = approval {
+                    args[1] = Word::Literal(approval.to_owned());
+                }
+                (
+                    sandbox.filter(|_| approval.is_some()),
+                    if sandbox.is_none() {
+                        sandbox_label.as_str()
+                    } else {
+                        "--ask-for-approval on-request"
+                    },
+                )
+            }
+            "-m" => (help.option(&["-m", "--model"], None), "--model"),
+            "-c" => {
+                let config = help.option(&["-c", "--config"], None);
+                let (isolated, reason) = if value.starts_with("skills.config=") {
+                    (true, "skills.config")
+                } else if value.starts_with("mcp_servers.") {
+                    (true, "MCP")
+                } else if value.starts_with("project_doc_max_bytes=") {
+                    (true, "project_doc_max_bytes")
+                } else {
+                    (false, "model_reasoning_effort")
+                };
+                (config.filter(|_| !isolated || use_own_codex), reason)
+            }
+            "--effort" => (help.option(&["--effort"], Some(value)), requested.as_str()),
+            "--permission-mode" => (
+                help.option(&["--permission-mode"], Some(value)),
+                requested.as_str(),
+            ),
+            "--dangerously-skip-permissions" | "--dangerously-bypass-approvals-and-sandbox" => {
+                let advertised = help.bypass(agent);
+                let supported = bypass_authorized && advertised;
+                if !supported {
+                    plan.with_cost.retain(|cost| cost != BYPASS_COST);
+                }
+                (
+                    supported.then_some(flag.as_str()),
+                    if advertised {
+                        "bypass_preview_required"
+                    } else {
+                        flag.as_str()
+                    },
+                )
+            }
+            _ => (help.has(flag).then_some(flag.as_str()), flag.as_str()),
+        };
+        if let Some(option) = option {
+            plan.words.push(Word::Literal(option.to_owned()));
+            plan.words.extend(args);
+        } else if !omitted.iter().any(|existing| existing == reason) {
+            omitted.push(reason.to_owned());
+        }
+    }
+    if !help.has("--settings") {
+        plan.overlay = None;
+    }
+    if let Some(home) = plan.home.as_mut()
+        && home.mcp.is_some()
+        && !(help.has("--mcp-config") && help.has("--strict-mcp-config"))
+    {
+        home.mcp = None;
+        omitted.push("MCP".into());
+    }
+    if plan.home.as_ref().is_some_and(|home| home.is_default())
+        && arsenal.is_some_and(|launch| {
+            launch.materialize.is_empty()
+                && !(help.has("--settings")
+                    && matches!(
+                        launch.launch_instructions,
+                        Some(crate::arsenal::role_instructions::Choice::Role { .. })
+                    ))
+        })
+    {
+        plan.home = None;
+    }
+    if !use_own_codex && plan.codex_home.take().is_some() {
+        omitted.push("CODEX_HOME".into());
+    }
+    omitted
+}
+
+pub(super) fn project_instructions_supported(agent: AgentId, help: &CliHelp) -> bool {
+    match agent {
+        AgentId::ClaudeCode => help.has("--settings"),
+        AgentId::Codex => {
+            help.has("--no-daemon") && help.option(&["-c", "--config"], None).is_some()
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -315,66 +495,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_applies_on_any_reported_build_and_codex_keeps_its_exact_records() {
-        for version in [
-            "2.1.309 (Claude Code)",
-            "2.1.322 (Claude Code)",
-            "2.1.325 (Claude Code)",
-            "9.9.9 (Claude Code)",
-        ] {
-            assert!(
-                permits_arsenal_exclusion(AgentId::ClaudeCode, Some(version)),
-                "{version}"
-            );
-            assert!(
-                permits_arsenal_home(AgentId::ClaudeCode, Some(version)),
-                "{version}"
-            );
-            let evidence = arsenal_exclusion(AgentId::ClaudeCode, Some(version)).unwrap();
-            assert!(evidence.limitation.contains("not checked"), "{version}");
-        }
-        // A checked build keeps its own record.
-        let checked =
-            arsenal_exclusion(AgentId::ClaudeCode, Some("2.1.323 (Claude Code)")).unwrap();
-        assert_eq!(checked.qualified_version, "2.1.323 (Claude Code)");
-        // An unknown version is still refused.
-        assert!(!permits_arsenal_exclusion(AgentId::ClaudeCode, None));
-        assert!(!permits_arsenal_home(AgentId::ClaudeCode, None));
-        for blank in ["", "  "] {
-            assert!(!permits_arsenal_exclusion(AgentId::ClaudeCode, Some(blank)));
-            assert!(!permits_arsenal_home(AgentId::ClaudeCode, Some(blank)));
-        }
-        // Codex: only the exact qualified builds; it never uses the Claude home.
-        assert!(permits_arsenal_exclusion(
-            AgentId::Codex,
-            Some("codex-cli 0.169.0")
-        ));
-        assert!(permits_arsenal_exclusion(
-            AgentId::Codex,
-            Some("codex-cli 0.159.0")
-        ));
-        for other in [
-            "codex-cli 0.158.0",
-            "codex-cli 0.160.0",
-            "codex-cli 0.170.0",
-            "0.159.0",
-        ] {
-            assert!(
-                !permits_arsenal_exclusion(AgentId::Codex, Some(other)),
-                "{other}"
-            );
-        }
-        assert!(!permits_arsenal_exclusion(AgentId::Codex, None));
-        assert!(!permits_arsenal_home(
-            AgentId::Codex,
-            Some("codex-cli 0.169.0")
-        ));
-        assert!(!permits_arsenal_exclusion(AgentId::Opencode, Some("1.0.0")));
-        // Profile syntax still does not depend on the build.
-        assert!(permits_profile_overrides(
-            AgentId::ClaudeCode,
-            Some("2.1.314 (Claude Code)")
-        ));
+    fn arsenal_records_keep_their_original_scope() {
+        assert_eq!(
+            arsenal_exclusion(AgentId::Codex, Some("codex-cli 0.169.0"))
+                .unwrap()
+                .qualified_version,
+            "codex-cli 0.169.0"
+        );
+        assert!(arsenal_exclusion(AgentId::Codex, Some("codex-cli 0.170.0")).is_none());
+        assert_eq!(
+            arsenal_exclusion(AgentId::ClaudeCode, Some("2.1.323 (Claude Code)"))
+                .unwrap()
+                .qualified_version,
+            "2.1.323 (Claude Code)"
+        );
     }
 
     #[test]

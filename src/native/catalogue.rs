@@ -94,63 +94,73 @@ pub fn discover_name(name: &str, path_var: Option<OsString>, home: &Path) -> Opt
         .and_then(|candidate| candidate.canonicalize().ok())
 }
 
-struct CachedVersion {
+#[derive(Clone)]
+struct CachedProbe {
     modified: SystemTime,
     size: u64,
     version: Arc<OnceLock<Option<String>>>,
+    help: Arc<OnceLock<super::capabilities::CliHelp>>,
 }
 
-static VERSIONS: std::sync::LazyLock<Mutex<HashMap<PathBuf, CachedVersion>>> =
+static PROBES: std::sync::LazyLock<Mutex<HashMap<PathBuf, CachedProbe>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Cache display versions by executable identity. UI callers use a worker even for hits:
 /// resolving identity can touch disk, and another caller may be probing the same executable.
-fn cached_version(path: &Path) -> Option<String> {
+fn cached_probe(path: &Path) -> Option<(PathBuf, CachedProbe)> {
     let path = path.canonicalize().ok()?;
     let metadata = path.metadata().ok()?;
     let modified = metadata.modified().ok()?;
     let size = metadata.len();
-    let version = {
-        let mut versions = VERSIONS.lock().unwrap();
+    let probe = {
+        let mut versions = PROBES.lock().unwrap();
         let entry = versions.entry(path.clone());
-        let entry = entry.or_insert_with(|| CachedVersion {
+        let entry = entry.or_insert_with(|| CachedProbe {
             modified,
             size,
             version: Arc::default(),
+            help: Arc::default(),
         });
         if entry.modified != modified || entry.size != size {
-            *entry = CachedVersion {
+            *entry = CachedProbe {
                 modified,
                 size,
                 version: Arc::default(),
+                help: Arc::default(),
             };
         }
-        entry.version.clone()
+        entry.clone()
     };
-    version.get_or_init(|| run_version(&path)).clone()
+    Some((path, probe))
+}
+
+fn cached_version(path: &Path) -> Option<String> {
+    let (path, probe) = cached_probe(path)?;
+    probe.version.get_or_init(|| run_version(&path)).clone()
+}
+
+/// These interactive launches use the top-level command, with no subcommand-specific flags.
+pub fn cached_cli_help(path: &Path) -> super::capabilities::CliHelp {
+    let Some((path, probe)) = cached_probe(path) else {
+        return Default::default();
+    };
+    probe
+        .help
+        .get_or_init(|| {
+            let help = run_probe(&path, "--help", 128 * 1024, true);
+            super::capabilities::CliHelp::parse(
+                help.as_deref()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .unwrap_or(""),
+            )
+        })
+        .clone()
 }
 
 /// `--version` in a process of its own, bounded in time and size. The first line, cleaned.
 fn run_version(path: &Path) -> Option<String> {
-    let mut child = Command::new(path)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buffer = vec![0u8; 512];
-        let n = stdout.read(&mut buffer).unwrap_or(0);
-        buffer.truncate(n);
-        let _ = send.send(buffer);
-    });
-    let bytes = receive.recv_timeout(Duration::from_secs(4)).ok();
-    let _ = child.kill();
-    let _ = child.wait();
-    let text = String::from_utf8_lossy(&bytes?).into_owned();
+    let bytes = run_probe(path, "--version", 512, false)?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
     let line: String = text
         .lines()
         .next()?
@@ -160,6 +170,46 @@ fn run_version(path: &Path) -> Option<String> {
         .collect();
     let line = line.trim().to_owned();
     (!line.is_empty()).then_some(line)
+}
+
+fn run_probe(path: &Path, arg: &str, limit: u64, require_success: bool) -> Option<Vec<u8>> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    let mut child = Command::new(path)
+        .arg(arg)
+        .env("LC_ALL", "C")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.take(limit + 1).read_to_end(&mut bytes);
+        let _ = send.send(
+            result
+                .ok()
+                .and_then(|n| (n as u64 <= limit).then_some(bytes)),
+        );
+    });
+    let output = receive
+        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        .ok()
+        .flatten();
+    if require_success && output.is_some() {
+        while std::time::Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(status)) => return if status.success() { output } else { None },
+                Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+                Err(_) => break,
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    if require_success { None } else { output }
 }
 
 /// Display only. Hermes `--version` performs an update check, so leave it unobserved.
@@ -183,6 +233,31 @@ pub(super) fn probe_provider_version(agent: AgentId, path: &Path) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_probes_share_identity_and_refresh_after_update() {
+        let root = std::env::temp_dir().join(format!("help-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let executable = root.join("provider");
+        let alias = root.join("alias");
+        let counter = root.join("count");
+        let script = |flags| {
+            format!(
+                "#!/bin/sh\nprintf x >> '{}/count'\nprintf '%s\\n' '{flags}'\n",
+                root.display()
+            )
+        };
+        std::fs::write(&executable, script("  --sandbox <MODE>")).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(&executable, &alias).unwrap();
+        assert!(cached_cli_help(&executable).has("--sandbox"));
+        assert!(cached_cli_help(&alias).has("--sandbox"));
+        assert_eq!(std::fs::read(&counter).unwrap(), b"x");
+        std::fs::write(&executable, script("  --ask-for-approval <MODE>")).unwrap();
+        assert!(cached_cli_help(&alias).has("--ask-for-approval"));
+        assert_eq!(std::fs::read(&counter).unwrap(), b"xx");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn repeated_version_queries_share_the_probe_and_invalidate_on_change() {

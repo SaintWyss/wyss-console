@@ -319,6 +319,9 @@ pub struct PreviewView {
     pub can_start: bool,
     pub through_shell: bool,
     pub provider_version: Option<String>,
+    pub bypass: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub omitted_options: Vec<String>,
     /// Opaque binding to this exact resolved profile plan. Start rejects it after any edit,
     /// restore or inherited change, and uses the plan whose fingerprint matched.
     pub plan_token: Option<String>,
@@ -385,6 +388,8 @@ pub struct StartReply {
     /// started without them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skills_skipped: Vec<arsenal::SkippedSkill>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub omitted_options: Vec<String>,
 }
 
 /// Whether a launch has a folder of its own only to hold copied skills: no environment and no
@@ -400,7 +405,7 @@ fn home_only_for_copies(launch: &ArsenalLaunch, agent: AgentId) -> bool {
             AgentId::Codex => launch
                 .codex_home
                 .as_ref()
-                .is_none_or(|home| home.is_default()),
+                .is_none_or(|home| !home.needs_launch_home()),
             _ => false,
         }
 }
@@ -914,22 +919,44 @@ impl NativeService {
         profile_id: Option<&str>,
         launch: Option<&ArsenalLaunch>,
     ) -> Result<PreviewView, NativeError> {
-        let (plan, _, digest, profile_effective) = self.plan_for(agent, profile_id, launch)?;
-        let provider_version = AGENTS
+        let (mut plan, _, digest, profile_effective) = self.plan_for(agent, profile_id, launch)?;
+        let path = AGENTS
             .iter()
             .find(|spec| spec.id == agent)
-            .and_then(|spec| self.agent_path(spec))
-            .and_then(|path| catalogue::probe_provider_version(agent, &path));
-        let version_ok = (!profile_effective && launch.is_none())
-            || check_launch_version(
-                agent,
-                provider_version.as_deref(),
-                profile_effective,
-                launch.is_some(),
-                plan.home.is_some(),
-            )
-            .is_ok();
-        let plan_token = digest.map(|digest| self.issue_plan_token(digest)).transpose()?;
+            .and_then(|spec| self.agent_path(spec));
+        let detected = agent.fits_shared_registry();
+        let provider_version = path.as_deref().and_then(|path| {
+            if detected {
+                catalogue::cached_provider_version(agent, path)
+            } else {
+                catalogue::probe_provider_version(agent, path)
+            }
+        });
+        let omitted_options = if detected && (profile_id.is_some() || launch.is_some()) {
+            let help = path
+                .as_deref()
+                .map(catalogue::cached_cli_help)
+                .unwrap_or_default();
+            capabilities::apply_help(&mut plan, agent, &help, true, launch)
+        } else {
+            Vec::new()
+        };
+        let version_ok = detected
+            || (!profile_effective && launch.is_none())
+            || check_launch_version(agent, provider_version.as_deref(), profile_effective).is_ok();
+        let bypass = plan
+            .with_cost
+            .iter()
+            .any(|cost| cost == profile::BYPASS_COST);
+        let plan_token = digest
+            .map(|digest| {
+                self.issue_plan_token(if detected && bypass {
+                    bypass_digest(&digest)
+                } else {
+                    digest
+                })
+            })
+            .transpose()?;
         Ok(PreviewView {
             can_start: plan.not_applicable.is_empty() && version_ok,
             applied: plan.applied,
@@ -937,6 +964,8 @@ impl NativeService {
             not_applicable: plan.not_applicable,
             through_shell: self.shell().is_some_and(|s| s.through_shell),
             provider_version,
+            bypass,
+            omitted_options,
             plan_token,
         })
     }
@@ -1042,10 +1071,27 @@ impl NativeService {
         )?;
         // Stored skills of the preset that could not be prepared. They never stop the start.
         let mut skills_skipped: Vec<arsenal::SkippedSkill> = Vec::new();
+        let agent_id = request.agent_id;
+        let detected = agent_id.fits_shared_registry();
+        let mut bypass_authorized = false;
         if request.profile_id.is_some() || request.arsenal.is_some() {
             match (request.plan_token.as_deref(), digest.as_deref()) {
                 (None, _) => return Err(NativeError::new("profile_preview_required")),
-                (Some(token), Some(digest)) => self.consume_plan_token(token, digest)?,
+                (Some(token), Some(digest)) => {
+                    if detected
+                        && plan
+                            .with_cost
+                            .iter()
+                            .any(|cost| cost == profile::BYPASS_COST)
+                        && self
+                            .consume_plan_token(token, &bypass_digest(digest))
+                            .is_ok()
+                    {
+                        bypass_authorized = true;
+                    } else {
+                        self.consume_plan_token(token, digest)?;
+                    }
+                }
                 _ => return Err(NativeError::new("profile_preview_stale")),
             }
         } else if request.plan_token.is_some() {
@@ -1060,31 +1106,44 @@ impl NativeService {
         let shell = self
             .user_shell()
             .map_err(|_| NativeError::new("spawn_failed"))?;
-        let arsenal_bound = request.arsenal.is_some();
-        let version_bound_handoff =
-            request.agent_id == AgentId::Opencode && request.brief.is_some();
-        let version_bound = profile_effective || arsenal_bound || version_bound_handoff;
+        let version_bound_handoff = agent_id == AgentId::Opencode && request.brief.is_some();
+        let version_bound =
+            !detected && (profile_effective || request.arsenal.is_some() || version_bound_handoff);
         let version_guard = version_bound && recipe::family(&shell).is_some();
-        let version = if version_bound {
+        let version = if detected {
+            catalogue::cached_provider_version(agent_id, &direct)
+        } else if version_bound {
             let expected = request.expected_cli_version.as_deref();
             check_launch_version(
-                request.agent_id,
+                agent_id,
                 expected,
                 profile_effective || version_bound_handoff,
-                arsenal_bound,
-                plan.home.is_some(),
             )?;
-            if !version_guard {
-                let installed = catalogue::probe_provider_version(request.agent_id, &direct);
-                if installed.as_deref() != expected {
-                    return Err(NativeError::new("provider_version_unverified"));
-                }
+            if !version_guard
+                && catalogue::probe_provider_version(agent_id, &direct).as_deref() != expected
+            {
+                return Err(NativeError::new("provider_version_unverified"));
             }
-            // Shell recipes verify this value in the initialized shell before executing the CLI.
             request.expected_cli_version.clone()
         } else {
-            catalogue::probe_provider_version(request.agent_id, &direct)
+            catalogue::probe_provider_version(agent_id, &direct)
         };
+        let (omitted_options, project_instructions_supported) =
+            if detected && (request.profile_id.is_some() || request.arsenal.is_some()) {
+                let help = catalogue::cached_cli_help(&direct);
+                (
+                    capabilities::apply_help(
+                        &mut plan,
+                        agent_id,
+                        &help,
+                        bypass_authorized,
+                        request.arsenal.as_ref(),
+                    ),
+                    capabilities::project_instructions_supported(agent_id, &help),
+                )
+            } else {
+                (Vec::new(), false)
+            };
         // A launch with a folder of its own never runs where the agent would read the owner's
         // folder again as the project's: the hooks, instructions and skills the preset left out
         // would come back. Refused before anything is written, with no way around it.
@@ -1113,11 +1172,17 @@ impl NativeService {
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.inner.base.join("sessions").join(&id);
-        let guard_marker = dir.join("provider-version-verified");
+        let guard_marker = dir.join("provider-launch-ready");
         if version_guard && store::private_dir(&dir).is_err() {
             return Err(NativeError::new("store_unavailable"));
         }
-        let mut words = vec![agent.executable.to_owned()];
+        // A startup file may reorder PATH. Use the same absolute executable we probed.
+        let executable = if detected {
+            direct.to_string_lossy().into_owned()
+        } else {
+            agent.executable.to_owned()
+        };
+        let mut words = vec![executable];
         for word in &plan.words {
             match word {
                 Word::Literal(text) => words.push(text.clone()),
@@ -1149,45 +1214,46 @@ impl NativeService {
         }
         if let (Some(spec), Some(launch)) = (&plan.home, request.arsenal.as_ref()) {
             'claude_home: {
-            let token =
-                launch_home::token().ok_or_else(|| NativeError::new("arsenal_token_missing"))?;
-            let owner_home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .ok_or_else(|| NativeError::new("store_unavailable"))?;
-            let home_dir = self.inner.base.join("launch-homes").join(&launch.selection);
-            let owner = launch_home::Owner::from_home(&owner_home);
-            let ready = read_copies(launch, &mut skills_skipped);
-            let (built, unwritten) =
-                match launch_home::build_with_skills(&owner, &home_dir, spec, &ready) {
-                    Ok(built) => built,
-                    // A folder only for the copies that cannot be built: the agent starts as the
-                    // owner's own, and the copies are reported.
-                    Err(_) if home_only_for_copies(launch, request.agent_id) => {
-                        skills_skipped.clear();
-                        skip_all(&mut skills_skipped, launch, "write_failed");
-                        break 'claude_home;
-                    }
-                    Err(_) => return Err(NativeError::new("arsenal_home_failed")),
-                };
-            skills_skipped.extend(unwritten);
-            if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
-                &launch.launch_instructions
-            {
-                launch_home::write_role(&owner, &home_dir, spec, role)
-                    .map_err(|_| NativeError::new("arsenal_home_failed"))?;
-            }
-            if let Some(mcp) = &built.mcp_config {
-                words.push("--strict-mcp-config".to_owned());
-                words.push("--mcp-config".to_owned());
-                words.push(mcp.to_string_lossy().into_owned());
-            }
-            let built_dir = built.dir.to_string_lossy().into_owned();
-            home_env.push(("CLAUDE_CONFIG_DIR".to_owned(), built_dir.clone()));
-            home_pin = Some(("CLAUDE_CONFIG_DIR", built_dir));
-            oauth_token = Some(token);
-            if !spec.memory {
-                home_env.push(("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_owned(), "1".to_owned()));
-            }
+                let token = launch_home::token()
+                    .ok_or_else(|| NativeError::new("arsenal_token_missing"))?;
+                let owner_home = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .ok_or_else(|| NativeError::new("store_unavailable"))?;
+                let home_dir = self.inner.base.join("launch-homes").join(&launch.selection);
+                let owner = launch_home::Owner::from_home(&owner_home);
+                let ready = read_copies(launch, &mut skills_skipped);
+                let (built, unwritten) =
+                    match launch_home::build_with_skills(&owner, &home_dir, spec, &ready) {
+                        Ok(built) => built,
+                        // A folder only for the copies that cannot be built: the agent starts as the
+                        // owner's own, and the copies are reported.
+                        Err(_) if home_only_for_copies(launch, request.agent_id) => {
+                            skills_skipped.clear();
+                            skip_all(&mut skills_skipped, launch, "write_failed");
+                            break 'claude_home;
+                        }
+                        Err(_) => return Err(NativeError::new("arsenal_home_failed")),
+                    };
+                skills_skipped.extend(unwritten);
+                if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
+                    &launch.launch_instructions
+                    && project_instructions_supported
+                {
+                    launch_home::write_role(&owner, &home_dir, spec, role)
+                        .map_err(|_| NativeError::new("arsenal_home_failed"))?;
+                }
+                if let Some(mcp) = &built.mcp_config {
+                    words.push("--strict-mcp-config".to_owned());
+                    words.push("--mcp-config".to_owned());
+                    words.push(mcp.to_string_lossy().into_owned());
+                }
+                let built_dir = built.dir.to_string_lossy().into_owned();
+                home_env.push(("CLAUDE_CONFIG_DIR".to_owned(), built_dir.clone()));
+                home_pin = Some(("CLAUDE_CONFIG_DIR", built_dir));
+                oauth_token = Some(token);
+                if !spec.memory {
+                    home_env.push(("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_owned(), "1".to_owned()));
+                }
             }
         }
         // Codex: its own folder too, with the real `HOME` and no token. The sign-in is the owner's
@@ -1195,42 +1261,45 @@ impl NativeService {
         // session never runs with the hooks the preset left out.
         if let (Some(spec), Some(launch)) = (&plan.codex_home, request.arsenal.as_ref()) {
             'codex_home: {
-            let owner_home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .ok_or_else(|| NativeError::new("store_unavailable"))?;
-            let home_dir = self
-                .inner
-                .base
-                .join("launch-homes")
-                .join("codex")
-                .join(&launch.selection);
-            let owner = launch_home_codex::CodexOwner::from_process(&owner_home);
-            let ready = read_copies(launch, &mut skills_skipped);
-            let (built, unwritten) =
-                match launch_home_codex::build_with_skills(&owner, &home_dir, spec, &ready) {
-                    Ok(built) => built,
-                    Err(_) if home_only_for_copies(launch, request.agent_id) => {
-                        skills_skipped.clear();
-                        skip_all(&mut skills_skipped, launch, "write_failed");
-                        break 'codex_home;
-                    }
-                    Err(_) => return Err(NativeError::new("arsenal_home_failed")),
-                };
-            skills_skipped.extend(unwritten);
-            if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
-                &launch.launch_instructions
-            {
-                launch_home_codex::write_role(&owner, &home_dir, spec, role).map_err(|error| {
-                    NativeError::new(if error.to_string() == "arsenal_role_too_long" {
-                        "arsenal_role_too_long"
-                    } else {
-                        "arsenal_home_failed"
-                    })
-                })?;
-            }
-            let built_dir = built.to_string_lossy().into_owned();
-            home_env.push(("CODEX_HOME".to_owned(), built_dir.clone()));
-            home_pin = Some(("CODEX_HOME", built_dir));
+                let owner_home = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .ok_or_else(|| NativeError::new("store_unavailable"))?;
+                let home_dir = self
+                    .inner
+                    .base
+                    .join("launch-homes")
+                    .join("codex")
+                    .join(&launch.selection);
+                let owner = launch_home_codex::CodexOwner::from_process(&owner_home);
+                let ready = read_copies(launch, &mut skills_skipped);
+                let (built, unwritten) =
+                    match launch_home_codex::build_with_skills(&owner, &home_dir, spec, &ready) {
+                        Ok(built) => built,
+                        Err(_) if home_only_for_copies(launch, request.agent_id) => {
+                            skills_skipped.clear();
+                            skip_all(&mut skills_skipped, launch, "write_failed");
+                            break 'codex_home;
+                        }
+                        Err(_) => return Err(NativeError::new("arsenal_home_failed")),
+                    };
+                skills_skipped.extend(unwritten);
+                if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
+                    &launch.launch_instructions
+                    && project_instructions_supported
+                {
+                    launch_home_codex::write_role(&owner, &home_dir, spec, role).map_err(
+                        |error| {
+                            NativeError::new(if error.to_string() == "arsenal_role_too_long" {
+                                "arsenal_role_too_long"
+                            } else {
+                                "arsenal_home_failed"
+                            })
+                        },
+                    )?;
+                }
+                let built_dir = built.to_string_lossy().into_owned();
+                home_env.push(("CODEX_HOME".to_owned(), built_dir.clone()));
+                home_pin = Some(("CODEX_HOME", built_dir));
             }
         }
         if let Some(brief) = &request.brief {
@@ -1279,20 +1348,24 @@ impl NativeService {
                 return Err(NativeError::new("store_unavailable"));
             }
         }
-        // A checked shell launch reads the token from a private file after shell initialization.
-        // A direct launch has no shell in between and receives it through the environment.
+        // Shell launches read the token from a private file after shell initialization.
+        // The readiness marker keeps that file alive until the shell has consumed it.
         let token_file = dir.join(TOKEN_FILE);
-        let token_through_file = oauth_token.is_some() && version_guard;
+        let token_through_file = oauth_token.is_some() && recipe::family(&shell).is_some();
+        let launch_guard = version_guard || token_through_file;
         // Removed on every return from here on. The recipe removes the file before it writes the
         // version marker, so a successful start has already removed it.
         let _token_guard = token_through_file.then(|| TokenFileGuard(token_file.clone()));
         if token_through_file
             && let Some(token) = &oauth_token
-            && write_token_file(
-                &token_file,
-                zeroize::Zeroizing::new(format!("{}\n", token.as_str())).as_bytes(),
-            )
-            .is_err()
+            && store::private_dir(&dir)
+                .and_then(|()| {
+                    write_token_file(
+                        &token_file,
+                        zeroize::Zeroizing::new(format!("{}\n", token.as_str())).as_bytes(),
+                    )
+                })
+                .is_err()
         {
             let _ = fs::remove_dir_all(&dir);
             return Err(NativeError::new("store_unavailable"));
@@ -1330,7 +1403,7 @@ impl NativeService {
             delegation: request.delegation,
         };
         let mut env = vec![("WYSS_NATIVE_SESSION_ID".to_owned(), id.clone())];
-        if version_guard {
+        if launch_guard {
             env.push((
                 "WYSS_NATIVE_VERSION_GUARD".to_owned(),
                 guard_marker.to_string_lossy().into_owned(),
@@ -1433,7 +1506,7 @@ impl NativeService {
                 return Err(NativeError::new(code));
             }
         };
-        if version_guard && !await_version_guard(terminal, &info.terminal_id, &guard_marker) {
+        if launch_guard && !await_launch_guard(terminal, &info.terminal_id, &guard_marker) {
             let _ = terminal.close(&info.terminal_id);
             if let Some((existed, previous)) = prior_recovery_override {
                 self.restore_recovered_default_override(&project_key, existed, previous);
@@ -1450,10 +1523,15 @@ impl NativeService {
             }
             session.state = State::FailedStart;
             session.ended_at = Some(store::now());
-            session.error = Some("provider_version_unverified".to_owned());
+            let code = if version_guard {
+                "provider_version_unverified"
+            } else {
+                "arsenal_home_failed"
+            };
+            session.error = Some(code.to_owned());
             self.record(session);
             let _ = fs::remove_dir_all(&dir);
-            return Err(NativeError::new("provider_version_unverified"));
+            return Err(NativeError::new(code));
         }
         session.state = State::Running;
         lock(&self.inner.live).insert(
@@ -1497,6 +1575,7 @@ impl NativeService {
             session: view,
             terminal: info,
             skills_skipped,
+            omitted_options,
         })
     }
 
@@ -1988,33 +2067,24 @@ fn remove_stale_token(dir: &Path, token: &Path) -> std::io::Result<()> {
     })
 }
 
+fn bypass_digest(digest: &str) -> String {
+    format!("{digest}:bypass")
+}
+
 fn check_launch_version(
     agent: AgentId,
     version: Option<&str>,
     profile_bound: bool,
-    arsenal_bound: bool,
-    arsenal_home: bool,
 ) -> Result<(), NativeError> {
     if version.is_none()
         || (profile_bound && !capabilities::permits_profile_overrides(agent, version))
     {
         return Err(NativeError::new("provider_version_unverified"));
     }
-    // An exclusion and a separate home have evidence independent of profile syntax.
-    if arsenal_bound && !capabilities::permits_arsenal_exclusion(agent, version) {
-        return Err(NativeError::new("arsenal_unqualified"));
-    }
-    if arsenal_home && !capabilities::permits_arsenal_home(agent, version) {
-        return Err(NativeError::new("arsenal_home_unqualified"));
-    }
     Ok(())
 }
 
-fn await_version_guard(
-    terminal: &TerminalService,
-    terminal_id: &TerminalId,
-    marker: &Path,
-) -> bool {
+fn await_launch_guard(terminal: &TerminalService, terminal_id: &TerminalId, marker: &Path) -> bool {
     let deadline = Instant::now() + Duration::from_secs(6);
     loop {
         let verified = fs::symlink_metadata(marker).is_ok_and(|meta| meta.file_type().is_file())

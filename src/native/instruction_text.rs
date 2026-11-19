@@ -23,8 +23,8 @@ fn locate(name: &str, claude: &Path, codex: &Path) -> Result<(PathBuf, PathBuf),
     if name == "CLAUDE.md" {
         return Ok((claude.to_owned(), claude.join("CLAUDE.md")));
     }
-    if name == "codex/AGENTS.md" {
-        return Ok((codex.to_owned(), codex.join("AGENTS.md")));
+    if let Some(file @ ("AGENTS.md" | "AGENTS.override.md")) = name.strip_prefix("codex/") {
+        return Ok((codex.to_owned(), codex.join(file)));
     }
     let rule = name.strip_prefix("rules/").ok_or(Refusal::Name)?;
     let ok = (4..=200).contains(&rule.len())

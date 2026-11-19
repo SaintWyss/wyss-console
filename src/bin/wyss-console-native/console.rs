@@ -1271,7 +1271,7 @@ impl Ui {
                 // Open the restarted agent in a new tab and remove the pane for the stopped session.
                 self.add_agent_tab(&started);
                 self.remove_pane(key, true);
-                let notes: Vec<String> = started.skills_skipped.iter().map(|(name, reason)| native::skipped_skill_note(name, reason)).collect();
+                let notes = native::start_notes(&started);
                 if !notes.is_empty() {
                     self.banner(&notes.join(" "), false);
                 }

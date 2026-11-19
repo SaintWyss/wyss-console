@@ -102,7 +102,7 @@ impl Default for HomeSpec {
 }
 
 /// A plain file or plugin name: no path, no control characters.
-fn name_ok(name: &str) -> bool {
+pub(super) fn name_ok(name: &str) -> bool {
     (1..=200).contains(&name.len())
         && !name.starts_with('.')
         && !name.contains('/')
@@ -507,6 +507,16 @@ pub fn place_skills(
     owner: Option<&Path>,
     skills: &[ReadySkill],
 ) -> io::Result<Vec<SkippedSkill>> {
+    place_selected_skills(link, owner, skills, &[])
+}
+
+pub(super) fn place_selected_skills(
+    link: &Path,
+    owner: Option<&Path>,
+    skills: &[ReadySkill],
+    off: &[String],
+) -> io::Result<Vec<SkippedSkill>> {
+    let needs_folder = !skills.is_empty() || !off.is_empty();
     let own = fs::symlink_metadata(link).is_ok_and(|meta| meta.is_dir());
     if own {
         for entry in fs::read_dir(link)? {
@@ -522,10 +532,10 @@ pub fn place_skills(
                 fs::remove_dir_all(&path)?;
             }
         }
-        if skills.is_empty() && fs::remove_dir(link).is_ok() {
+        if !needs_folder && fs::remove_dir(link).is_ok() {
             return place(link, owner).map(|()| Vec::new());
         }
-    } else if skills.is_empty() {
+    } else if !needs_folder {
         return place(link, owner).map(|()| Vec::new());
     } else {
         place(link, None)?;
@@ -541,7 +551,15 @@ pub fn place_skills(
             if !replaced.contains(text.as_ref())
                 && fs::symlink_metadata(link.join(&name)).is_err()
             {
-                symlink(entry.path(), link.join(&name))?;
+                let off = off
+                    .iter()
+                    .filter_map(|path| Path::new(path).strip_prefix(&name).ok())
+                    .collect::<Vec<_>>();
+                if off.is_empty() {
+                    symlink(entry.path(), link.join(&name))?;
+                } else if entry.path().is_dir() {
+                    mirror_skills(&entry.path(), &link.join(&name), &off)?;
+                }
             }
         }
     }
@@ -555,6 +573,31 @@ pub fn place_skills(
         }
     }
     Ok(skipped)
+}
+
+/// Mirror only the branches containing an omitted SKILL.md. Other entries stay as links.
+fn mirror_skills(source: &Path, target: &Path, off: &[&Path]) -> io::Result<()> {
+    store::private_dir(target)?;
+    store::write_atomic(&target.join(COPY_MARK), b"")?;
+    let omit_here = off.iter().any(|path| path.as_os_str().is_empty());
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == COPY_MARK || (omit_here && name == "SKILL.md") {
+            continue;
+        }
+        let below = off
+            .iter()
+            .filter_map(|path| path.strip_prefix(&name).ok())
+            .collect::<Vec<_>>();
+        let dest = target.join(&name);
+        if below.is_empty() {
+            symlink(entry.path(), dest)?;
+        } else if entry.path().is_dir() {
+            mirror_skills(&entry.path(), &dest, &below)?;
+        }
+    }
+    Ok(())
 }
 
 /// Writes one stored skill under `skills/<name>`: first into a fresh private folder beside it,
@@ -710,7 +753,7 @@ fn instruction_bytes(dir: &Path, home: Option<&Path>) -> u64 {
 }
 
 /// The name and description an account skill is listed with: its `SKILL.md` front matter.
-fn listed_bytes(skill: &Path) -> u64 {
+pub(super) fn listed_bytes(skill: &Path) -> u64 {
     front_matter_bytes(&skill.join("SKILL.md"))
 }
 
