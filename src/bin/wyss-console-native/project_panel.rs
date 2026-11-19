@@ -1031,6 +1031,7 @@ fn render_markdown(text: &str) -> Vec<Arc<str>> {
             .map(|p| match p {
                 Inline::Text(text) => escape(&text).to_string(),
                 Inline::Code(code) => format!("<tt>{}</tt>", escape(&code)),
+                Inline::Strong(text) => format!("<b>{}</b>", escape(&text)),
                 Inline::Link { text, url } => format!(
                     "<a href=\"{}\">{} ({})</a>",
                     escape(&url),

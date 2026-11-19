@@ -414,3 +414,16 @@ fn git_read_limits_output_and_kills_a_blocked_command() {
         Err(GitError::Timeout)
     );
 }
+
+#[test]
+fn bold_text_is_shown_bold_and_stars_that_open_nothing_stay_literal() {
+    let doc = markdown("La **ventana** habla con *uno* y 2 ** 3.");
+    assert_eq!(
+        doc,
+        vec![Block::Paragraph(vec![
+            Inline::Text("La ".into()),
+            Inline::Strong("ventana".into()),
+            Inline::Text(" habla con *uno* y 2 ** 3.".into()),
+        ])]
+    );
+}

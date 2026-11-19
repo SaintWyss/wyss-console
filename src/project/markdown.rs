@@ -4,6 +4,7 @@ use super::{markdown_blocks, short};
 pub enum Inline {
     Text(String),
     Code(String),
+    Strong(String),
     Link { text: String, url: String },
 }
 
@@ -19,10 +20,22 @@ pub enum Block {
 fn inline(mut s: &str, summary: bool) -> Vec<Inline> {
     let mut result = Vec::new();
     let mut start = 0;
-    while let Some(at) = s[start..].find(['`', '[', '<', '!']).map(|at| at + start) {
+    while let Some(at) = s[start..].find(['`', '[', '<', '!', '*']).map(|at| at + start) {
         let rest = &s[at..];
         let span = if summary && let Some(tail) = image_tail(rest) {
             Some((Inline::Text(String::new()), tail))
+        } else if let Some(strong) = rest.strip_prefix("**") {
+            strong
+                .split_once("**")
+                .filter(|(text, _)| !text.is_empty() && !text.contains('\n'))
+                .map(|(text, tail)| {
+                    let item = if summary {
+                        Inline::Text(text.into())
+                    } else {
+                        Inline::Strong(text.into())
+                    };
+                    (item, tail)
+                })
         } else if let Some(code) = rest.strip_prefix('`') {
             code.split_once('`')
                 .map(|(code, tail)| (Inline::Code(code.into()), tail))
@@ -224,7 +237,7 @@ pub(super) fn readme_excerpt(text: &str) -> Option<String> {
             let plain: String = parts
                 .into_iter()
                 .map(|part| match part {
-                    Inline::Code(code) => code,
+                    Inline::Code(code) | Inline::Strong(code) => code,
                     Inline::Link { text, .. } | Inline::Text(text) => {
                         text.replace(['*', '_', '~'], "")
                     }
