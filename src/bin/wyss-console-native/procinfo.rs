@@ -245,13 +245,33 @@ mod tests {
     }
 
     #[test]
-    fn git_file_pointing_to_a_gitdir_is_followed() {
+    fn a_real_worktree_shows_its_branch_and_a_loose_gitdir_pointer_does_not() {
         let d = scratch("gitfile");
+        let git = |dir: &Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        let main = d.join("main");
+        fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        git(&main, &["worktree", "add", "-qb", "linked", d.join("wt").to_str().unwrap()]);
+        assert_eq!(git_state(&d.join("wt")), Git::Branch("linked".into()));
+        // A `.git` file pointing at a folder that is not this checkout's worktree is not followed.
+        fs::create_dir_all(d.join("loose")).unwrap();
         fs::create_dir_all(d.join("real")).unwrap();
-        fs::create_dir_all(d.join("wt")).unwrap();
         fs::write(d.join("real/HEAD"), "ref: refs/heads/main\n").unwrap();
-        fs::write(d.join("wt/.git"), format!("gitdir: {}\n", d.join("real").display())).unwrap();
-        assert_eq!(git_state(&d.join("wt")), Git::Branch("main".into()));
+        fs::write(d.join("loose/.git"), format!("gitdir: {}\n", d.join("real").display())).unwrap();
+        assert_eq!(git_state(&d.join("loose")), Git::NoRepo);
         let _ = fs::remove_dir_all(&d);
     }
 
