@@ -280,6 +280,9 @@ struct State {
     found: RefCell<ghostty::Found>,
     /// A left-button press in progress: where it started and how it expands.
     drag: RefCell<Option<(Pos, Mode)>>,
+    /// Text of the selection as of the last drag step: a redraw under the pointer may drop the
+    /// selection before the button is released, and release still has to copy.
+    drag_text: RefCell<Option<String>>,
     /// Last pointer position over the area, for mouse wheel reports.
     pointer: StdCell<(f64, f64)>,
 }
@@ -575,6 +578,7 @@ impl Terminal {
             find: RefCell::new(None),
             found: RefCell::new(ghostty::Found::default()),
             drag: RefCell::new(None),
+            drag_text: RefCell::new(None),
         });
 
         let area = {
@@ -687,6 +691,8 @@ impl Terminal {
                 let new = Selection { anchor, head, mode };
                 if *sel != Some(new) {
                     *sel = Some(new);
+                    drop(sel);
+                    *state.drag_text.borrow_mut() = state.selected_text();
                     if let Some(w) = g.widget() {
                         w.queue_draw();
                     }
@@ -696,10 +702,12 @@ impl Terminal {
         {
             let state = state.clone();
             drag.connect_drag_end(move |g, _, _| {
-                if state.drag.borrow_mut().take().is_none() {
+                let was_dragging = state.drag.borrow_mut().take().is_some();
+                let cached = state.drag_text.borrow_mut().take();
+                if !was_dragging && cached.is_none() {
                     return;
                 }
-                if let (Some(text), Some(w)) = (state.selected_text(), g.widget()) {
+                if let (Some(text), Some(w)) = (state.selected_text().or(cached), g.widget()) {
                     // Like Warp, selecting also copies: Ctrl+V pastes the last thing selected or copied.
                     w.display().primary_clipboard().set_text(&text);
                     w.clipboard().set_text(&text);
