@@ -1,0 +1,51 @@
+.arsenal {
+    background: @bg;
+    color: @text;
+}
+.arsenal .tree {
+    background: @bg;
+    border-right: 1px solid @line;
+    padding: 12px;
+}
+.arsenal .content { padding: 16px; }
+.arsenal .sync {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 6px;
+    padding: 12px;
+}
+.arsenal .title { font-weight: bold; }
+.arsenal .hint { color: @muted; }
+.arsenal .source { font-family: monospace; }
+.arsenal .tree-children {
+    margin-left: 13px;
+    padding-left: 6px;
+    border-left: 1px solid @line;
+}
+.arsenal button.tree-leaf {
+    background: transparent;
+    border: 1px solid transparent;
+    color: @muted;
+    padding: 3px 7px;
+    min-height: 22px;
+}
+.arsenal button.tree-leaf:hover { color: @text; }
+.arsenal button.tree-leaf.selected {
+    background: @surface_control;
+    border-color: @line_strong;
+    border-radius: 5px;
+    color: @text;
+}
+.arsenal expander > title { min-height: 28px; padding: 1px 5px; }
+.arsenal .heading { font-size: 1.16em; font-weight: bold; }
+.arsenal .table-row {
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid @line;
+    border-radius: 0;
+    padding: 7px;
+}
+.arsenal button.table-row:hover { background: @surface_hover; }
+.arsenal .table-name { font-weight: bold; }
+.arsenal .preset-row { border-top: 1px solid @line; padding: 12px 0; }
+.arsenal .compact-action { padding: 1px 6px; min-height: 22px; }

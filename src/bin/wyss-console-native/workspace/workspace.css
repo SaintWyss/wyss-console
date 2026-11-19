@@ -1,0 +1,227 @@
+.workspace {
+    background: @bg;
+    color: @text;
+}
+.workspace .list {
+    background: @chrome;
+    border-right: 1px solid @line;
+    min-width: 224px;
+    padding: 12px 8px;
+}
+
+/* The form controls share the 40px outer height of the approved layout. */
+.workspace entry,
+.workspace searchentry,
+.workspace dropdown > button,
+.workspace menubutton > button,
+.workspace button {
+    min-height: 38px;
+    padding: 0 12px;
+}
+.workspace searchentry > text { min-width: 0; }
+.workspace menubutton.new { margin-top: 10px; }
+.workspace menubutton.new > button {
+    background: transparent;
+    border-style: dashed;
+}
+.workspace menubutton.new > button:hover,
+.workspace menubutton.new > button:checked { background: @surface_hover; }
+.workspace .linked entry { border-radius: 5px 0 0 5px; }
+.workspace .linked menubutton > button {
+    border-left-width: 0;
+    border-radius: 0 5px 5px 0;
+}
+.workspace button.secondary { min-width: 114px; }
+.workspace .foot button.secondary,
+.workspace .foot button.primary { min-width: 94px; }
+.workspace button.primary {
+    background: @accent;
+    color: @text_on_accent;
+    border-color: @accent;
+}
+.workspace button.primary:hover,
+.workspace button.primary:active {
+    background: @accent_strong;
+    border-color: @accent_strong;
+}
+.workspace button.flat {
+    background: transparent;
+    border-color: transparent;
+}
+.workspace button.flat:hover { background: @surface_hover; }
+
+.workspace button.it {
+    background: transparent;
+    color: @text;
+    border: 1px solid transparent;
+    box-shadow: none;
+    min-height: 18px;
+    padding: 8px;
+}
+.workspace button.it:hover, .workspace button.tab:hover { background: @surface_hover; }
+.workspace button.it.on { background: @accent_soft; border-color: @accent_line; }
+.workspace entry.head {
+    margin: 14px 22px 8px;
+    padding: 6px 8px;
+    font-size: 20px;
+    font-weight: 600;
+    color: @text;
+    background: @bg;
+    border: 1px solid transparent;
+    box-shadow: none;
+}
+.workspace entry.head:focus-within { border-color: @line_strong; }
+.workspace .tabs {
+    padding: 0 22px;
+    border-bottom: 1px solid @line;
+}
+.workspace button.tab {
+    color: @muted;
+    background: @bg;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    box-shadow: none;
+    margin: 0;
+    padding: 0 14px;
+}
+.workspace button.tab.on { color: @text; border-bottom-color: @accent; }
+.workspace .body { padding: 8px 22px 22px; }
+.workspace .row {
+    padding: 16px 0;
+    border-bottom: 1px solid @line;
+}
+.workspace .row-copy { min-width: 260px; }
+.workspace .options,
+.workspace .command-editor {
+    background: @surface_control;
+    border: 1px solid @line;
+    border-radius: 5px;
+    padding: 12px;
+}
+.workspace .options > flowboxchild { padding: 0; }
+.workspace .options checkbutton { min-height: 24px; }
+.workspace .command-editor textview {
+    padding: 0;
+    font-family: 'IBM Plex Mono', monospace;
+}
+.workspace .lbl { color: @text; font-weight: 600; }
+.workspace .hint, .workspace .flag { color: @muted; font-size: 12px; }
+.workspace .flag, .workspace .mono { font-family: monospace; }
+.workspace .sksec {
+    color: @muted;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 14px 6px 6px;
+}
+.workspace .sw {
+    min-width: 34px;
+    min-height: 18px;
+    border-radius: 99px;
+    color: transparent;
+    background: @surface_control;
+    border: 1px solid @line_strong;
+    box-shadow: none;
+}
+.workspace .sw image { opacity: 0; }
+.workspace .sw slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: 2px;
+    border: none;
+    border-radius: 99px;
+    background: @muted;
+    box-shadow: none;
+}
+.workspace .sw:checked { background: @accent_soft; border-color: @accent; }
+.workspace .sw:checked slider { background: @accent; }
+.workspace .sw:disabled { opacity: 0.55; }
+.workspace .notice {
+    color: @warn;
+    background: @warn_soft;
+    padding: 9px 12px;
+}
+.workspace .foot {
+    border-top: 1px solid @line;
+    padding: 12px 22px;
+    background: @surface;
+}
+.workspace textview { padding: 8px; }
+.workspace .context { padding-right: 22px; }
+.workspace label.warning { color: @warn; background: transparent; }
+.workspace .foot button.danger {
+    color: @error;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+.workspace .foot button.danger:hover { background: @surface_hover; }
+.workspace .context progress { background: @accent; box-shadow: none; }
+.workspace .context trough { background: @line; box-shadow: none; }
+.workspace .context trough, .workspace .context progress { min-height: 4px; }
+
+.workspace { font-size: 15px; }
+.workspace .tabs { padding: 0 32px; }
+.workspace button.tab { padding: 0; margin-right: 28px; }
+.workspace button.tab.on { font-weight: 600; }
+.workspace .agent-body { padding: 0 32px 22px; }
+.workspace .agent-body .row { padding: 18px 0; }
+.workspace .agent-body .row:first-child { padding-top: 0; }
+.workspace .agent-body .row:last-child { border-bottom-width: 0; }
+.workspace .hint, .workspace .flag { font-size: 14px; }
+.workspace dropdown > button,
+.workspace .body entry,
+.workspace .body searchentry,
+.workspace .body button.secondary { border-color: @line_strong; }
+.workspace .context { padding-right: 32px; }
+.workspace .tree-tools { padding: 42px 0 8px; }
+.workspace .tree-section, .workspace .tree-category {
+    min-height: 48px;
+    padding-right: 6px;
+}
+.workspace .tree-category { border-bottom: 1px solid @line; }
+.workspace button.fold-trigger {
+    min-height: 46px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-weight: 400;
+}
+.workspace button.fold-trigger:hover { background: @surface_hover; }
+.workspace .tree-body { padding-left: 16px; }
+.workspace .tree-entries .tree-row { padding-left: 32px; }
+.workspace .tree-row, .workspace .instruction-row {
+    min-height: 39px;
+    padding-right: 6px;
+    border-bottom: 1px solid @line;
+}
+.workspace .instruction-row { min-height: 47px; }
+.workspace .instruction-row:last-child { border-bottom-width: 0; }
+.workspace button.instruction-link {
+    border: 0;
+    background: transparent;
+    text-decoration: underline;
+    font-family: monospace;
+    font-weight: 400;
+    padding: 0;
+}
+.workspace .instruction-link:hover { background: @surface_hover; }
+.workspace .sw:checked { background: @accent; border-color: @accent; }
+.workspace .sw:checked slider { background: @text_on_accent; }
+.workspace .summary-note {
+    background: @surface;
+    color: @text;
+    border-radius: 5px;
+    margin-top: 22px;
+    padding: 10px 14px;
+    font-size: 14px;
+}
+.workspace .summary-fact {
+    min-height: 43px;
+    border-bottom: 1px solid @line;
+}
+.workspace .summary-fact label { padding: 8px 0; }
+.workspace .fact-title { color: @muted; }
+.workspace .foot { background: @bg; padding: 14px 32px; }
+.workspace .foot button.secondary { border-color: @line_strong; }
+.workspace .foot button.primary:disabled { opacity: 0.54; }

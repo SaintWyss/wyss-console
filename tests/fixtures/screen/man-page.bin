@@ -1,0 +1,47 @@
+[?1049h[22;0;0t[24;1H[?1h=[4mLS[24m(1)                            User Commands                            [4mLS[24m(1)[m
+[m
+[1mNAME(B[m[m
+     ls - list directory contents[m
+[m
+[1mSYNOPSIS(B[m[m
+     [1mls(B[m [[4mOPTION[24m]... [[4mFILE[24m]...[m
+[m
+[1mDESCRIPTION(B[m[m
+     List information about the FILEs (the current directory by default).  Sort[m
+     entries alphabetically if none of [1m-cftuvSUX(B[m nor [1m--sort(B[m is specified.[m
+[m
+     Mandatory arguments to long options are mandatory for short options too.[m
+[m
+     [1m-a,(B[m [1m--all(B[m[m
+            do not ignore entries starting with .[m
+[m
+     [1m-A,(B[m [1m--almost-all(B[m[m
+            do not list implied . and ..[m
+[m
+     [1m--author(B[m[m
+            with [1m-l(B[m, print the author of each file[m
+[m
+[7m Manual page ls(1) line 1 (press h for help or q to quit)[27m[K[K     [1m-b,(B[m [1m--escape(B[m[m
+            print C-style escapes for nongraphic characters[m
+[m
+     [1m--block-size=SIZE(B[m[m
+            with   [1m-l(B[m,   scale   sizes   by  SIZE  when  printing  them;  e.g.,[m
+            '--block-size=M'; see SIZE format below[m
+[m
+     [1m-B,(B[m [1m--ignore-backups(B[m[m
+            do not list implied entries ending with ~[m
+[m
+     [1m-c(B[m     with [1m-lt(B[m: sort by, and show, ctime (time of  last  change  of  file[m
+            status  information);  with [1m-l(B[m: show ctime and sort by name; other‐[m
+            wise: sort by ctime, newest first[m
+[m
+     [1m-C(B[m     list entries by columns[m
+[m
+     [1m--color[=WHEN](B[m[m
+            color the output WHEN; more info below[m
+[m
+     [1m-d,(B[m [1m--directory(B[m[m
+            list directories themselves, not their contents[m
+[m
+     [1m-D,(B[m [1m--dired(B[m[m
+[7m Manual page ls(1) line 24 (press h for help or q to quit)[27m[K

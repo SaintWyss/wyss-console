@@ -1,0 +1,21 @@
+.distributors {
+    background: @bg;
+    color: @text;
+    padding: 18px;
+}
+.distributors .hint { color: @muted; }
+.distributors .installed { color: @ok; }
+.distributors .primary { background: @accent; color: @text_on_accent; }
+.personal-rail {
+    background: @chrome;
+    border-right: 1px solid @line;
+    padding: 8px;
+}
+.personal-rail button { padding: 5px 8px; }
+.personal-rail label { min-width: 126px; }
+.personal-rail button:checked { background: @surface; border-color: @line; }
+.distributor-list { border-top: 1px solid @line; }
+.distributor-row { border-bottom: 1px solid @line; padding: 10px 0; }
+.distributor-row .title, .distributor-row .installed { font-weight: bold; }
+.distributor-row button { min-height: 22px; padding: 2px 8px; }
+.distributor-list .add-tool { margin-top: 18px; }

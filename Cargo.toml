@@ -1,0 +1,58 @@
+[package]
+license-file = "LICENSE"
+name = "wyss-console"
+version = "0.2.0"
+description = "Wyss Console para Linux, con GTK4"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+default-run = "wyss-console"
+autobins = false
+
+[features]
+default = ["gui"]
+gui = ["dep:gtk"]
+test-fixtures = []
+
+[[bin]]
+name = "wyss-console"
+path = "src/bin/wyss-console-native/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "wyss-host"
+path = "src/bin/wyss-host.rs"
+test = false
+
+[[bin]]
+name = "wyss-screen"
+path = "src/bin/wyss-screen.rs"
+
+[[test]]
+name = "screen_corpus"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "screen_helper_process"
+required-features = ["test-fixtures"]
+
+[dependencies]
+sha2 = "0.10.9"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip`: a split ratio must decode to the exact f64 that was encoded.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# Stored credentials use authenticated encryption with an OS-generated key.
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+getrandom = "0.3"
+zeroize = "1"
+# Parse provider TOML for inventory and semantic validation of byte-preserving edits.
+# Keep the pinned parser aligned with the dependency graph.
+toml = { version = "=1.1.6", default-features = false, features = ["std", "serde", "parse", "display"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+uuid = { version = "=1.27.0", features = ["v4"] }
+
+portable-pty = { version = "=0.9.0", default-features = false }
+nix = { version = "=0.28.0", default-features = false, features = ["dir", "fs", "inotify", "poll", "signal", "process", "user", "socket"] }
+
+gtk = { package = "gtk4", version = "=0.11.5", features = ["v4_14"], optional = true }

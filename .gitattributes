@@ -1,0 +1,2 @@
+tests/fixtures/screen/*.bin binary
+tests/fixtures/screen/*.sgr binary

@@ -1,0 +1,538 @@
+/* The whole look of the window, in one file: graphite dark theme with the tokens of the Console
+   (src/app.css). GTK CSS has no custom properties here, so the tokens are named colors. */
+/* The named colors (@chrome, @bg, @text...) are written in front of this file by theme.rs, one set per
+   theme, from the Console's tokens. */
+
+window.console {
+  background: @bg;
+  color: @text;
+  font-family: 'IBM Plex Sans', 'Inter', sans-serif;
+  font-size: 13px;
+}
+
+window.console * {
+  -gtk-icon-style: symbolic;
+}
+
+/* GTK loads the desktop's user stylesheet even with the Default theme selected. */
+button,
+entry,
+searchentry,
+dropdown > button,
+combobox button,
+checkbutton > check {
+  background: @surface_control;
+  color: @text;
+  border: 1px solid @line;
+  border-radius: 5px;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+button:hover,
+button:active,
+dropdown > button:checked,
+combobox button:checked {
+  background: @surface_hover;
+  color: @text;
+}
+button:disabled, entry:disabled, searchentry:disabled, checkbutton:disabled {
+  color: @muted;
+  opacity: 0.65;
+}
+button:focus-visible, checkbutton:focus-visible, switch:focus-visible,
+textview:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: -2px;
+}
+entry:focus-within, searchentry:focus-within {
+  border-color: @accent;
+}
+label, entry > text, searchentry > text {
+  background: transparent;
+  text-shadow: none;
+}
+entry placeholder, searchentry placeholder {
+  color: @muted;
+}
+entry selection, searchentry selection, textview selection, label selection {
+  background: @accent;
+  color: @text_on_accent;
+}
+checkbutton {
+  background: transparent;
+  color: @text;
+}
+checkbutton > check {
+  min-width: 16px;
+  min-height: 16px;
+  border-color: @line_strong;
+}
+checkbutton > check:hover {
+  background: @surface_hover;
+}
+checkbutton > check:checked,
+checkbutton > check:indeterminate {
+  background: @accent;
+  color: @text_on_accent;
+  border-color: @accent;
+}
+textview, textview > text {
+  background: @surface_control;
+  color: @text;
+  caret-color: @text;
+}
+popover > contents, popover > arrow, tooltip.background {
+  background: @surface_overlay;
+  border: 1px solid @line;
+  color: @text;
+  text-shadow: none;
+}
+list, listbox, listview {
+  background: @surface_overlay;
+  color: @text;
+}
+row {
+  background: transparent;
+  color: @text;
+}
+row:hover {
+  background: @surface_hover;
+}
+row:selected {
+  background: @accent_soft;
+  color: @text;
+}
+scrollbar, scrollbar > range > trough {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+scrollbar slider {
+  background: @line_strong;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  min-width: 6px;
+  min-height: 6px;
+}
+scrollbar slider:hover, scrollbar slider:active {
+  background: @muted;
+}
+
+/* ---- rail ---- */
+.rail {
+  background: @chrome;
+  border-right: 1px solid @line;
+  min-width: 51px;
+  padding: 11px 0;
+}
+.rail-marker {
+  min-width: 3px;
+  min-height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+}
+.rail-marker.active {
+  background: @text;
+}
+button.rail-btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  margin: 0 0 0 5px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: @muted;
+}
+button.rail-btn:hover {
+  background: @surface_hover;
+  color: @text;
+}
+button.rail-btn.active {
+  background: @surface_strong;
+  color: @text;
+}
+button.rail-btn:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: -2px;
+}
+
+/* ---- tab bar ---- */
+.tabbar {
+  background: @chrome;
+  border-bottom: 1px solid @line;
+  min-height: 39px;
+  padding: 0 8px 0 8px;
+}
+.tab {
+  padding: 0 10px 0 10px;
+  margin: 0 2px 0 0;
+  border-bottom: 2px solid transparent;
+  color: @muted;
+}
+.tab.active {
+  border-bottom-color: @text;
+  color: @text;
+}
+.tab-name {
+  font-weight: 500;
+}
+.tab.active .tab-name {
+  font-weight: 700;
+}
+.tab-ram,
+.tab-panes {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: @faint;
+  margin-left: 8px;
+}
+.tab-panes {
+  color: @muted;
+}
+button.tab-close {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  margin-left: 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: @faint;
+}
+button.tab-close:hover {
+  background: @surface_hover;
+  color: @text;
+}
+.tools {
+  margin: 0 0 0 4px;
+}
+button.tool-btn {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin-left: 6px;
+  border: 1px solid @line;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: @muted;
+}
+button.tool-btn:hover {
+  background: @surface_hover;
+  color: @text;
+}
+button.tool-btn:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: 1px;
+}
+
+/* ---- panes ---- */
+.body {
+  background: @bg;
+  padding: 3px;
+}
+.pane {
+  background: @terminal_bg;
+  border: 1px solid @line;
+  border-radius: 6px;
+}
+.pane.focused {
+  border-color: @accent_line;
+}
+.pane-header {
+  background: @surface;
+  border-bottom: 1px solid @line;
+  min-height: 31px;
+  padding: 0 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: @faint;
+}
+.pane-shell {
+  color: @muted;
+}
+.dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 4px;
+  background: @ok;
+  margin-right: 14px;
+}
+.dot.ended {
+  background: @warn;
+}
+paned > separator {
+  background: transparent;
+  min-width: 6px;
+  min-height: 6px;
+}
+paned > separator:hover {
+  background: @line;
+}
+
+/* ---- status bar ---- */
+.statusbar {
+  background: @chrome;
+  border-top: 1px solid @line;
+  min-height: 29px;
+  padding: 0 12px 0 10px;
+  color: @muted;
+  font-size: 12px;
+}
+.status-folder {
+  margin-left: 8px;
+}
+.status-git {
+  margin-left: 14px;
+  color: @faint;
+}
+.status-kind {
+  color: @muted;
+}
+
+/* ---- tooltips and the shortcut list ---- */
+tooltip.background {
+  background: @surface_overlay;
+  border: 1px solid @line;
+  border-radius: 5px;
+  color: @text;
+}
+tooltip.background label {
+  padding: 2px 4px;
+}
+popover.shortcuts > contents {
+  background: @surface_overlay;
+  border: 1px solid @line;
+  border-radius: 6px;
+  color: @text;
+  padding: 12px 16px;
+}
+popover.shortcuts .shortcut-key {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: @text;
+}
+popover.shortcuts .shortcut-what {
+  color: @muted;
+}
+popover.shortcuts .shortcut-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* ---- pane header: agent label and lifecycle buttons ---- */
+.pane-native {
+  color: @muted;
+  border: 1px solid @line;
+  border-radius: 9px;
+  padding: 0 7px;
+  margin-right: 8px;
+}
+button.hdr-btn {
+  min-height: 20px;
+  padding: 0 8px;
+  margin-left: 6px;
+  border: 1px solid @line;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: @muted;
+  font-family: 'IBM Plex Sans', 'Inter', sans-serif;
+  font-size: 12px;
+}
+button.hdr-btn:hover {
+  background: @surface_hover;
+  color: @text;
+}
+button.hdr-btn:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: 1px;
+}
+button.hdr-close {
+  min-width: 20px;
+  padding: 0;
+  border-color: transparent;
+}
+
+/* ---- search bar of a pane ---- */
+.find-bar {
+  background: @surface;
+  border-bottom: 1px solid @line;
+  padding: 4px 8px;
+}
+.find-bar entry {
+  min-width: 240px;
+  min-height: 24px;
+  background: @surface_control;
+  color: @text;
+  border: 1px solid @line_strong;
+  border-radius: 4px;
+  box-shadow: none;
+  font-size: 12px;
+}
+.find-bar entry:focus-within {
+  border-color: @accent;
+}
+.find-count {
+  color: @muted;
+  font-size: 12px;
+  margin: 0 10px;
+  min-width: 70px;
+}
+.find-bar button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  margin-left: 4px;
+  border: 1px solid @line;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: @muted;
+}
+.find-bar button:hover {
+  background: @surface_hover;
+  color: @text;
+}
+
+/* ---- the Launch button and its menu ---- */
+button.launch-btn {
+  min-height: 28px;
+  padding: 0 12px;
+  margin-left: 8px;
+  border: 1px solid @line_strong;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: @text;
+  font-size: 13px;
+}
+button.launch-btn:hover,
+button.launch-btn.open {
+  background: @surface_hover;
+}
+button.launch-btn:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: 1px;
+}
+.launch-panel {
+  background: @surface_overlay;
+  border: 1px solid @line_strong;
+  border-radius: 6px;
+  min-width: 320px;
+  padding: 6px 0 0 0;
+  margin: 38px 10px 0 0;
+}
+button.launch-item {
+  padding: 7px 16px;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: @text;
+}
+button.launch-item:hover {
+  background: @surface_hover;
+}
+button.launch-item:focus-visible {
+  outline: 2px solid @accent;
+  outline-offset: -2px;
+}
+.launch-name {
+  font-size: 14px;
+}
+.launch-type {
+  color: @muted;
+  font-size: 12px;
+  margin-left: 24px;
+}
+.pill-full {
+  color: @warn;
+  border: 1px solid @warn_line;
+  border-radius: 4px;
+  padding: 0 7px;
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.launch-empty,
+.launch-refused {
+  color: @muted;
+  font-size: 12px;
+  padding: 6px 16px;
+}
+.launch-refused {
+  color: @error;
+}
+.launch-foot {
+  border-top: 1px solid @line;
+  margin-top: 6px;
+  padding: 8px 16px 10px 16px;
+  color: @muted;
+  font-size: 12px;
+}
+
+/* ---- messages under the tab bar ---- */
+.banner {
+  background: @surface;
+  border-bottom: 1px solid @line;
+  padding: 5px 12px;
+  color: @muted;
+  font-size: 12px;
+}
+.banner.error {
+  background: @error_soft;
+  border-bottom-color: @error_line;
+  color: @error_text;
+}
+.banner button {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+/* Settings follows the Console's two-column cards and uses the active theme tokens. */
+.settings-heading {
+  padding: 14px 16px 10px;
+}
+.settings-title, .settings-card-title, .settings-table-heading {
+  color: @text;
+  font-weight: 600;
+}
+.settings-title { font-size: 15px; }
+.settings-card-title { font-size: 14px; }
+.settings-body { padding: 0 16px 16px; }
+.settings-card {
+  background: @chrome;
+  border: 1px solid @line;
+  border-radius: 6px;
+  padding: 14px;
+}
+.settings-card dropdown > button { min-height: 30px; }
+.settings-hint { color: @muted; }
+.settings-notice {
+  color: @text;
+  background: @chrome;
+  border: 1px solid @line;
+  border-radius: 5px;
+  padding: 10px 12px;
+}
+.settings-error {
+  color: @error_text;
+  background: @error_soft;
+  border-color: @error_line;
+}
+.settings-table-cell, .settings-table-heading {
+  padding: 6px;
+  border-bottom: 1px solid @line;
+}
