@@ -36,6 +36,17 @@ El host consulta la ayuda del ejecutable instalado de Codex o Claude Code. Si fa
 
 La misma lista aparece en la leyenda de la Consola (`src/bin/wyss-console-native/keymap.rs`).
 
+## Línea de comandos
+
+Hay una sola ventana. Si ya está abierta, `wyss-console …` abre una pestaña en ella y la trae al frente; si no, la abre y restaura las terminales vivas del host.
+
+| Opción | Qué hace |
+|---|---|
+| `-e PROGRAMA [ARGS…]` o `-- PROGRAMA [ARGS…]` | Corre el programa en una pestaña nueva; la pestaña se cierra cuando el programa termina. Un único argumento con espacios se toma como línea de shell. |
+| `--workdir DIR`, `--working-directory DIR`, `-w DIR` | Carpeta de la pestaña nueva. Sin esta opción se usa la carpeta desde donde se llamó. |
+| `--no-terminal` | Abre la ventana en Workspace sin crear una pestaña si no hay nada que restaurar. Al entrar a Consola se crea la primera. |
+| `N` (número) | Pestañas a abrir cuando no hay nada que restaurar. |
+
 ## Requisitos
 
 - Rust 1.92 o posterior, Cargo, compilador C y `pkg-config`.

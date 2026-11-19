@@ -43,8 +43,18 @@ fn panel_security_ask_rechecks_cached_running_state() {
 
 pub struct Config {
     pub host: Option<Host>,
-    /// Tabs to open when there is nothing to restore.
-    pub tabs: usize,
+    /// What the command line asked for (tabs, folder, program, no terminal).
+    pub request: crate::cli::Request,
+    /// Folder the caller was in, for a new tab without `--workdir`.
+    pub cwd: Option<String>,
+}
+
+/// A later `wyss-console …` while the window is open: a new tab in it, then the window to the front.
+pub fn handle(request: &crate::cli::Request, cwd: Option<String>) -> bool {
+    let Some(ui) = UI.with(|ui| ui.borrow().clone()) else { return false };
+    ui.open_request(request, cwd);
+    ui.win.present();
+    true
 }
 
 /// What the periodic read of /proc learned about a pane.
@@ -1078,6 +1088,42 @@ impl Ui {
         });
     }
 
+    /// A tab in the asked folder; with a program, it replaces the shell (`exec`) so the tab closes
+    /// when the program ends.
+    fn open_request(self: &Rc<Self>, request: &crate::cli::Request, cwd: Option<String>) {
+        let dir = request.workdir.clone().or(cwd);
+        let Some(host) = self.host.clone() else {
+            self.new_tab();
+            return;
+        };
+        let title = request
+            .command
+            .as_ref()
+            .and_then(|c| c.first())
+            .and_then(|p| p.split_whitespace().next())
+            .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned())
+            .unwrap_or_else(|| tr("Terminal"));
+        let command = request.command.clone();
+        std::thread::spawn(move || {
+            let result = (|| {
+                let (rows, cols) = native::FIRST_SIZE;
+                let id = host.create_in(rows, cols, dir.as_deref(), Some(&title))?;
+                if let Some(command) = &command
+                    && let Err(error) = host.write(&id, &crate::cli::typed(command))
+                {
+                    let _ = host.close(&id);
+                    return Err(native::Refusal::from(error));
+                }
+                Ok(native::Opened::Terminal { terminal_id: id, title })
+            })();
+            glib::MainContext::default().invoke(move || {
+                UI.with(|ui| {
+                    if let Some(ui) = ui.borrow().clone() { ui.opened(result); }
+                });
+            });
+        });
+    }
+
     fn run_distributor(self: &Rc<Self>, title: &str, cwd: &str, command: &str) {
         let Some(host) = self.host.clone() else {
             self.banner(&native::failure_text("host_unavailable"), true);
@@ -1636,7 +1682,15 @@ pub fn build(
     };
     console_button.connect_clicked({
         let show_screen = show_screen.clone();
-        move |_| show_screen("console")
+        move |_| {
+            // Opened with --no-terminal: the console gets its first tab when it is shown.
+            if let Some(ui) = UI.with(|ui| ui.borrow().clone())
+                && ui.tabs.borrow().is_empty()
+            {
+                ui.new_tab();
+            }
+            show_screen("console")
+        }
     });
     let (settings_page, landing) = settings::build(&win, service, settings_snapshot, cfg.host.clone(), {
         let ui = Rc::downgrade(&ui);
@@ -1845,14 +1899,22 @@ pub fn build(
         }
         ui.add_tab(t.n, t.root.clone(), t.focus.clone());
     }
+    let request = &cfg.request;
     if plan.tabs.is_empty() {
-        for _ in 0..cfg.tabs.max(1) {
-            ui.new_tab();
+        if !request.wants_tab() && !request.no_terminal {
+            for _ in 0..request.tabs.unwrap_or(1).max(1) {
+                ui.new_tab();
+            }
         }
     } else {
         ui.select(plan.active);
     }
-    if ui.tabs.borrow().is_empty() {
+    if request.wants_tab() {
+        ui.open_request(request, cfg.cwd.clone());
+    } else if request.no_terminal && ui.tabs.borrow().is_empty() {
+        show_screen("workspace");
+    }
+    if ui.tabs.borrow().is_empty() && !request.wants_tab() && !request.no_terminal {
         eprintln!("wyss-console: no terminal to show");
         win.close();
     }

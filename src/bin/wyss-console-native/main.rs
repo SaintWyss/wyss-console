@@ -1,6 +1,7 @@
 //! Interfaz GTK4 para Wyss Console.
 
 mod arsenal;
+mod cli;
 mod credentials;
 mod console;
 mod distributors;
@@ -33,6 +34,8 @@ use wyss_console::settings::SettingsService;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 fn main() -> glib::ExitCode {
     let mut args = std::env::args();
@@ -51,36 +54,53 @@ fn main() -> glib::ExitCode {
             }
         };
     }
-    let tabs: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(1).max(1);
     let service = SettingsService::from_environment();
     let snapshot = settings::Snapshot::load(&service);
+    // One window: a later `wyss-console …` (a shortcut, Dolphin, a menu entry that needs a
+    // terminal) reaches the running one through its command line and opens a tab there. Without a
+    // session bus GApplication runs on its own, as before.
     let app = gtk::Application::builder()
         .application_id("dev.wyss.Console")
-        .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
-    app.connect_command_line(|app, _| {
-        app.activate();
+    let host: Rc<RefCell<Option<Option<host::Host>>>> = Rc::default();
+    app.connect_command_line(move |app, line| {
+        let args: Vec<String> = line.arguments().iter().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
+        let mut request = match cli::parse(&args) {
+            Ok(r) => r,
+            Err(error) => {
+                eprintln!("wyss-console: {error}");
+                return 2.into();
+            }
+        };
+        let cwd = line.cwd().map(|p| p.to_string_lossy().into_owned());
+        if let (Some(dir), Some(base)) = (&request.workdir, &cwd)
+            && !dir.starts_with('/')
+        {
+            request.workdir = Some(format!("{base}/{dir}"));
+        }
+        if console::handle(&request, cwd.clone()) {
+            return 0.into();
+        }
+        // First window of this process: the host is reached only now, in the primary instance.
+        if host.borrow().is_none() {
+            match host::connect_or_start() {
+                Ok(h) => *host.borrow_mut() = Some(h),
+                Err(error) => {
+                    eprintln!("wyss-console: {error}");
+                    return 1.into();
+                }
+            }
+        }
+        let h = host.borrow().clone().flatten();
+        build(app, console::Config { host: h, request, cwd }, service.clone(), snapshot.clone());
         0.into()
     });
-    let host = match host::connect_or_start() {
-        Ok(host) => host,
-        Err(error) => {
-            eprintln!("wyss-console: {error}");
-            return glib::ExitCode::FAILURE;
-        }
-    };
-    app.connect_activate(move |app| build(app, tabs, host.clone(), service.clone(), snapshot.clone()));
     app.run()
 }
 
-fn build(
-    app: &gtk::Application,
-    tabs: usize,
-    host: Option<host::Host>,
-    service: SettingsService,
-    snapshot: settings::Snapshot,
-) {
-    let win = console::build(app, console::Config { host, tabs }, service, snapshot);
+fn build(app: &gtk::Application, cfg: console::Config, service: SettingsService, snapshot: settings::Snapshot) {
+    let win = console::build(app, cfg, service, snapshot);
 
     if let Some(secs) = std::env::var("WYSS_CONSOLE_EXIT_AFTER").ok().and_then(|v| v.parse::<u32>().ok()) {
         let win = win.clone();
