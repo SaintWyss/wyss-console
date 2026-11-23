@@ -334,6 +334,25 @@ fn request(value: serde_json::Value) -> SaveRequest {
 }
 
 #[test]
+fn a_fixed_launch_is_listed_but_never_written_or_deleted() {
+    let places = places();
+    let text = "name = \"Claude Global\"\ndirectory = \"~\"\n\n[session]\nagent = \"claude_code\"\npermission = \"bypass\"\n";
+    write(&places, "claude-global.toml", text);
+    assert!(list(&places).unwrap().launches.iter().any(|l| l.id == "claude-global"));
+    let refused = save(
+        &places,
+        &request(json!({
+            "name": "Claude Global", "directory": "~", "agent": "claude_code",
+            "permission": "ask", "replace": true,
+        })),
+        &fake(),
+    );
+    assert_eq!(refused.unwrap_err(), SaveRefusal::Invalid(FIXED_REFUSAL.into()));
+    assert_eq!(delete(&places, "claude-global").unwrap_err(), FIXED_REFUSAL);
+    assert_eq!(fs::read_to_string(places.folder.join("claude-global.toml")).unwrap(), text);
+}
+
+#[test]
 fn a_saved_launch_is_private_names_its_preset_and_reads_back_the_same() {
     let places = places();
     let work = places.home.join("work").display().to_string();

@@ -361,6 +361,7 @@ pub const ES: &[(&str, &str)] = &[
     ("Split the pane, one above the other", "Dividir el panel en dos, uno encima del otro"),
     ("Split, one above the other (Ctrl+Shift+E)", "Dividir en dos paneles, uno encima del otro (Ctrl+Shift+E)"),
     ("Start it again", "Volver a iniciar"),
+    ("Starts in your home folder with full access and your whole configuration. This launch cannot be edited.", "Abre en tu carpeta personal con acceso total y toda tu configuración. Este lanzamiento no se puede editar."),
     ("Stop", "Parar"),
     ("Structure", "Estructura"),
     ("Study and knowledge", "Estudio y conocimiento"),

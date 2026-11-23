@@ -213,6 +213,27 @@ fn foot(
     (save_button, try_button)
 }
 
+/// A fixed launch has no form, no Save and no Delete: only what it does and how to open it.
+fn fixed_launch(screen: &Screen, parent: &gtk::Box, launch: &Launch) {
+    let body = vertical(10);
+    body.add_css_class("body");
+    body.append(&label(&launch.name, "head"));
+    let about = label(
+        &tr("Starts in your home folder with full access and your whole configuration. This launch cannot be edited."),
+        "hint",
+    );
+    about.set_wrap(true);
+    body.append(&about);
+    if let Some(action) = screen.try_launch.clone() {
+        let open = button(&tr("Open"), "primary");
+        open.set_halign(gtk::Align::Start);
+        let id = launch.id.clone();
+        open.connect_clicked(move |_| action(&id));
+        body.append(&open);
+    }
+    parent.append(&body);
+}
+
 fn confirm(window: &gtk::ApplicationWindow, action: impl Fn() + 'static) {
     let dialog = gtk::AlertDialog::builder()
         .message(tr("Delete this launch?"))
@@ -803,6 +824,10 @@ impl Screen {
             return;
         };
         self.select(launch.as_ref().map(|entry| entry.id.as_str()));
+        if let Some(entry) = launch.as_ref().filter(|entry| launch::is_fixed(&entry.id)) {
+            fixed_launch(self, &editor, entry);
+            return;
+        }
         if commands
             || launch
                 .as_ref()

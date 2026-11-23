@@ -538,6 +538,9 @@ impl launch::Known for Known<'_> {
 }
 
 pub fn save(places: &Places, draft: &Draft) -> Result<Launch, String> {
+    if draft.id.as_deref().is_some_and(launch::is_fixed) {
+        return Err(launch::FIXED_REFUSAL.into());
+    }
     if draft.read_only_selection && draft.needs_selection() {
         return Err(
             crate::t!("Changes that write to the Arsenal library are unavailable here.").into(),
@@ -944,6 +947,12 @@ mod tests {
                 .launches
                 .contains(&editable)
         );
+
+        let mut fixed = Draft::load(&places, None, CODEX, None).unwrap();
+        fixed.id = Some("codex-global".into());
+        fixed.name = "Renamed away".into();
+        assert_eq!(save(&places, &fixed).unwrap_err(), launch::FIXED_REFUSAL);
+        assert!(!places.folder.join("renamed-away.toml").exists());
 
         let mut draft = Draft::load(&places, None, CODEX, None).unwrap();
         assert!(draft.uses_global());

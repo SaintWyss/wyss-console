@@ -658,6 +658,7 @@
     "there is no stored sign-in token for a folder of the session's own": "no hay un token de inicio de sesión guardado para una carpeta propia de la sesión",
     "the project folder would load your own configuration again": "la carpeta del proyecto volvería a cargar tu propia configuración",
     "the Arsenal library could not be read": "no se pudo leer la biblioteca de Arsenal",
+    "Starts in your home folder with full access and your whole configuration. This launch cannot be edited.": "Abre en tu carpeta personal con acceso total y toda tu configuración. Este lanzamiento no se puede editar.",
     "A preset cannot run with your home folder (~) as the working directory: the agent would load your own ~/.claude again on top of the preset. Choose a project folder in Workspace → General → Working directory.": "Un preset no puede correr con tu carpeta personal (~) como directorio de trabajo: el agente volvería a cargar tu ~/.claude encima del preset. Elegí una carpeta de proyecto en Workspace → General → Directorio de trabajo.",
     "This preset needs your Claude Code sign-in, and it was not found in the system keyring. Sign in once with claude in a terminal and try again.": "Este preset necesita tu sesión de Claude Code y no se encontró en el llavero del sistema. Iniciá sesión una vez con claude en una terminal y probá de nuevo.",
     "The preset’s own folder for the agent could not be prepared. Nothing was started.": "No se pudo preparar la carpeta propia del preset para el agente. No se inició nada.",

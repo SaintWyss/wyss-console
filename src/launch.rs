@@ -1151,6 +1151,15 @@ fn write_then_publish(
     }
 }
 
+/// The owner's two full-access launches in the home folder. Workspace lists and starts them, and
+/// never writes or deletes their files.
+const FIXED: [&str; 2] = ["claude-global", "codex-global"];
+pub const FIXED_REFUSAL: &str = "This launch is fixed and cannot be edited";
+
+pub fn is_fixed(id: &str) -> bool {
+    FIXED.contains(&id)
+}
+
 pub fn save_session(
     places: &Places,
     request: &SaveRequest,
@@ -1170,6 +1179,9 @@ pub fn save_session(
     let id = slug(&request.name);
     if id.is_empty() {
         return Err(invalid("name needs at least one letter or digit".into()));
+    }
+    if is_fixed(&id) {
+        return Err(invalid(FIXED_REFUSAL.into()));
     }
     let folder =
         directory(Some(&request.directory), &places.home).map_err(|why| invalid(why.to_owned()))?;
@@ -1237,6 +1249,9 @@ pub fn save_session(
 /// Deletes a launch the window saved: one with no `before` line and no commands. The owner's
 /// own files, and the shipped ones with a `before` line, are edited by hand and never deleted here.
 pub fn delete(places: &Places, id: &str) -> Result<(), String> {
+    if is_fixed(id) {
+        return Err(FIXED_REFUSAL.into());
+    }
     let launch = get_for_editor(places, id)?;
     let saved = matches!(&launch.kind, Kind::Session { before, .. } if before.is_empty());
     if !saved {
