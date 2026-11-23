@@ -268,6 +268,7 @@ struct State {
     shared: Arc<Shared>,
     pty: Option<Pty>,
     input: Input,
+    input_revision: StdCell<u64>,
     cell_w: StdCell<f64>,
     cell_h: StdCell<f64>,
     size: StdCell<(usize, usize)>,
@@ -327,6 +328,11 @@ impl State {
                 t.scroll_bottom();
             }
         }
+        self.send_input(bytes);
+    }
+
+    fn send_input(&self, bytes: &[u8]) {
+        self.input_revision.set(self.input_revision.get().saturating_add(1));
         self.input.send(bytes);
     }
 
@@ -566,6 +572,7 @@ impl Terminal {
             cursor_blinks: StdCell::new(false),
             pty,
             input,
+            input_revision: StdCell::new(0),
             cell_w: StdCell::new(8.0),
             pointer: StdCell::new((0.0, 0.0)),
             cell_h: StdCell::new(16.0),
@@ -747,7 +754,7 @@ impl Terminal {
                 let modes = state.shared.lock().wheel_modes();
                 match wheel::action(modes, shift, rows, pos.col, pos.row) {
                     wheel::Action::Scrollback(r) => state.shared.lock().scroll_delta(r),
-                    wheel::Action::Send(bytes) => state.input.send(&bytes),
+                    wheel::Action::Send(bytes) => state.send_input(&bytes),
                 }
                 state.clear_selection();
                 if let Some(a) = area_w.upgrade() {
@@ -826,6 +833,10 @@ impl Terminal {
         area.add_controller(paste);
 
         Terminal { widget: area, local_pid, state }
+    }
+
+    pub fn queue_input_state(&self) -> (bool, u64) {
+        (self.state.shared.lock().bracketed_paste(), self.state.input_revision.get())
     }
 
     pub fn type_text(&self, text: &str) {

@@ -9,6 +9,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 
+use crate::activity;
 use crate::host::Host;
 use crate::i18n::{tr, trf};
 use crate::icons::{self, Icon};
@@ -125,6 +126,7 @@ struct Pane {
     /// What the session's state offers (stop and restart, or start again and forget); `None` until
     /// the first read of `native_sessions`, and for a start that is still being prepared.
     life: Cell<Option<native::Lifecycle>>,
+    queue: Option<Rc<activity::QueuePanel>>,
 }
 
 struct Tab {
@@ -172,6 +174,9 @@ struct Ui {
     host: Option<Host>,
     home: Option<String>,
     refreshing: Cell<bool>,
+    activity_refreshing: Cell<bool>,
+    activity_strip: activity::Strip,
+    activity: RefCell<wyss_console::native::service::ActivityView>,
     save_pending: Cell<bool>,
     terminal_preferences: Cell<wyss_console::settings::Terminal>,
 }
@@ -244,6 +249,15 @@ impl Ui {
         for w in [dot.upcast_ref::<gtk::Widget>(), badge.upcast_ref(), shell.upcast_ref(), state.upcast_ref(), ram.upcast_ref(), grow.upcast_ref(), buttons.stop.upcast_ref(), buttons.restart.upcast_ref(), buttons.forget.upcast_ref(), buttons.close.upcast_ref()] {
             header.append(w);
         }
+        let queue = self.host.as_ref().zip(tag.as_ref()).zip(tid.as_ref())
+            .filter(|((_, tag), _)| matches!(tag.agent_name.as_str(), "Claude Code" | "Codex"))
+            .map(|((host, tag), tid)| {
+                let panel = activity::QueuePanel::new(
+                    host.clone(), tag.session_id.clone(), Some(tid.clone()), tag.agent_name == "Codex",
+                );
+                header.insert_child_after(&panel.button, Some(&grow));
+                panel
+            });
         root.append(&header);
 
         // Search bar (Ctrl+Shift+F), closed until asked for.
@@ -300,6 +314,7 @@ impl Ui {
             info: RefCell::new(Info { running: true, ..Info::default() }),
             native: RefCell::new(tag),
             life: Cell::new(None),
+            queue,
         });
         // The search bar talks to this pane only; a weak reference keeps the widgets from holding it alive.
         {
@@ -905,7 +920,41 @@ impl Ui {
                 self.git.set_text("");
             }
         }
+        self.paint_activity();
         self.kind.set_text(&tag.map(|t| native::agent_label(&t)).unwrap_or_else(|| tr("Terminal")));
+    }
+
+    fn paint_activity(&self) {
+        let pane = self.focused();
+        let tag = pane.as_ref().and_then(|p| p.native.borrow().clone());
+        self.activity_strip.paint(&self.activity.borrow(), tag.as_ref().map(|t| t.session_id.as_str()));
+    }
+
+    fn refresh_activity(self: &Rc<Self>) {
+        if !self.visible() || self.activity_refreshing.replace(true) {
+            return;
+        }
+        let host = self.host.clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let result = gtk::gio::spawn_blocking(move || activity::snapshot(host.as_ref())).await;
+            let Some(ui) = weak.upgrade() else { return };
+            ui.activity_refreshing.set(false);
+            let (view, reachable) = result.unwrap_or_default();
+            ui.activity.replace(view);
+            ui.paint_activity();
+            let activity = ui.activity.borrow();
+            for pane in ui.panes.borrow().values() {
+                if let Some(panel) = &pane.queue {
+                    let tag = pane.native.borrow();
+                    let info = reachable.then_some(()).and_then(|()| {
+                        let id = &tag.as_ref()?.session_id;
+                        activity.sessions.iter().find(|s| &s.id == id)
+                    });
+                    panel.observe(info, pane.term.queue_input_state());
+                }
+            }
+        });
     }
 
     fn visible(&self) -> bool {
@@ -1586,7 +1635,13 @@ pub fn build(
     screens.set_hhomogeneous(false);
     screens.set_vhomogeneous(false);
     screens.add_named(&main, Some("console"));
-    outer.append(&screens);
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    body.set_hexpand(true);
+    screens.set_vexpand(true);
+    body.append(&screens);
+    let activity_strip = activity::Strip::new(cfg.host.clone());
+    body.append(&activity_strip.root);
+    outer.append(&body);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&outer));
     overlay.add_overlay(&launch_panel);
@@ -1615,6 +1670,9 @@ pub fn build(
         host: cfg.host.clone(),
         home: std::env::var("HOME").ok(),
         refreshing: Cell::new(false),
+        activity_refreshing: Cell::new(false),
+        activity_strip,
+        activity: RefCell::new(Default::default()),
         save_pending: Cell::new(false),
         terminal_preferences: Cell::new(preferences.terminal),
     });
@@ -1981,12 +2039,16 @@ pub fn build(
     }
     {
         let ui = ui.clone();
-        win.connect_map(move |_| ui.refresh_soon());
+        win.connect_map(move |_| {
+            ui.refresh_soon();
+            ui.refresh_activity();
+        });
     }
     {
         let ui = ui.clone();
         glib::timeout_add_seconds_local(REFRESH_SECS, move || {
             ui.refresh();
+            ui.refresh_activity();
             glib::ControlFlow::Continue
         });
     }

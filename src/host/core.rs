@@ -57,6 +57,7 @@ struct Entry {
     changed: Condvar,
     /// The parser helper that keeps this terminal's screen; none when there is no helper.
     screen: Mutex<Option<Arc<ScreenLink>>>,
+    input_revision: Mutex<u64>,
 }
 
 /// The host's ring as the parser link's source of bytes. It holds the entry weakly: the link must
@@ -216,6 +217,22 @@ struct Write {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct QueueEdit {
+    id: String,
+    revision: u64,
+    edit: crate::native::prompt_queue::Edit,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueueSend {
+    id: String,
+    terminal_id: String,
+    turn: crate::native::prompt_queue::TurnId,
+    revision: u64,
+    input_revision: u64,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Resize {
     terminal_id: String,
     size: TerminalSize,
@@ -275,6 +292,8 @@ fn entry_cols(entry: &Entry) -> u16 {
 fn title_ok(title: &str) -> bool {
     !title.trim().is_empty() && title.chars().count() <= 80 && !title.chars().any(char::is_control)
 }
+
+const QUEUE_AUTOSEND: bool = false;
 
 impl HostCore {
     pub fn new(native: Option<NativeService>) -> Arc<Self> {
@@ -342,6 +361,7 @@ impl HostCore {
             }),
             changed: Condvar::new(),
             screen: Mutex::new(None),
+            input_revision: Mutex::new(0),
         });
         if let Some(spawner) = lock(&self.screen).clone() {
             let link = ScreenLink::start(
@@ -466,9 +486,15 @@ impl HostCore {
             }
             "term_write" => {
                 let request: Write = params(value)?;
+                let id = terminal_id(&request.terminal_id)?;
+                let entry = self.entry(&request.terminal_id).ok();
+                let mut revision = entry.as_ref().map(|entry| lock(&entry.input_revision));
+                if let Some(revision) = revision.as_deref_mut() {
+                    *revision = revision.saturating_add(1);
+                }
                 let written = self
                     .terminals
-                    .write(&terminal_id(&request.terminal_id)?, request.data)
+                    .write(&id, request.data)
                     .map_err(|e| terminal_error(&e))?;
                 to_value(written)
             }
@@ -570,6 +596,25 @@ impl HostCore {
                 let request: Sample = params(value)?;
                 to_value(self.native()?.sessions(&self.terminals, request.sample))
             }
+            "native_activity" => {
+                let mut activity = self.native()?.activity(&self.terminals);
+                for session in &mut activity.sessions {
+                    if let Some(entry) = session.terminal_id.as_deref().and_then(|tid| self.entry(tid).ok()) {
+                        session.input_revision = Some(*lock(&entry.input_revision));
+                    }
+                }
+                to_value(activity)
+            }
+            "native_queue" => {
+                let request: Id = params(value)?;
+                to_value(self.native()?.queue(&request.id).map_err(|e| native_error(&e))?)
+            }
+            "native_queue_edit" => {
+                let request: QueueEdit = params(value)?;
+                to_value(self.native()?.edit_queue(&request.id, request.revision, request.edit)
+                    .map_err(|e| native_error(&e))?)
+            }
+            "native_queue_send" => self.send_queue(params(value)?),
             "native_stop" => {
                 let request: Id = params(value)?;
                 self.native()?
@@ -586,6 +631,33 @@ impl HostCore {
             }
             _ => Err(HostError::new("unknown_op")),
         }
+    }
+
+    fn send_queue(&self, request: QueueSend) -> Result<Value, HostError> {
+        // The end-of-turn file is writable by the agent itself and a draft in the composer is not
+        // detected, so a send could run unattended in bypass mode. Off until the idle screen is verified.
+        if !QUEUE_AUTOSEND {
+            return Err(HostError::new("queue_unsafe"));
+        }
+        use crate::screen::terminal::mode::BRACKETED_PASTE;
+        let entry = self.entry(&request.terminal_id)?;
+        let link = lock(&entry.screen).clone().ok_or_else(|| HostError::new("queue_unsafe"))?;
+        let snap = link.snapshot(0, Duration::from_millis(500)).map_err(|_| HostError::new("queue_unsafe"))?;
+        if snap.status.health != Health::Healthy || snap.status.fidelity != Fidelity::Exact
+            || snap.body.modes & BRACKETED_PASTE == 0
+        {
+            return Err(HostError::new("queue_unsafe"));
+        }
+        // Another client or this window can type after arming. Check and serialize all input
+        // against the same terminal the owner armed, and refuse an out-of-date parser snapshot.
+        let revision = lock(&entry.input_revision);
+        if *revision != request.input_revision || snap.at != lock(&entry.inner).ring.end() {
+            return Err(HostError::new("queue_unsafe"));
+        }
+        to_value(self.native()?.send_queue(
+            &self.terminals, &request.id, &terminal_id(&request.terminal_id)?,
+            request.turn, request.revision,
+        ).map_err(|e| native_error(&e))?)
     }
 
     /// An agent's terminal is kept like any other, titled by what it runs.

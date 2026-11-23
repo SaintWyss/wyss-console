@@ -1,5 +1,6 @@
 //! Interfaz GTK4 para Wyss Console.
 
+mod activity;
 mod arsenal;
 mod cli;
 mod credentials;

@@ -295,6 +295,30 @@ paned > separator:hover {
   color: @muted;
 }
 
+/* ---- subscription and context readings ---- */
+.usage-strip {
+  background: @chrome;
+  border-top: 1px solid @line;
+  color: @muted;
+  font-size: 12px;
+}
+.usage-column {
+  padding: 4px 10px;
+}
+.usage-column + .usage-column {
+  border-left: 1px solid @line;
+}
+.usage-provider {
+  color: @text;
+  font-weight: 600;
+}
+.usage-warning {
+  color: @warn;
+}
+.usage-danger {
+  color: @error;
+}
+
 /* ---- tooltips and the shortcut list ---- */
 tooltip.background {
   background: @surface_overlay;

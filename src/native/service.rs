@@ -4,7 +4,7 @@
 //! resources are sampled only then (nothing runs while the view is hidden).
 use super::{
     arsenal::{self, ArsenalLaunch},
-    capabilities,
+    capabilities, claude_activity, prompt_queue,
     catalogue::{self, AGENTS, AgentId},
     extended_registry::{ExtendedRegistry, RecoveryRead},
     launch_home, launch_home_codex,
@@ -13,7 +13,7 @@ use super::{
     recipe::{self, family},
     registry::{M9Open, ProfileRef, Registry, Session, State},
     resources::{self, Usage},
-    store,
+    store, usage,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -438,11 +438,34 @@ fn read_copies(
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ActivitySession {
+    pub id: String,
+    pub agent: AgentId,
+    pub name: String,
+    pub started_at: u64,
+    pub terminal_id: Option<String>,
+    pub context: Option<f64>,
+    pub turn: Option<prompt_queue::Turn>,
+    pub input_revision: Option<u64>,
+    pub queue_revision: Option<u64>,
+    pub queued: usize,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct ActivityView {
+    pub plans: usage::Plans,
+    pub sessions: Vec<ActivitySession>,
+}
+
 struct Live {
     terminal: TerminalId,
+    agent: AgentId,
     pid: Option<u32>,
     last: Option<(resources::Sample, Instant)>,
     usage: Option<Usage>,
+    codex_rollouts: Option<(PathBuf, PathBuf)>,
+    queue_attempt: Option<prompt_queue::TurnId>,
 }
 
 struct Inner {
@@ -465,6 +488,8 @@ struct Inner {
     path_var: Option<OsString>,
     chosen: Mutex<Vec<String>>,
     live: Mutex<HashMap<String, Live>>,
+    readings: Mutex<usage::Usage>,
+    prompts: Mutex<prompt_queue::Book>,
     starting: AtomicBool,
     /// Variables added to every launch, besides the session's id. Empty outside tests.
     extra_env: Vec<(String, String)>,
@@ -674,6 +699,8 @@ impl NativeService {
         store::private_dir(&sessions).ok()?;
         Some(Self {
             inner: Arc::new(Inner {
+                readings: Mutex::new(usage::Usage::new(&base)),
+                prompts: Mutex::new(prompt_queue::Book::open(&base)),
                 base,
                 registry: Mutex::new(registry),
                 extended_registry: Mutex::new(extended_registry),
@@ -1374,6 +1401,17 @@ impl NativeService {
                 .map_err(|_| NativeError::new("store_unavailable"))?;
             words.extend(["--append-system-prompt-file".to_owned(), path.to_string_lossy().into_owned()]);
         }
+        let codex_rollouts = if agent_id == AgentId::Codex
+            && version.as_deref() == Some("codex-cli 0.170.0")
+        {
+            let home = home_pin.as_ref().map_or_else(
+                || launch_home_codex::CodexOwner::from_process(&self.inner.home).dir,
+                |(_, path)| PathBuf::from(path),
+            );
+            direct.canonicalize().ok().map(|executable| (home, executable))
+        } else {
+            None
+        };
         if let Some(brief) = &request.brief {
             if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {
                 let _ = fs::remove_dir_all(&dir);
@@ -1405,6 +1443,31 @@ impl NativeService {
                 return Err(NativeError::new("store_unavailable"));
             }
         }
+        let mut launch_exe = direct.clone();
+        if agent_id == AgentId::ClaudeCode
+            && version.as_deref() == Some("2.1.330 (Claude Code)")
+            && let Ok(helper) = std::env::current_exe()
+            && helper.file_name().is_some_and(|name| name == "wyss-host")
+            && store::private_dir(&dir).is_ok()
+        {
+            if let Some((_, pinned)) = &home_pin {
+                // The launch home is already known. Prepare before the shell reads its
+                // sign-in file so the monitoring executable never receives the stored token.
+                let argv: Vec<_> = words[1..].iter().map(OsString::from).collect();
+                if let Some(prepared) = claude_activity::prepare(
+                    &dir, &helper, Path::new(pinned), &project, &argv,
+                ).and_then(|args| args.into_iter().map(|word| word.into_string().ok()).collect::<Option<Vec<_>>>()) {
+                    words.splice(1.., prepared);
+                }
+            } else if !version_bound
+                && let (Some(exe), Some(dir_name)) = (helper.to_str(), dir.to_str())
+            {
+                // ponytail: a version-pinned launch goes unmonitored, the shell guard must probe the real CLI.
+                // With the owner's home, check the config directory selected by shell startup.
+                words.splice(..0, [exe.to_owned(), claude_activity::LAUNCH.to_owned(), dir_name.to_owned()]);
+                launch_exe = helper;
+            }
+        }
         // Shell launches read the token from a private file after shell initialization.
         // The readiness marker keeps that file alive until the shell has consumed it.
         let token_file = dir.join(TOKEN_FILE);
@@ -1430,7 +1493,7 @@ impl NativeService {
         let made = recipe::recipe_pinned_secret(
             &shell,
             &words,
-            &direct,
+            &launch_exe,
             if version_bound {
                 request.expected_cli_version.as_deref()
             } else {
@@ -1595,9 +1658,12 @@ impl NativeService {
             id.clone(),
             Live {
                 terminal: info.terminal_id.clone(),
+                agent: agent_id,
                 pid: info.observed_pid,
                 last: None,
                 usage: None,
+                codex_rollouts,
+                queue_attempt: None,
             },
         );
         {
@@ -1841,9 +1907,12 @@ impl NativeService {
                 .map_err(|_| NativeError::new("store_unavailable"))
         } else {
             registry.forget(id);
-            registry
-                .save()
-                .map_err(|_| NativeError::new("store_unavailable"))
+            registry.save().map_err(|_| NativeError::new("store_unavailable"))?;
+            drop(extended);
+            drop(registry);
+            lock(&self.inner.readings).forget(id);
+            lock(&self.inner.prompts).forget(id);
+            Ok(())
         }
     }
 
@@ -1853,7 +1922,14 @@ impl NativeService {
     /// write also withdraws extended storage. Volatile sessions have no write here, and their storage
     /// failure was already reported when they started.
     fn finish(&self, id: &str, state: State, code: Option<u32>, signal: Option<String>) -> bool {
-        lock(&self.inner.live).remove(id);
+        let live = lock(&self.inner.live).remove(id);
+        if let Some(live) = live {
+            let mut readings = lock(&self.inner.readings);
+            let dir = self.inner.base.join("sessions").join(id);
+            readings.observe(id, live.agent, &dir, None);
+            readings.finished(id);
+            readings.plans();
+        }
         let mut persisted = true;
         {
             let mut registry = lock(&self.inner.registry);
@@ -2033,6 +2109,87 @@ impl NativeService {
                 )
             })
             .collect()
+    }
+
+    pub(crate) fn activity(&self, terminal: &TerminalService) -> ActivityView {
+        let sessions = self.sessions(terminal, false);
+        let mut readings = lock(&self.inner.readings);
+        let live = lock(&self.inner.live);
+        let prompts = lock(&self.inner.prompts);
+        readings.retain(|id| sessions.iter().any(|session| session.session.id == id));
+        let mut views = Vec::new();
+        for session in sessions {
+            let id = session.session.id;
+            if !id_ok(&id) { continue; }
+            let agent = session.session.agent_id;
+            let dir = self.inner.base.join("sessions").join(&id);
+            if let Some(live) = live.get(&id) {
+                readings.observe(&id, agent, &dir, live.pid.zip(live.codex_rollouts.as_ref()));
+            }
+            let folder = session.session.project.rsplit('/').find(|p| !p.is_empty()).unwrap_or("/");
+            let name = format!("{} · {folder} · {}", session.session.agent_name, &id[..7]);
+            let turn = (agent == AgentId::ClaudeCode && session.terminal_id.is_some())
+                .then(|| claude_activity::turn(&dir)).flatten();
+            let queue = prompts.summary(&id);
+            views.push(ActivitySession {
+                context: readings.context(&id), id, agent, name,
+                started_at: session.session.started_at,
+                terminal_id: session.terminal_id, turn, input_revision: None,
+                queue_revision: queue.map(|(revision, _)| revision),
+                queued: queue.map_or(0, |(_, count)| count),
+            });
+        }
+        ActivityView { plans: readings.plans(), sessions: views }
+    }
+
+    fn prompt_session(&self, id: &str) -> Result<Session, NativeError> {
+        if id_ok(id)
+            && let Some(session) = self.stored_session(id)
+            && matches!(session.agent_id, AgentId::ClaudeCode | AgentId::Codex)
+        {
+            return Ok(session);
+        }
+        Err(NativeError::new("session_unknown"))
+    }
+
+    pub(crate) fn queue(&self, id: &str) -> Result<prompt_queue::Queue, NativeError> {
+        self.prompt_session(id)?;
+        lock(&self.inner.prompts).get(id).ok_or_else(|| NativeError::new("store_unavailable"))
+    }
+
+    pub(crate) fn edit_queue(&self, id: &str, revision: u64, edit: prompt_queue::Edit) -> Result<prompt_queue::Queue, NativeError> {
+        self.prompt_session(id)?;
+        lock(&self.inner.prompts).edit(id, revision, edit).ok_or_else(|| NativeError::new("queue_edit_failed"))
+    }
+
+    pub(crate) fn send_queue(
+        &self, terminal: &TerminalService, id: &str, tid: &TerminalId,
+        turn_id: prompt_queue::TurnId, revision: u64,
+    ) -> Result<prompt_queue::Queue, NativeError> {
+        use prompt_queue::{Dispatch, dispatch};
+        let session = self.prompt_session(id)?;
+        let mut live = lock(&self.inner.live);
+        let mut prompts = lock(&self.inner.prompts);
+        let entry = live.get_mut(id).filter(|entry| &entry.terminal == tid);
+        let Some(entry) = entry.filter(|_| session.state == State::Running && session.agent_id == AgentId::ClaudeCode)
+        else { return Err(NativeError::new("queue_unsafe")); };
+        let dir = self.inner.base.join("sessions").join(id);
+        let turn = claude_activity::turn(&dir).filter(|turn| turn.id == turn_id);
+        let running = || terminal.status(tid).is_ok_and(|i| i.state == TerminalState::Running);
+        if dispatch(running(), true, turn, entry.queue_attempt, store::now()) != Dispatch::Send {
+            return Err(NativeError::new("queue_unsafe"));
+        }
+        entry.queue_attempt = Some(turn_id);
+        prompts.send(id, revision, |bytes| {
+            // Recheck after the durable pending marker. A changed turn or stopped terminal makes
+            // this attempt fail held rather than sending into a different prompt.
+            let turn = claude_activity::turn(&dir).filter(|turn| turn.id == turn_id);
+            dispatch(running(), true, turn, None, store::now()) == Dispatch::Send
+                && {
+                    let len = bytes.len();
+                    terminal.write(tid, bytes).is_ok_and(|count| count == len)
+                }
+        }).ok_or_else(|| NativeError::new("queue_send_failed"))
     }
 
     fn sample(&self) {

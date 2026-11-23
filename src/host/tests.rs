@@ -292,7 +292,8 @@ fn it_says_what_it_is_and_refuses_what_it_does_not_know() {
             "native_arsenal_codex_v1",
             "native_arsenal_launch_instructions_v1",
             "native_permission_bypass_v1",
-            "native_template_edits_v1"
+            "native_template_edits_v1",
+            "native_activity_v1"
         ])
     );
     assert_eq!(
