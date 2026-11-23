@@ -135,7 +135,7 @@ fn open_relative_fd(root: &Path, path: &Path, directory: bool) -> io::Result<Fil
     Ok(dir)
 }
 
-fn open_relative(root: &Path, path: &Path) -> io::Result<File> {
+pub(crate) fn open_relative(root: &Path, path: &Path) -> io::Result<File> {
     let file = open_relative_fd(root, path, false)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(

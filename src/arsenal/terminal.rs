@@ -105,8 +105,10 @@ pub struct TerminalPlan {
     pub kept: Vec<String>,
     /// Installed skills the session would not expose.
     pub excluded: Vec<String>,
-    /// Kept skills the provider's own configuration already switches off. Arsenal never switches a
-    /// skill on, so these stay off in the session.
+    /// Kept Claude Code skills explicitly enabled in the session overlay.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_on: Vec<String>,
+    /// Kept skills that still inherit the provider’s disabled state.
     pub inherited_off: Vec<String>,
     /// For a provider that switches skills off by file (Codex): the `SKILL.md` of each excluded skill.
     pub excluded_files: Vec<String>,
@@ -290,6 +292,11 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         .filter(|name| input.installed.base_off.contains(*name))
         .cloned()
         .collect();
+    let (skills_on, inherited_off) = if provider == "claude_code" {
+        (inherited_off, Vec::new())
+    } else {
+        (Vec::new(), inherited_off)
+    };
     if !inherited_off.is_empty() {
         warnings.push(format!(
             "{} kept skill(s) are switched off in your own {} configuration and stay off: {}.",
@@ -341,7 +348,8 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         .iter()
         .any(|item| matches!(item.state, "rejected" | "missing"))
         || conflicts.iter().any(|conflict| conflict.blocking)
-        || excluded.len() > MAX_SKILLS_OFF;
+        || excluded.len() > MAX_SKILLS_OFF
+        || skills_on.len() > MAX_SKILLS_OFF;
     let partial = items.iter().any(|item| item.state == "unsupported");
     let status = if blocked {
         "blocked"
@@ -351,11 +359,11 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         "ready"
     };
     let overlay = match provider {
-        "claude_code" => Some(overlay_text(&excluded)),
+        "claude_code" => Some(overlay_text(&excluded, &skills_on)),
         "codex" => Some(crate::native::arsenal::codex_config_value(&excluded_files)),
         _ => None,
     };
-    let config_hash = config_hash(&input, &items, &excluded, &excluded_files);
+    let config_hash = config_hash(&input, &items, &excluded, &excluded_files, &skills_on);
     TerminalPlan {
         selection: input.selection.id.clone(),
         selection_name: input.selection.name.clone(),
@@ -368,6 +376,7 @@ pub fn plan(input: Input<'_>) -> TerminalPlan {
         items,
         kept: kept.into_iter().collect(),
         excluded,
+        skills_on,
         inherited_off,
         excluded_files,
         untouched,
@@ -506,12 +515,10 @@ fn conflicts(
     found
 }
 
-/// The session settings an exclusion writes: only `skillOverrides`, only `off`, only installed names.
-pub fn overlay_text(excluded: &[String]) -> String {
-    let skills: serde_json::Map<String, serde_json::Value> = excluded
-        .iter()
-        .map(|name| (name.clone(), serde_json::Value::String("off".into())))
-        .collect();
+/// The Claude Code session settings for the preset's installed skills.
+pub fn overlay_text(excluded: &[String], enabled: &[String]) -> String {
+    let mut skills = serde_json::Map::new();
+    crate::native::arsenal::skill_overrides(&mut skills, excluded, enabled);
     serde_json::to_string_pretty(&serde_json::json!({ "skillOverrides": skills }))
         .unwrap_or_default()
 }
@@ -521,8 +528,9 @@ fn config_hash(
     items: &[PlanItem],
     excluded: &[String],
     excluded_files: &[String],
+    skills_on: &[String],
 ) -> String {
-    let material = serde_json::json!({
+    let mut material = serde_json::json!({
         "selection": input.selection.id,
         "updated": input.selection.updated_at,
         "provider": input.provider,
@@ -535,6 +543,9 @@ fn config_hash(
         "excluded": excluded,
         "excluded_files": excluded_files,
     });
+    if !skills_on.is_empty() {
+        material["skills_on"] = serde_json::json!(skills_on);
+    }
     format!("{:x}", Sha256::digest(material.to_string().as_bytes()))
 }
 
@@ -898,9 +909,12 @@ mod tests {
     }
 
     #[test]
-    fn a_claude_skill_its_settings_switch_off_is_kept_but_reported_off() {
-        let mut installed = scan(vec![skill("design", "user", b"one")], Vec::new());
-        installed.base_off = ["design".to_owned()].into();
+    fn chosen_claude_skill_overrides_account_off_and_unselected_stays_off() {
+        let mut installed = scan(
+            vec![skill("design", "user", b"one"), skill("other", "user", b"two")],
+            Vec::new(),
+        );
+        installed.base_off = ["design".to_owned(), "other".to_owned()].into();
         let sel = selection(&[]);
         let plan = plan(input(
             &sel,
@@ -909,7 +923,12 @@ mod tests {
             Some(EVIDENCE),
         ));
         assert_eq!(plan.kept, ["design"]);
-        assert_eq!(plan.inherited_off, ["design"]);
+        assert!(plan.inherited_off.is_empty());
+        assert_eq!(plan.skills_on, ["design"]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&plan.overlay.unwrap()).unwrap(),
+            serde_json::json!({"skillOverrides": {"design": "on", "other": "off"}}),
+        );
         assert!(plan.excluded_files.is_empty());
     }
 

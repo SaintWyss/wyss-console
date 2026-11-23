@@ -7,7 +7,7 @@ use crate::native::store;
 
 const FILE: &str = "role-instructions.json";
 const MAX_FILE: u64 = 1024 * 1024;
-const MAX_ROLE: usize = 64 * 1024;
+pub(crate) const MAX_ROLE: usize = 64 * 1024;
 pub const UNREADABLE: &str = "role_unreadable";
 pub const TOO_LARGE: &str = "role_too_large";
 
@@ -38,7 +38,7 @@ struct State {
     presets: BTreeMap<String, Choice>,
 }
 
-fn id_ok(id: &str) -> bool {
+pub(crate) fn id_ok(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 

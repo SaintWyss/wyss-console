@@ -25,6 +25,9 @@ pub struct ArsenalLaunch {
     pub config_hash: String,
     /// Installed skills switched off for this session, by their exact provider names.
     pub skills_off: Vec<String>,
+    /// Claude Code skills that override an inherited disabled state for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_on: Vec<String>,
     /// For Codex, which switches skills off by file: the `SKILL.md` of each skill switched off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_files_off: Vec<String>,
@@ -39,11 +42,53 @@ pub struct ArsenalLaunch {
     pub codex_home: Option<super::launch_home_codex::CodexHomeSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_instructions: Option<crate::arsenal::role_instructions::Choice>,
+    /// The launch's project instructions came from a review of the current project files.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub project_instructions_reviewed: bool,
+    /// Explicit model shared by an optional suggestion and the resulting Claude launch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion_model: Option<String>,
     /// Stored skills copied into this session's own folder from the Arsenal library: the host
     /// reads each from the library itself and checks every file's digest. Absent from launches
     /// and sessions saved before it existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materialize: Vec<Materialize>,
+}
+
+/// Changes only the reviewed instruction choice of an existing preset session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstructionReview {
+    pub choice: Option<crate::arsenal::role_instructions::Choice>,
+    pub reviewed: bool,
+    pub model: Option<String>,
+}
+
+impl ArsenalLaunch {
+    pub fn review(&self) -> InstructionReview {
+        InstructionReview {
+            choice: self.launch_instructions.clone(),
+            reviewed: self.project_instructions_reviewed,
+            model: self.suggestion_model.clone(),
+        }
+    }
+
+    pub fn apply_review(&mut self, review: InstructionReview) {
+        self.launch_instructions = review.choice;
+        self.project_instructions_reviewed = review.reviewed;
+        self.suggestion_model = review.model;
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+pub(crate) fn suggestion_model_ok(model: &str) -> bool {
+    model.starts_with("claude-")
+        && model.len() <= 64
+        && model.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && model.bytes().last().is_some_and(|byte| byte.is_ascii_digit())
 }
 
 /// One stored skill a session gets from the library: its capability, the revision the preset
@@ -213,9 +258,8 @@ impl ArsenalLaunch {
         }
         let mut seen = BTreeSet::new();
         if self.skills_off.len() > MAX_SKILLS_OFF
-            || self
-                .skills_off
-                .iter()
+            || self.skills_on.len() > MAX_SKILLS_OFF
+            || self.skills_off.iter().chain(&self.skills_on)
                 .any(|name| !skill_ok(name) || !seen.insert(name.as_str()))
         {
             return Err("arsenal_invalid");
@@ -250,6 +294,13 @@ impl ArsenalLaunch {
         if let Some(home) = &self.codex_home {
             home.validate().map_err(|_| "arsenal_invalid")?;
         }
+        if (self.project_instructions_reviewed && self.launch_instructions.is_none())
+            || self.suggestion_model.as_deref().is_some_and(|model| {
+                !self.project_instructions_reviewed || !suggestion_model_ok(model)
+            })
+        {
+            return Err("arsenal_invalid");
+        }
         if self.launch_instructions.as_ref().is_some_and(|choice| {
             !choice.valid() || matches!(choice, crate::arsenal::role_instructions::Choice::Load)
         }) {
@@ -263,7 +314,7 @@ impl ArsenalLaunch {
 /// switches hooks off, the plan says it cannot apply: an Arsenal launch never runs without the
 /// owner's hooks, and never pretends a selection applied where nothing could carry it.
 pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
-    if launch.validate().is_err() {
+    if launch.validate().is_err() || (agent != AgentId::ClaudeCode && (!launch.skills_on.is_empty() || launch.suggestion_model.is_some())) {
         plan.not_applicable
             .push("The Arsenal selection is not well formed.".to_owned());
         return;
@@ -279,7 +330,11 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
     let home = launch
         .home
         .as_ref()
-        .filter(|home| own_role || (copies && agent == AgentId::ClaudeCode) || !home.is_default())
+        .filter(|home| {
+            (own_role && !launch.project_instructions_reviewed)
+                || (copies && agent == AgentId::ClaudeCode)
+                || !home.is_default()
+        })
         .or_else(|| (copies && agent == AgentId::ClaudeCode).then_some(&default_home));
     let default_codex_home = super::launch_home_codex::CodexHomeSpec::default();
     let codex_home = launch
@@ -326,6 +381,10 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             return;
         }
     }
+    if let Some(model) = &launch.suggestion_model {
+        use super::profile::Word;
+        plan.words.extend([Word::Literal("--model".into()), Word::Literal(model.clone())]);
+    }
     let mut overlay: Map<String, Value> = match plan.overlay.as_deref() {
         None => Map::new(),
         Some(text) => match serde_json::from_str(text) {
@@ -352,9 +411,7 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
             .push("The session settings could not be combined.".to_owned());
         return;
     };
-    for name in &launch.skills_off {
-        skills.insert(name.clone(), Value::String("off".to_owned()));
-    }
+    skill_overrides(skills, &launch.skills_off, &launch.skills_on);
     plan.applied.push(format!(
         "Arsenal selection \"{}\": {} installed skill(s) switched off for this session.",
         launch.selection_name,
@@ -371,6 +428,14 @@ pub fn apply(plan: &mut LaunchPlan, agent: AgentId, launch: &ArsenalLaunch) {
         plan.words.push(super::profile::Word::Overlay);
     }
     plan.overlay = serde_json::to_string_pretty(&Value::Object(overlay)).ok();
+}
+
+pub(crate) fn skill_overrides(skills: &mut Map<String, Value>, off: &[String], on: &[String]) {
+    for (names, state) in [(off, "off"), (on, "on")] {
+        for name in names {
+            skills.insert(name.clone(), Value::String(state.to_owned()));
+        }
+    }
 }
 
 /// What the launch home changes, in one line the owner reads before starting.
@@ -512,10 +577,13 @@ mod tests {
             selection_name: "Frontend".to_owned(),
             config_hash: "a".repeat(64),
             skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
+            skills_on: Vec::new(),
             skill_files_off: Vec::new(),
             home: None,
             codex_home: None,
             launch_instructions: None,
+            project_instructions_reviewed: false,
+            suggestion_model: None,
             materialize: Vec::new(),
         }
     }
@@ -566,6 +634,8 @@ mod tests {
         });
         let old: ArsenalLaunch = serde_json::from_value(saved).unwrap();
         assert!(old.materialize.is_empty());
+        assert!(old.skills_on.is_empty());
+        assert!(serde_json::to_value(&old).unwrap().get("skills_on").is_none());
         assert!(old.validate().is_ok());
         // Without copies the key is not written, so an older host still reads the launch.
         assert!(!serde_json::to_string(&old).unwrap().contains("materialize"));
@@ -620,6 +690,22 @@ mod tests {
             overlay,
             serde_json::json!({"skillOverrides": {"design": "off", "gsd-help": "off"}})
         );
+    }
+
+    #[test]
+    fn claude_overlay_enables_chosen_skills_and_rejects_overlaps() {
+        let mut launch = launch(&["other"]);
+        launch.skills_on = vec!["chosen".to_owned()];
+        let mut plan = LaunchPlan::default();
+        apply(&mut plan, AgentId::ClaudeCode, &launch);
+        let overlay: Value = serde_json::from_str(plan.overlay.as_deref().unwrap()).unwrap();
+        assert_eq!(overlay["skillOverrides"]["chosen"], "on");
+        assert_eq!(overlay["skillOverrides"]["other"], "off");
+        let mut codex = LaunchPlan::default();
+        apply(&mut codex, AgentId::Codex, &launch);
+        assert!(!codex.not_applicable.is_empty());
+        launch.skills_on.push("other".to_owned());
+        assert_eq!(launch.validate(), Err("arsenal_invalid"));
     }
 
     #[test]

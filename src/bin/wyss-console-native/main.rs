@@ -19,6 +19,7 @@ mod palette;
 mod personalization;
 mod prefs;
 mod procinfo;
+mod project_instructions;
 mod project_panel;
 mod pty;
 mod search;

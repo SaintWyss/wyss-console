@@ -5,7 +5,9 @@
 pub mod analysis;
 pub mod environment;
 pub mod library;
+pub mod project_instructions;
 pub mod role_instructions;
+pub mod suggestion;
 pub mod roles;
 pub mod store;
 pub mod sync;

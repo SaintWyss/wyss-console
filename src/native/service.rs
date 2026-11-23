@@ -396,10 +396,10 @@ pub struct StartReply {
 /// role of the preset's own need it.
 fn home_only_for_copies(launch: &ArsenalLaunch, agent: AgentId) -> bool {
     !launch.materialize.is_empty()
-        && !matches!(
+        && (!matches!(
             launch.launch_instructions,
             Some(crate::arsenal::role_instructions::Choice::Role { .. })
-        )
+        ) || (agent == AgentId::ClaudeCode && launch.project_instructions_reviewed))
         && match agent {
             AgentId::ClaudeCode => launch.home.as_ref().is_none_or(|home| home.is_default()),
             AgentId::Codex => launch
@@ -1154,6 +1154,26 @@ impl NativeService {
             } else {
                 (Vec::new(), false)
             };
+        if !plan.not_applicable.is_empty() {
+            return Err(NativeError {
+                code: "profile_not_applicable",
+                reasons: plan.not_applicable,
+            });
+        }
+        if agent_id == AgentId::Codex
+            && request.arsenal.as_ref().is_some_and(|launch| launch.project_instructions_reviewed)
+            && plan.codex_home.as_ref().is_none_or(|home| home.instructions)
+        {
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .ok_or_else(|| NativeError::new("store_unavailable"))?;
+            let owner = launch_home_codex::CodexOwner::from_process(&home);
+            if ["AGENTS.override.md", "AGENTS.md"].iter().any(|name| {
+                owner.dir.join(name).canonicalize().is_ok_and(|target| target.starts_with(&project))
+            }) {
+                return Err(NativeError::new("arsenal_project_glob"));
+            }
+        }
         // A launch with a folder of its own never runs where the agent would read the owner's
         // folder again as the project's: the hooks, instructions and skills the preset left out
         // would come back. Refused before anything is written, with no way around it.
@@ -1179,6 +1199,34 @@ impl NativeService {
                     _ => return Err(NativeError::new("arsenal_home_cwd_is_home")),
                 }
             }
+        }
+        if let Some(overlay) = &plan.overlay {
+            let overlay = if request.agent_id == AgentId::ClaudeCode
+                && request
+                    .arsenal
+                    .as_ref()
+                    .is_some_and(|launch| launch.launch_instructions.is_some())
+            {
+                let owner_home = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .ok_or_else(|| NativeError::new("store_unavailable"))?;
+                let owner = launch_home::Owner::from_home(&owner_home).dir;
+                let launch_home = request
+                    .arsenal
+                    .as_ref()
+                    .map(|launch| self.inner.base.join("launch-homes").join(&launch.selection));
+                let excludes =
+                    project_instruction_excludes(&project, &owner, launch_home.as_deref())?;
+                if request.arsenal.as_ref().is_some_and(|launch| launch.project_instructions_reviewed)
+                    && !excludes.contains(&format!("{}/**", project_key.trim_end_matches('/')))
+                {
+                    return Err(NativeError::new("arsenal_project_glob"));
+                }
+                project_instruction_overlay(overlay, &excludes)?
+            } else {
+                overlay.clone()
+            };
+            plan.overlay = Some(overlay);
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.inner.base.join("sessions").join(&id);
@@ -1248,6 +1296,7 @@ impl NativeService {
                 if let Some(crate::arsenal::role_instructions::Choice::Role { role }) =
                     &launch.launch_instructions
                     && project_instructions_supported
+                    && !launch.project_instructions_reviewed
                 {
                     launch_home::write_role(&owner, &home_dir, spec, role)
                         .map_err(|_| NativeError::new("arsenal_home_failed"))?;
@@ -1274,12 +1323,14 @@ impl NativeService {
                 let owner_home = std::env::var_os("HOME")
                     .map(PathBuf::from)
                     .ok_or_else(|| NativeError::new("store_unavailable"))?;
-                let home_dir = self
-                    .inner
-                    .base
-                    .join("launch-homes")
-                    .join("codex")
-                    .join(&launch.selection);
+                let mut home_dir = self.inner.base.join("launch-homes").join("codex").join(&launch.selection);
+                if launch.project_instructions_reviewed
+                    && let Some(crate::arsenal::role_instructions::Choice::Role { role }) = &launch.launch_instructions
+                {
+                    // One stable home per reviewed role. Another selection cannot change the
+                    // instructions under a running Codex session.
+                    home_dir.push(format!("role-{:x}", Sha256::digest(role.as_bytes())));
+                }
                 let owner = launch_home_codex::CodexOwner::from_process(&owner_home);
                 let ready = read_copies(launch, &mut skills_skipped);
                 let (built, unwritten) =
@@ -1312,8 +1363,20 @@ impl NativeService {
                 home_pin = Some(("CODEX_HOME", built_dir));
             }
         }
+        if let Some(launch) = &request.arsenal
+            && launch.project_instructions_reviewed
+            && request.agent_id == AgentId::ClaudeCode
+            && let Some(crate::arsenal::role_instructions::Choice::Role { role }) = &launch.launch_instructions
+        {
+            let path = dir.join("ROL.md");
+            store::private_dir(&dir)
+                .and_then(|()| store::write_atomic(&path, role.as_bytes()))
+                .map_err(|_| NativeError::new("store_unavailable"))?;
+            words.extend(["--append-system-prompt-file".to_owned(), path.to_string_lossy().into_owned()]);
+        }
         if let Some(brief) = &request.brief {
             if brief.len() > MAX_BRIEF || !brief.starts_with("# ") || brief.contains('\0') {
+                let _ = fs::remove_dir_all(&dir);
                 return Err(NativeError::new("brief_invalid"));
             }
             match request.agent_id {
@@ -1321,34 +1384,18 @@ impl NativeService {
                     words.push("--prompt".to_owned());
                     words.push(brief.clone());
                 }
-                AgentId::Hermes => return Err(NativeError::new("handoff_target_unverified")),
+                AgentId::Hermes => {
+                    let _ = fs::remove_dir_all(&dir);
+                    return Err(NativeError::new("handoff_target_unverified"));
+                }
                 AgentId::ClaudeCode | AgentId::Codex => words.push(brief.clone()),
             }
         }
         if request.delegation {
+            let _ = fs::remove_dir_all(&dir);
             return Err(NativeError::new("delegation_unavailable"));
         }
         if let Some(overlay) = &plan.overlay {
-            let overlay = if request.agent_id == AgentId::ClaudeCode
-                && request
-                    .arsenal
-                    .as_ref()
-                    .is_some_and(|launch| launch.launch_instructions.is_some())
-            {
-                let owner_home = std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .ok_or_else(|| NativeError::new("store_unavailable"))?;
-                let owner = launch_home::Owner::from_home(&owner_home).dir;
-                let launch_home = request
-                    .arsenal
-                    .as_ref()
-                    .map(|launch| self.inner.base.join("launch-homes").join(&launch.selection));
-                let excludes =
-                    project_instruction_excludes(&project, &owner, launch_home.as_deref())?;
-                project_instruction_overlay(overlay, &excludes)?
-            } else {
-                overlay.clone()
-            };
             let write = || -> std::io::Result<()> {
                 store::private_dir(&dir)?;
                 store::write_atomic(&dir.join("settings.json"), overlay.as_bytes())
@@ -1698,12 +1745,29 @@ impl NativeService {
         plan_token: Option<String>,
         expected_cli_version: Option<String>,
     ) -> Result<StartReply, NativeError> {
+        self.restart_with_review(terminal, id, size, plan_token, expected_cli_version, None)
+    }
+
+    pub(crate) fn restart_with_review(
+        &self,
+        terminal: &TerminalService,
+        id: &str,
+        size: TerminalSize,
+        plan_token: Option<String>,
+        expected_cli_version: Option<String>,
+        review: Option<arsenal::InstructionReview>,
+    ) -> Result<StartReply, NativeError> {
         if !id_ok(id) {
             return Err(NativeError::new("session_unknown"));
         }
-        let old = self
+        let mut old = self
             .stored_session(id)
             .ok_or_else(|| NativeError::new("session_unknown"))?;
+        if let Some(review) = review {
+            let launch = old.arsenal.as_mut().ok_or_else(|| NativeError::new("arsenal_invalid"))?;
+            launch.apply_review(review);
+            launch.validate().map_err(NativeError::new)?;
+        }
         let was_running = old.state == State::Running;
         // The Console restarts with the id alone. A plan without full access is the one the
         // owner already started and gets its token here; full access always needs a preview of

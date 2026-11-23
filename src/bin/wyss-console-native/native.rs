@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use wyss_console::native::arsenal::{ArsenalLaunch, InstructionReview};
 
 use crate::host::{Host, HostError, ListEntry};
 use crate::i18n::{tr, trf};
@@ -246,6 +247,8 @@ pub fn failure_text(code: &str) -> String {
         "arsenal_token_missing" => tr(t!("This preset needs your Claude Code sign-in, and it was not found in the system keyring. Sign in once with claude in a terminal and try again.")),
         "arsenal_home_failed" => tr(t!("The preset’s own folder for the agent could not be prepared. Nothing was started.")),
         "arsenal_home_unqualified" => tr(t!("This agent build cannot use a preset’s own folder. Start it without the preset.")),
+        "arsenal_invalid" => tr(t!("The Arsenal selection is not well formed.")),
+        "arsenal_project_instructions_unsupported" => tr(t!("This agent build cannot apply the reviewed project instructions.")),
         "arsenal_unqualified" => tr(t!("This agent build cannot apply Arsenal presets. Start it without the preset.")),
         "arsenal_project_glob" => tr(t!("The working directory cannot be used with a preset (it is missing or its name has special characters). Choose another folder in Workspace.")),
         "unknown_terminal" => tr(t!("That terminal is no longer open.")),
@@ -263,6 +266,11 @@ pub fn failure_text(code: &str) -> String {
 /// A failure as a sentence for the banner.
 pub fn explain(e: &HostError) -> String {
     match e {
+        HostError::Remote { code, reasons } if code == "profile_not_applicable"
+            && reasons.iter().any(|reason| reason == "arsenal_project_instructions_unsupported") =>
+        {
+            failure_text("arsenal_project_instructions_unsupported")
+        }
         HostError::Remote { code, .. } => failure_text(code),
         HostError::Io(_) => failure_text("host_unavailable"),
         HostError::Protocol(_) => failure_text("internal"),
@@ -282,7 +290,13 @@ pub fn preview(host: &Host, agent: &str, profile: Option<&str>, arsenal: Option<
     if let Some(arsenal) = arsenal {
         params["arsenal"] = arsenal.clone();
     }
-    parse_preview(&host.call("native_preview", params)?)
+    let answer = host.call("native_preview", params)?;
+    if answer["not_applicable"].as_array().is_some_and(|reasons| {
+        reasons.iter().any(|reason| reason == "arsenal_project_instructions_unsupported")
+    }) {
+        return Err(HostError::Remote { code: "arsenal_project_instructions_unsupported".into(), reasons: vec![] });
+    }
+    parse_preview(&answer)
 }
 
 pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, arsenal: Option<&Value>, preview: &Preview) -> Result<Started, HostError> {
@@ -303,43 +317,85 @@ pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, ars
 
 /// `native_restart`. A session with full access is restarted only with `checked`: a preview of
 /// its own start ([`prepare_restart`]) the owner confirmed, whose token the host consumes.
+#[cfg(test)]
 pub fn restart(host: &Host, id: &str, checked: Option<&Preview>) -> Result<Started, HostError> {
+    restart_with_review(host, id, checked, None)
+}
+
+pub fn restart_with_review(
+    host: &Host, id: &str, checked: Option<&Preview>, review: Option<&InstructionReview>,
+) -> Result<Started, HostError> {
     let mut params = json!({"id": id, "size": {"rows": FIRST_SIZE.0, "cols": FIRST_SIZE.1}});
     if let Some(preview) = checked {
         params["plan_token"] = json!(preview.plan_token);
         params["expected_cli_version"] = json!(preview.provider_version);
+    }
+    if let Some(review) = review {
+        params["review"] = json!(review);
     }
     parse_started(&host.call("native_restart", params)?)
 }
 
 pub enum Restart {
     Started(Box<Started>),
-    Confirm(Preview),
+    Confirm(Preview, Option<InstructionReview>),
+    Cancelled,
 }
 
-/// Uses the host's current profile plan for this session. An older host or a profile change
-/// between calls can still request confirmation when asked to restart.
+#[cfg(test)]
 pub fn prepare_restart(host: &Host, id: &str) -> Result<Restart, HostError> {
-    let session = sessions(host)?.into_iter().find(|s| s.id == id)
+    prepare_restart_using(host, id, None).map_err(|error| match error {
+        RestartError::Host(error) => error,
+        RestartError::Review(_) => unreachable!("no selector in this test"),
+    })
+}
+
+pub enum RestartError {
+    Host(HostError),
+    Review(String),
+}
+
+impl From<HostError> for RestartError {
+    fn from(error: HostError) -> Self { Self::Host(error) }
+}
+
+/// Uses the host's current profile plan and gives a preset another review before restarting.
+pub fn prepare_restart_select(
+    host: &Host, id: &str, select: &ReviewFor<'_>,
+) -> Result<Restart, RestartError> {
+    prepare_restart_using(host, id, Some(select))
+}
+
+fn prepare_restart_using(
+    host: &Host, id: &str, select: Option<&ReviewFor<'_>>,
+) -> Result<Restart, RestartError> {
+    let mut session = sessions(host)?.into_iter().find(|s| s.id == id)
         .ok_or_else(|| HostError::Remote { code: "session_unknown".into(), reasons: vec![] })?;
-    if !full_access(&session) {
-        match restart(host, id, None) {
-            Err(HostError::Remote { code, .. }) if code == "restart_needs_preview" => {}
-            result => return result.map(|started| Restart::Started(Box::new(started))),
+    let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
+    let mut review = None;
+    if let (Some(select), Some(arsenal)) = (select, session.arsenal.as_mut()) {
+        let mut launch: ArsenalLaunch = serde_json::from_value(arsenal.clone())
+            .map_err(|_| bad("invalid session preset"))?;
+        let previous = launch.review();
+        if !select(&mut launch, agent, &session.project, true).map_err(RestartError::Review)? {
+            return Ok(Restart::Cancelled);
+        }
+        if launch.review() != previous {
+            review = Some(launch.review());
+            *arsenal = serde_json::to_value(launch).map_err(|_| bad("invalid review"))?;
         }
     }
-    let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
-    // The host restarts with the exclusion it stored, so the preview names that same one.
-    let preview = preview(
-        host,
-        agent,
-        session.profile_id.as_deref(),
-        session.arsenal.as_ref(),
-    )?;
+    if !full_access(&session) {
+        match restart_with_review(host, id, None, review.as_ref()) {
+            Err(HostError::Remote { code, .. }) if code == "restart_needs_preview" => {}
+            result => return Ok(Restart::Started(Box::new(result?))),
+        }
+    }
+    let preview = preview(host, agent, session.profile_id.as_deref(), session.arsenal.as_ref())?;
     if preview.can_start && preview.bypass == Some(false) {
-        restart(host, id, Some(&preview)).map(|started| Restart::Started(Box::new(started)))
+        Ok(Restart::Started(Box::new(restart_with_review(host, id, Some(&preview), review.as_ref())?)))
     } else {
-        Ok(Restart::Confirm(preview))
+        Ok(Restart::Confirm(preview, review))
     }
 }
 
@@ -407,6 +463,7 @@ pub enum Opened {
     /// Nothing ran: the launch file runs `before` commands or starts with full access, and the
     /// owner has not approved its exact text. The window shows what it would do and asks.
     NeedsApproval(wyss_console::launch::NeedsApproval),
+    Cancelled,
 }
 
 /// The commands, the folder and the fingerprint of the file they came from.
@@ -419,6 +476,7 @@ type BeforeCommands<'a> = dyn Fn(&[String], &str, &str) -> Vec<(String, String)>
 /// is of the very text `launch` was parsed from, and is bound here to the resolved folder: a
 /// commands launch, or a session with `before` commands or full access, whose text and folder the
 /// owner has not approved in `approvals` opens nothing and asks.
+#[cfg(test)]
 pub fn open_launch(
     host: &Host,
     launch: &Launch,
@@ -427,13 +485,29 @@ pub fn open_launch(
     before: &BeforeCommands<'_>,
     approvals: Option<&wyss_console::launch::Approvals>,
 ) -> Result<Opened, Refusal> {
+    open_launch_select(host, launch, fingerprint, home, before, approvals, &|_, _, _, _| Ok(true))
+}
+
+/// Review a compiled preset before any preview, approval or command that can start it.
+pub type ReviewFor<'a> = dyn Fn(&mut ArsenalLaunch, &str, &str, bool) -> Result<bool, String> + 'a;
+
+pub fn open_launch_select(
+    host: &Host,
+    launch: &Launch,
+    fingerprint: &str,
+    home: &str,
+    before: &BeforeCommands<'_>,
+    approvals: Option<&wyss_console::launch::Approvals>,
+    select: &ReviewFor<'_>,
+) -> Result<Opened, Refusal> {
     open_launch_with(host, launch, fingerprint, home, before, approvals, &|preset, agent, directory| {
-        wyss_console::arsenal::library::launch_for_process(preset, agent, std::path::Path::new(directory))
+        let mut launch = wyss_console::arsenal::library::launch_for_process(preset, agent, std::path::Path::new(directory))?;
+        Ok(select(&mut launch, agent, directory, false)?.then_some(launch))
     })
 }
 
 /// Compiles a preset (its name, the agent, the folder) into the Arsenal part of the launch.
-type ArsenalFor<'a> = dyn Fn(&str, &str, &str) -> Result<wyss_console::native::arsenal::ArsenalLaunch, String> + 'a;
+type ArsenalFor<'a> = dyn Fn(&str, &str, &str) -> Result<Option<ArsenalLaunch>, String> + 'a;
 
 /// [`open_launch`] with the preset compiler given: tests give it a stand-in.
 fn open_launch_with(
@@ -474,6 +548,7 @@ fn open_launch_with(
                     let compiled = arsenal_for(name, agent.id(), &directory).map_err(|reason| {
                         Refusal(trf(t!("The preset “{name}” cannot be applied: {reason} Nothing was started."), &[("name", name), ("reason", &reason)]))
                     })?;
+                    let Some(compiled) = compiled else { return Ok(Opened::Cancelled); };
                     Some(serde_json::to_value(compiled).map_err(|_| Refusal(failure_text("internal")))?)
                 }
             };
@@ -746,6 +821,21 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_the_preset_review_never_previews_or_runs_before_commands() {
+        let host = Host::new("/nonexistent/none.sock");
+        let before = |_: &[String], _: &str, _: &str| -> Vec<(String, String)> {
+            panic!("no command may run after cancelling");
+        };
+        let select = |_: &str, _: &str, _: &str| Ok(None);
+        let home = std::env::temp_dir().to_string_lossy().into_owned();
+        let out = open_launch_with(
+            &host, &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT,
+            &home, &before, Some(&test_approvals()), &select,
+        ).unwrap();
+        assert_eq!(out, Opened::Cancelled);
+    }
+
+    #[test]
     fn a_launch_with_a_preset_sends_the_same_compiled_arsenal_to_every_preview_and_the_start() {
         let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-9"}, "skills_skipped": [{"name": "tutor", "reason": "digest_mismatch"}]});
         let (path, h) = fake_host(vec![
@@ -757,17 +847,20 @@ mod tests {
         let asked = std::cell::RefCell::new(Vec::new());
         let compile = |preset: &str, agent: &str, dir: &str| {
             asked.borrow_mut().push((preset.to_owned(), agent.to_owned(), dir.to_owned()));
-            Ok(wyss_console::native::arsenal::ArsenalLaunch {
+            Ok(Some(ArsenalLaunch {
                 selection: "6f1d2b8e-0000-4000-8000-00000000a001".into(),
                 selection_name: "Reviewer".into(),
                 config_hash: "c".repeat(64),
                 skills_off: vec!["design".into()],
+                skills_on: Vec::new(),
                 skill_files_off: vec!["/h/.codex/skills/design/SKILL.md".into()],
                 home: None,
                 codex_home: None,
                 launch_instructions: None,
+                project_instructions_reviewed: false,
+                suggestion_model: None,
                 materialize: Vec::new(),
-            })
+            }))
         };
         let before = |_: &[String], _: &str, _: &str| vec![("true".to_owned(), "ok".to_owned())];
         let out = open_launch_with(&Host::new(&path), &session_launch(Some(Permission::Ask), Some("Reviewer")), PRINT, &home, &before, Some(&test_approvals()), &compile).unwrap();
@@ -792,7 +885,7 @@ mod tests {
             ("native_sessions", json!({"ok": [row]})),
             ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok", "through_shell": true, "with_cost": []}})),
         ]);
-        let Restart::Confirm(_) = prepare_restart(&Host::new(&path), "0123456789abcdef0123456789abcdef").unwrap() else { panic!("asks") };
+        let Restart::Confirm(_, _) = prepare_restart(&Host::new(&path), "0123456789abcdef0123456789abcdef").unwrap() else { panic!("asks") };
         let seen = h.join().unwrap();
         assert_eq!(seen[1]["params"]["arsenal"], json!({"selection": "s-1", "skills_off": ["design"]}));
     }
@@ -840,7 +933,7 @@ mod tests {
         ]);
         let host = Host::new(&path);
         let id = "0123456789abcdef0123456789abcdef";
-        let Restart::Confirm(pre) = prepare_restart(&host, id).unwrap() else {
+        let Restart::Confirm(pre, _) = prepare_restart(&host, id).unwrap() else {
             panic!("bypass restart did not ask for confirmation");
         };
         assert_eq!(restart(&host, id, Some(&pre)).unwrap().terminal_id, "t-11");

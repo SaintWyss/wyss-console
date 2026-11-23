@@ -41,6 +41,7 @@ const CLAUDE_HELP: &str = "Options:
   --effort <effort> (choices: low, medium, high, xhigh, max)
   --permission-mode <mode> (choices: manual, plan, acceptEdits)
   --settings <file>
+  --append-system-prompt-file <file>
   --mcp-config <file>
   --strict-mcp-config
   --dangerously-skip-permissions";
@@ -797,10 +798,13 @@ fn arsenal_launch(off: &[&str]) -> super::arsenal::ArsenalLaunch {
         selection_name: "Frontend".to_owned(),
         config_hash: "c".repeat(64),
         skills_off: off.iter().map(|s| (*s).to_owned()).collect(),
+        skills_on: Vec::new(),
         skill_files_off: Vec::new(),
         home: None,
         codex_home: None,
         launch_instructions: None,
+        project_instructions_reviewed: false,
+        suggestion_model: None,
         materialize: Vec::new(),
     }
 }
@@ -825,6 +829,43 @@ fn arsenal_start(
             delegation: false,
         },
     )
+}
+
+#[test]
+fn reviewed_claude_instructions_use_a_session_file_and_exclude_project_discovery() {
+    use crate::arsenal::{role_instructions::Choice, project_instructions::Snapshot};
+    let world = World::new();
+    let project = world.home.join("project");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("CLAUDE.md"), "# Include\nkeep\n# Exclude\nleave out\n").unwrap();
+    let snapshot = Snapshot::read(&project).unwrap();
+    let ids = [snapshot.sections().next().unwrap().id.clone()].into();
+    let base = Choice::Role { role: "Preset role".to_owned() };
+    let composition = snapshot.compose(Some(&base), &ids);
+    let expected = composition.text.clone();
+    let mut launch = arsenal_launch(&["other"]);
+    launch.skills_on = vec!["chosen".into()];
+    launch.launch_instructions = Some(composition.into_choice().unwrap());
+    launch.project_instructions_reviewed = true;
+    let preview = world.service.preview(AgentId::ClaudeCode, None, Some(&launch)).unwrap();
+    assert!(preview.can_start);
+    let reply = world.service.start(&world.terminal, StartRequest {
+        agent_id: AgentId::ClaudeCode,
+        project: project.to_string_lossy().into(),
+        profile_id: None,
+        size: SIZE,
+        brief: None,
+        plan_token: preview.plan_token,
+        expected_cli_version: preview.provider_version,
+        arsenal: Some(launch),
+        delegation: false,
+    }).unwrap();
+    let dir = world.base.join("sessions").join(&reply.session.session.id);
+    assert_eq!(fs::read(dir.join("ROL.md")).unwrap(), expected.as_bytes());
+    let overlay: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(overlay["skillOverrides"], serde_json::json!({"chosen": "on", "other": "off"}));
+    assert!(overlay["claudeMdExcludes"].as_array().unwrap().contains(&serde_json::json!(format!("{}/**", project.display()))));
+    assert_eq!(fs::read_to_string(project.join("CLAUDE.md")).unwrap(), "# Include\nkeep\n# Exclude\nleave out\n");
 }
 
 #[test]
@@ -1341,6 +1382,43 @@ fn assert_nothing_started(world: &World, marker: &Path) {
     let folders = fs::read_dir(&sessions).map_or(0, |entries| entries.count());
     assert_eq!(folders, 0, "a sessions/<id> folder was created");
     assert!(world.service.sessions(&world.terminal, false).is_empty());
+}
+
+#[test]
+fn reviewed_codex_restart_keeps_each_review_in_its_own_launch_home() {
+    use super::arsenal::InstructionReview;
+    use crate::arsenal::role_instructions::Choice;
+    let world = World::new();
+    let _env = FakeOwnerEnv::new(&world.home);
+    let owner = world.home.join(".codex");
+    fs::create_dir_all(&owner).unwrap();
+    fs::write(owner.join("AGENTS.md"), "Global").unwrap();
+    let project = world.home.join("project");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("AGENTS.md"), "Both sections originally").unwrap();
+    script(
+        &world.bin.join("codex"),
+        r#"[ "$1" = --version ] && { echo 'codex-cli 0.170.0'; exit 0; }
+printf '%s\n' "$@"
+exec cat"#,
+    );
+    let role = |role: &str| Choice::Role { role: role.into() };
+    let mut launch = arsenal_launch(&[]);
+    launch.apply_review(InstructionReview { choice: Some(role("First review")), reviewed: true, model: None });
+    let first = start_in(&world, AgentId::Codex, &project, &launch).unwrap();
+    let output = world.output_until(&first.terminal.terminal_id, "project_doc_max_bytes=0");
+    assert!(output.contains("project_doc_max_bytes=0"), "{output:?}");
+    let revision = InstructionReview { choice: Some(role("Second review")), reviewed: true, model: None };
+    world.service.restart_with_review(
+        &world.terminal, &first.session.session.id, SIZE, None, None, Some(revision),
+    ).unwrap();
+    let homes = world.base.join("launch-homes/codex").join(&launch.selection);
+    let mut texts: Vec<_> = fs::read_dir(homes).unwrap().map(|entry| {
+        fs::read_to_string(entry.unwrap().path().join("AGENTS.md")).unwrap()
+    }).collect();
+    texts.sort();
+    assert_eq!(texts, ["Global\n\nFirst review", "Global\n\nSecond review"]);
+    assert_eq!(fs::read_to_string(project.join("AGENTS.md")).unwrap(), "Both sections originally");
 }
 
 #[test]

@@ -254,6 +254,8 @@ struct Restart {
     plan_token: Option<String>,
     #[serde(default)]
     expected_cli_version: Option<String>,
+    #[serde(default)]
+    review: Option<crate::native::arsenal::InstructionReview>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -548,12 +550,13 @@ impl HostCore {
                 let request: Restart = params(value)?;
                 let reply = self
                     .native()?
-                    .restart(
+                    .restart_with_review(
                         &self.terminals,
                         &request.id,
                         request.size,
                         request.plan_token,
                         request.expected_cli_version,
+                        request.review,
                     )
                     .map_err(|e| native_error(&e))?;
                 self.track_native(

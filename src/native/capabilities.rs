@@ -301,22 +301,12 @@ impl CliHelp {
     pub(super) fn parse(help: &str) -> Self {
         let mut declarations = std::collections::BTreeMap::new();
         let mut current: Vec<String> = Vec::new();
-        for line in help.lines() {
-            let line = line.trim();
-            if !line.starts_with('-') {
-                if line.ends_with(':') && !line.starts_with('[') {
-                    current.clear();
-                }
-                for flag in &current {
-                    if let Some(text) = declarations.get_mut(flag) {
-                        let text: &mut String = text;
-                        text.push(' ');
-                        text.push_str(line);
-                    }
-                }
-                continue;
+        for raw in help.lines() {
+            let line = raw.trim();
+            if line.ends_with(':') && !raw.starts_with(char::is_whitespace) {
+                current.clear();
             }
-            current.clear();
+            let mut flags = Vec::new();
             for word in line.split_whitespace() {
                 let flag = word.trim_end_matches(',');
                 let long = flag.strip_prefix("--").is_some_and(|name| {
@@ -328,14 +318,36 @@ impl CliHelp {
                 if !long && !short {
                     break;
                 }
-                declarations.insert(flag.to_owned(), line.to_owned());
-                current.push(flag.to_owned());
+                flags.push(flag.to_owned());
                 if !word.ends_with(',') {
                     break;
                 }
             }
+            if flags.is_empty() {
+                for flag in &current {
+                    if let Some(text) = declarations.get_mut(flag) {
+                        let text: &mut String = text;
+                        text.push(' ');
+                        text.push_str(line);
+                    }
+                }
+            } else {
+                for flag in &flags {
+                    declarations.insert(flag.clone(), line.to_owned());
+                }
+                current = flags;
+            }
         }
         Self(declarations)
+    }
+
+    pub(crate) fn declaration(&self, option: &str) -> Option<&str> {
+        self.0.get(option).map(String::as_str)
+    }
+
+    fn supports_claude_role_file(&self) -> bool {
+        self.has("--append-system-prompt-file")
+            || self.declaration("--bare").is_some_and(|text| text.contains("--append-system-prompt[-file]"))
     }
 
     pub fn has(&self, option: &str) -> bool {
@@ -452,6 +464,23 @@ pub(super) fn apply_help(
             omitted.push(reason.to_owned());
         }
     }
+    if let Some(launch) = arsenal {
+        let reviewed_role = launch.project_instructions_reviewed
+            && matches!(launch.launch_instructions,
+                Some(crate::arsenal::role_instructions::Choice::Role { .. }));
+        if launch.project_instructions_reviewed
+            && (!project_instructions_supported(agent, help)
+                || (agent == AgentId::ClaudeCode && reviewed_role
+                    && !help.supports_claude_role_file()))
+        {
+            plan.not_applicable.push("arsenal_project_instructions_unsupported".into());
+        }
+        if (launch.suggestion_model.is_some() && !help.has("--model"))
+            || (!launch.skills_on.is_empty() && !help.has("--settings"))
+        {
+            plan.not_applicable.push("arsenal_unqualified".into());
+        }
+    }
     if !help.has("--settings") {
         plan.overlay = None;
     }
@@ -493,6 +522,13 @@ pub(super) fn project_instructions_supported(agent: AgentId, help: &CliHelp) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_role_file_is_advertised_in_the_bare_description() {
+        let help = CliHelp::parse("Options:\n  --bare Minimal mode.\n        Provide context via:\n        --append-system-prompt[-file], --add-dir\nCommands:\n  update");
+        assert!(!help.has("--append-system-prompt-file"));
+        assert!(help.supports_claude_role_file());
+    }
 
     #[test]
     fn arsenal_records_keep_their_original_scope() {

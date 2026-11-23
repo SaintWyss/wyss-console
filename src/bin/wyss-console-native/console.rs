@@ -41,6 +41,19 @@ fn panel_security_ask_rechecks_cached_running_state() {
     assert!(can_send_panel_request(true, || true));
 }
 
+fn review_project_instructions(
+    launch: &mut wyss_console::native::arsenal::ArsenalLaunch,
+    provider: &str,
+    directory: &str,
+    restart: bool,
+) -> Result<bool, String> {
+    crate::project_instructions::select(launch, provider, directory, restart, |review| {
+        glib::MainContext::default().invoke(move || UI.with(|ui| {
+            if let Some(ui) = ui.borrow().clone() { review.show(&ui.win); }
+        }));
+    })
+}
+
 pub struct Config {
     pub host: Option<Host>,
     /// What the command line asked for (tabs, folder, program, no terminal).
@@ -1076,7 +1089,7 @@ impl Ui {
                 let (launch, print) = launches::get_with_fingerprint(&folder, &id, &launches::System::read(std::path::Path::new("/etc/os-release"))).map_err(native::Refusal)?;
                 let home = native::launcher(&host)?.home.or_else(|| std::env::var("HOME").ok()).unwrap_or_default();
                 let approvals = wyss_console::launch::Approvals::from_env();
-                native::open_launch(&host, &launch, &print, &home, &native::run_before, approvals.as_ref())
+                native::open_launch_select(&host, &launch, &print, &home, &native::run_before, approvals.as_ref(), &review_project_instructions)
             })();
             glib::MainContext::default().invoke(move || {
                 UI.with(|u| {
@@ -1160,6 +1173,7 @@ impl Ui {
                 self.banner(&notes.join(" "), false);
             }
             Ok(native::Opened::NeedsApproval(needed)) => self.ask_approval(needed),
+            Ok(native::Opened::Cancelled) => {}
         }
     }
 
@@ -1246,19 +1260,26 @@ impl Ui {
             let result = match act {
                 PaneAct::Stop => native::stop(&host, &tag.session_id).map(|_| None),
                 PaneAct::Forget => native::forget(&host, &tag.session_id).map(|_| None),
-                PaneAct::Restart => match native::prepare_restart(&host, &tag.session_id) {
+                PaneAct::Restart => match native::prepare_restart_select(&host, &tag.session_id, &review_project_instructions) {
                     Ok(native::Restart::Started(started)) => Ok(Some(*started)),
-                    Ok(native::Restart::Confirm(preview)) => {
+                    Ok(native::Restart::Confirm(preview, review)) => {
                         glib::MainContext::default().invoke(move || {
                             UI.with(|u| {
                                 if let Some(ui) = u.borrow().clone() {
-                                    ui.confirm_full_restart(&key, tag.session_id, preview);
+                                    ui.confirm_full_restart(&key, tag.session_id, preview, review);
                                 }
                             });
                         });
                         return;
                     }
-                    Err(error) => Err(error),
+                    Ok(native::Restart::Cancelled) => return,
+                    Err(native::RestartError::Host(error)) => Err(error),
+                    Err(native::RestartError::Review(reason)) => {
+                        glib::MainContext::default().invoke(move || UI.with(|ui| {
+                            if let Some(ui) = ui.borrow().clone() { ui.banner(&reason, true); }
+                        }));
+                        return;
+                    }
                 },
                 PaneAct::Close => unreachable!("handled above"),
             };
@@ -1274,7 +1295,7 @@ impl Ui {
 
     /// Asks, as a launch with full access does, before restarting a session with full access;
     /// accepting restarts it with the token of the preview just made, which the host consumes.
-    fn confirm_full_restart(self: &Rc<Self>, key: &str, id: String, preview: native::Preview) {
+    fn confirm_full_restart(self: &Rc<Self>, key: &str, id: String, preview: native::Preview, review: Option<wyss_console::native::arsenal::InstructionReview>) {
         if !preview.can_start || preview.plan_token.is_none() {
             return self.banner(&native::failure_text("profile_not_applicable"), true);
         }
@@ -1292,8 +1313,9 @@ impl Ui {
             if answer != Ok(1) {
                 return;
             }
+            let review = review.clone();
             std::thread::spawn(move || {
-                let result = native::restart(&host, &id, Some(&preview)).map(Some);
+                let result = native::restart_with_review(&host, &id, Some(&preview), review.as_ref()).map(Some);
                 glib::MainContext::default().invoke(move || {
                     UI.with(|u| {
                         if let Some(ui) = u.borrow().clone() {

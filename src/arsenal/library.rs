@@ -264,10 +264,13 @@ pub fn launch_for(
         selection_name: selection.name,
         config_hash: plan.config_hash,
         skills_off: plan.excluded,
+        skills_on: plan.skills_on,
         skill_files_off: plan.excluded_files,
         home,
         codex_home,
         launch_instructions,
+        project_instructions_reviewed: false,
+        suggestion_model: None,
         materialize: plan.materialize,
     };
     launch
