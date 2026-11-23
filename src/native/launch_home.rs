@@ -288,7 +288,45 @@ pub fn settings(owner: &Value, spec: &HomeSpec) -> Value {
             }
         }
     }
+    set_plugin_modes(&mut settings);
     Value::Object(settings)
+}
+
+/// Plugins whose hook reads its starting mode from an environment variable, with the level a
+/// launch uses when the plugin is on and the owner did not choose one.
+const PLUGIN_MODES: [(&str, &str, &str); 2] = [
+    ("caveman", "CAVEMAN_DEFAULT_MODE", "lite"),
+    ("ponytail", "PONYTAIL_DEFAULT_MODE", "full"),
+];
+
+/// Makes each mode agree with its plugin: off when the plugin is off, and on when the plugin is on.
+/// A level the owner chose is kept.
+fn set_plugin_modes(settings: &mut Map<String, Value>) {
+    for (name, variable, level) in PLUGIN_MODES {
+        let Some(plugins) = settings.get("enabledPlugins").and_then(Value::as_object) else {
+            return;
+        };
+        let mut states = plugins
+            .iter()
+            .filter(|(id, _)| id.split('@').next() == Some(name))
+            .map(|(_, on)| on.as_bool() == Some(true))
+            .peekable();
+        if states.peek().is_none() {
+            continue;
+        }
+        let on = states.any(|state| state);
+        let env = settings
+            .entry("env")
+            .or_insert_with(|| Value::Object(Map::new()));
+        let Some(env) = env.as_object_mut() else {
+            return;
+        };
+        if !on {
+            env.insert(variable.to_owned(), Value::String("off".to_owned()));
+        } else if matches!(env.get(variable).and_then(Value::as_str), None | Some("off")) {
+            env.insert(variable.to_owned(), Value::String(level.to_owned()));
+        }
+    }
 }
 
 /// The `--mcp-config` file: only the kept servers of the owner's `~/.claude.json`. A kept name the
@@ -1214,7 +1252,7 @@ mod tests {
             dir.join("settings.json"),
             serde_json::json!({
                 "model": "opus",
-                "env": {"A": "1"},
+                "env": {"A": "1", "CAVEMAN_DEFAULT_MODE": "lite"},
                 "hooks": {
                     "PreToolUse": [
                         {"matcher": "Bash", "hooks": [
@@ -1518,6 +1556,42 @@ mod tests {
             serde_json::json!({"mcpServers": {"context7": {"url": "https://x"}}})
         );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_launch_mode_follows_its_plugin_and_keeps_the_owner_level() {
+        let owner = serde_json::json!({
+            "env": {
+                "A": "1",
+                "CAVEMAN_DEFAULT_MODE": "off",
+                "PONYTAIL_DEFAULT_MODE": "ultra"
+            },
+            "enabledPlugins": {"caveman@caveman": true, "ponytail@ponytail": true}
+        });
+        let on = settings(&owner, &HomeSpec::default());
+        assert_eq!(on["env"]["CAVEMAN_DEFAULT_MODE"], "lite");
+        assert_eq!(on["env"]["PONYTAIL_DEFAULT_MODE"], "ultra");
+        assert_eq!(on["env"]["A"], "1");
+
+        let off = settings(
+            &owner,
+            &HomeSpec {
+                plugins_off: vec!["caveman@caveman".into(), "ponytail@ponytail".into()],
+                ..HomeSpec::default()
+            },
+        );
+        assert_eq!(off["env"]["CAVEMAN_DEFAULT_MODE"], "off");
+        assert_eq!(off["env"]["PONYTAIL_DEFAULT_MODE"], "off");
+
+        let without_env = settings(
+            &serde_json::json!({"enabledPlugins": {"ponytail@ponytail": true}}),
+            &HomeSpec::default(),
+        );
+        assert_eq!(without_env["env"]["PONYTAIL_DEFAULT_MODE"], "full");
+        assert!(without_env["env"].get("CAVEMAN_DEFAULT_MODE").is_none());
+
+        let unrelated = settings(&serde_json::json!({"model": "opus"}), &HomeSpec::default());
+        assert!(unrelated.get("env").is_none());
     }
 
     #[test]
