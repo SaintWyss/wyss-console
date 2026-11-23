@@ -559,6 +559,8 @@
     "Search plugin…": "Buscar plugin…",
     "With hooks": "Con hooks",
     "Same skill as": "Misma skill que",
+    "Locked: always on": "Bloqueados: siempre activos",
+    "Blocks npm and npx: agents use pnpm. No launch can turn it off.": "Frena npm y npx: los agentes usan pnpm. Ningún lanzamiento puede apagarlo.",
     "Your servers": "Tus servidores",
     "Your sessions, history, approvals, workspaces and Codex login are not touched.": "No se tocan tus sesiones, historial, aprobaciones, workspaces ni el inicio de sesión de Codex.",
     "Your terminals belong to a host process, not to this window. Closing the window does not stop them; this is what happens in the other cases on this machine.": "Tus terminales pertenecen a un proceso host, no a esta ventana. Cerrar la ventana no las detiene; esto es lo que pasa en los otros casos de esta máquina.",

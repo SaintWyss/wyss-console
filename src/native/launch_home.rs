@@ -175,6 +175,16 @@ pub fn hook_key(event: &str, matcher: &str, command: &str) -> String {
     format!("{digest:x}")[..16].to_owned()
 }
 
+/// The hook no launch can leave out: it keeps npm and npx away from the agents.
+const LOCKED_HOOK: &str = "pnpm-only.py";
+
+/// Whether this hook command runs the locked hook.
+pub fn hook_locked(command: &str) -> bool {
+    command.split_whitespace().any(|word| {
+        Path::new(word.trim_matches(['"', '\''])).file_name() == Some(LOCKED_HOOK.as_ref())
+    })
+}
+
 /// Removes the hooks a launch left out from `settings` (a settings file's object).
 fn drop_hooks_off(settings: &mut Map<String, Value>, spec: &HomeSpec) {
     let off: BTreeSet<&str> = spec.hooks_off.iter().map(String::as_str).collect();
@@ -190,7 +200,8 @@ fn drop_hooks_off(settings: &mut Map<String, Value>, spec: &HomeSpec) {
                 if let Some(Value::Array(hooks)) = group.get_mut("hooks") {
                     hooks.retain(|hook| {
                         let command = hook.get("command").and_then(Value::as_str).unwrap_or("");
-                        !off.contains(hook_key(event, &matcher, command).as_str())
+                        hook_locked(command)
+                            || !off.contains(hook_key(event, &matcher, command).as_str())
                     });
                 }
             }
@@ -1131,6 +1142,26 @@ pub fn token() -> Option<zeroize::Zeroizing<String>> {
 #[cfg(test)]
 mod plugin_detail_tests {
     use super::*;
+
+    #[test]
+    fn a_preset_cannot_leave_out_the_locked_hook() {
+        let locked = "python3 \"/home/me/.claude/hooks/pnpm-only.py\"";
+        let value = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": locked},
+            {"type": "command", "command": "python3 /x/other.py"},
+        ]}]}});
+        let spec = HomeSpec {
+            hooks_off: vec![
+                hook_key("PreToolUse", "Bash", locked),
+                hook_key("PreToolUse", "Bash", "python3 /x/other.py"),
+            ],
+            ..HomeSpec::default()
+        };
+        let hooks = settings(&value, &spec)["hooks"]["PreToolUse"][0]["hooks"].clone();
+        assert_eq!(hooks.as_array().unwrap().len(), 1);
+        assert_eq!(hooks[0]["command"], locked);
+        assert!(hook_locked(locked) && !hook_locked("python3 /x/not-pnpm-only.py.bak"));
+    }
 
     #[test]
     fn a_plugin_lists_what_it_brings_and_only_same_named_skills_clash() {

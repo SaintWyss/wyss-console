@@ -2896,6 +2896,10 @@ fn hook_matchers(entries: &[HookOption]) -> String {
 
 fn hooks(parent: &gtk::Box, draft: &Editing, entries: &[HookOption], fixed: &[HookOption]) {
     let groups = Rc::new(model::hooks(entries));
+    let (locked, free): (Vec<HookOption>, Vec<HookOption>) = entries
+        .iter()
+        .cloned()
+        .partition(|hook| wyss_console::native::launch_home::hook_locked(&hook.command));
     let (on, total) = model::hook_counts(&draft.borrow(), &groups);
     let count = label(&count_text(on, total), "hint");
     tools(
@@ -2907,7 +2911,19 @@ fn hooks(parent: &gtk::Box, draft: &Editing, entries: &[HookOption], fixed: &[Ho
     if groups.is_empty() {
         parent.append(&label(&tr("Nothing of this kind."), "hint"));
     }
-    for (event, entries) in groups.iter() {
+    if !locked.is_empty() {
+        let (_, rows) = fold(parent, &tr(t!("Locked: always on")), true, false);
+        for (_, entries) in model::hooks(&locked) {
+            for (script, hooks) in entries {
+                let hint = format!("🔒 {}", hook_matchers(&hooks));
+                toggle_row(&rows, &script, &hint, "mono", None);
+            }
+        }
+        let why = label(&tr(t!("Blocks npm and npx: agents use pnpm. No launch can turn it off.")), "hint");
+        why.set_wrap(true);
+        rows.append(&why);
+    }
+    for (event, entries) in model::hooks(&free).iter() {
         let (header, rows) = fold(parent, &tr(model::event_label(event)), false, false);
         let mut children = Vec::new();
         for (script, hooks) in entries {

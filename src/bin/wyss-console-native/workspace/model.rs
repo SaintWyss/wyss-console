@@ -695,9 +695,10 @@ pub fn hook_counts(draft: &Draft, groups: &[(String, HookRows)]) -> (usize, usiz
     (
         rows.clone()
             .filter(|(_, hooks)| {
-                hooks
-                    .iter()
-                    .all(|hook| !draft.hook_exclusions().contains(&hook.key))
+                hooks.iter().all(|hook| {
+                    wyss_console::native::launch_home::hook_locked(&hook.command)
+                        || !draft.hook_exclusions().contains(&hook.key)
+                })
             })
             .count(),
         rows.count(),
