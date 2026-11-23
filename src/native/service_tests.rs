@@ -214,6 +214,30 @@ impl Drop for World {
 }
 
 #[test]
+fn a_new_folder_in_the_home_can_start_and_one_outside_it_cannot() {
+    let w = World::new();
+    let inside = w.home.join("Proyectos Activos/nuevo");
+    let outside = w.base.parent().unwrap().join("outside");
+    fs::create_dir_all(&inside).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    let link = w.home.join("salida");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    fs::write(w.home.join("archivo"), "x").unwrap();
+    assert_eq!(w.service.project_allowed(inside.to_str().unwrap()).unwrap(), inside);
+    for refused in [
+        outside.clone(),
+        link,
+        w.home.join("archivo"),
+        w.home.join("no-existe"),
+    ] {
+        assert_eq!(
+            w.service.project_allowed(refused.to_str().unwrap()).unwrap_err().code,
+            "project_invalid"
+        );
+    }
+}
+
+#[test]
 fn the_catalogue_finds_what_is_installed_and_says_what_is_not() {
     let world = World::new();
     let launcher = world.service.launcher();

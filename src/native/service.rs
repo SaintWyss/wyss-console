@@ -835,7 +835,10 @@ impl NativeService {
         }
     }
 
-    fn project_allowed(&self, path: &str) -> Result<PathBuf, NativeError> {
+    /// A folder a session may start in: one already known, or any real folder inside the home
+    /// (a saved launch names it before any session has run there). A link out of the home is
+    /// judged by where it leads.
+    pub(super) fn project_allowed(&self, path: &str) -> Result<PathBuf, NativeError> {
         let known = path == self.inner.home.to_string_lossy()
             || lock(&self.inner.chosen).iter().any(|p| p == path)
             || lock(&self.inner.registry)
@@ -844,11 +847,18 @@ impl NativeService {
                 .iter()
                 .any(|p| p.path == path);
         let invalid = || NativeError::new("project_invalid");
-        if !known || path.len() > 4096 {
+        if path.len() > 4096 {
             return Err(invalid());
         }
         let canonical = Path::new(path).canonicalize().map_err(|_| invalid())?;
-        canonical.is_dir().then_some(canonical).ok_or_else(invalid)
+        let in_home = self
+            .inner
+            .home
+            .canonicalize()
+            .is_ok_and(|home| canonical.starts_with(home));
+        (canonical.is_dir() && (known || in_home))
+            .then_some(canonical)
+            .ok_or_else(invalid)
     }
 
     // ---- profiles applied -----------------------------------------------------------------
