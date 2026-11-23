@@ -1693,6 +1693,7 @@ fn agent_editor(
                         } else {
                             model::codex_mcp_counts(&draft.codex, codex)
                         }),
+                        "plugins" => Some(model::plugin_counts(&draft, claude, codex)),
                         "hooks" => Some(model::hook_tab_counts(&draft, claude, codex)),
                         _ => None,
                     };
@@ -1859,6 +1860,7 @@ fn agent_tab(
     let _timing = Timing::new(match id {
         "general" => "editor:general",
         "skills" => "editor:skills",
+        "plugins" => "editor:plugins",
         "mcp" => "editor:mcp",
         "hooks" => "editor:hooks",
         "summary" => "editor:summary",
@@ -1875,6 +1877,10 @@ fn agent_tab(
             let (claude, codex) = &catalog.inventory;
             let is_claude = draft.borrow().agent == CLAUDE;
             match id {
+                "plugins" => {
+                    let agent = draft.borrow().agent.clone();
+                    plugins(parent, draft, model::plugin_details(&agent, claude, codex));
+                }
                 "mcp" if is_claude => mcp(parent, draft, claude),
                 "mcp" => codex_mcp(parent, draft, codex),
                 "hooks" => {
@@ -2755,21 +2761,110 @@ fn mcp(parent: &gtk::Box, draft: &Editing, options: &wyss_console::native::launc
         "value",
         Some(&control),
     );
-    if !options.plugins.is_empty() {
-        let (header, rows) = fold(parent, &tr("Plugins"), false, false);
-        let mut children = Vec::new();
-        for name in &options.plugins {
-            let control = switch(name, !draft.borrow().claude.plugins_off.contains(name), {
-                let draft = draft.clone();
-                let name = name.clone();
-                move |on| model::set_off(&mut draft.borrow_mut().claude.plugins_off, &name, on)
-            });
-            toggle_row(&rows, name, "", "value", Some(&control));
-            children.push(control);
+}
+
+/// What a plugin brings, in one line.
+fn plugin_parts(detail: &wyss_console::native::launch_home::PluginDetail) -> String {
+    let mut parts = Vec::new();
+    for (count, name) in [
+        (detail.skills.len(), tr(t!("Skills"))),
+        (detail.agents, tr(t!("Agents"))),
+        (detail.commands, tr(t!("Commands"))),
+    ] {
+        if count > 0 {
+            parts.push(format!("{count} {name}"));
         }
-        let badge = switch_count(&children, children.len());
-        header.append(&badge);
     }
+    if detail.mcp {
+        parts.push("MCP".to_owned());
+    }
+    parts.join(" · ")
+}
+
+fn plugins(
+    parent: &gtk::Box,
+    draft: &Editing,
+    details: &[wyss_console::native::launch_home::PluginDetail],
+) {
+    if details.is_empty() {
+        parent.append(&label(&tr("Nothing of this kind."), "hint"));
+        return;
+    }
+    let bar = horizontal(8);
+    let search = gtk::SearchEntry::new();
+    search.set_hexpand(true);
+    search.set_placeholder_text(Some(&tr(t!("Search plugin…"))));
+    let hooked = gtk::ToggleButton::with_label(&tr(t!("With hooks")));
+    bar.append(&search);
+    bar.append(&hooked);
+    parent.append(&bar);
+    let all = Arc::new(details.to_vec());
+    let warnings = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, gtk::Label)>::new()));
+    let refresh = std::rc::Rc::new({
+        let (draft, all, warnings) = (draft.clone(), all.clone(), warnings.clone());
+        move || {
+            let current = draft.borrow();
+            let off = model::plugins_off(&current);
+            let clashes = wyss_console::native::launch_home::plugin_clashes(&all, off);
+            for (id, warning) in warnings.borrow().iter() {
+                let text = clashes.get(id).filter(|_| !off.contains(id)).map(|others| {
+                    format!("⚠ {}: {}", tr(t!("Same skill as")), others.join(", "))
+                });
+                warning.set_visible(text.is_some());
+                warning.set_text(text.as_deref().unwrap_or(""));
+            }
+        }
+    });
+    let mut rows = Vec::new();
+    let mut controls = Vec::new();
+    for detail in details {
+        let card = vertical(2);
+        let on = !model::plugins_off(&draft.borrow()).contains(&detail.id);
+        let control = switch(&detail.id, on, {
+            let (draft, id, refresh) = (draft.clone(), detail.id.clone(), refresh.clone());
+            move |on| {
+                model::set_plugin(&mut draft.borrow_mut(), &id, on);
+                refresh();
+            }
+        });
+        let name = detail.id.split('@').next().unwrap_or(&detail.id);
+        let hooks = if detail.hook_events > 0 {
+            format!("⚠ {} {}", detail.hook_events, tr(t!("Hooks")))
+        } else {
+            String::new()
+        };
+        toggle_row(&card, name, &hooks, "value", Some(&control));
+        for text in [detail.description.as_str(), &plugin_parts(detail)] {
+            if !text.is_empty() {
+                let line = label(text, "hint");
+                line.set_wrap(true);
+                card.append(&line);
+            }
+        }
+        let warning = label("", "hint");
+        warning.set_visible(false);
+        card.append(&warning);
+        warnings.borrow_mut().push((detail.id.clone(), warning));
+        parent.append(&card);
+        let words = format!("{} {}", detail.id, detail.description).to_lowercase();
+        rows.push((card, words, detail.hook_events > 0));
+        controls.push(control);
+    }
+    refresh();
+    let filter = std::rc::Rc::new({
+        let (search, hooked) = (search.clone(), hooked.clone());
+        move || {
+            let wanted = search.text().to_lowercase();
+            for (card, words, has_hooks) in &rows {
+                card.set_visible(words.contains(&wanted) && (!hooked.is_active() || *has_hooks));
+            }
+        }
+    });
+    search.connect_search_changed({
+        let filter = filter.clone();
+        move |_| filter()
+    });
+    hooked.connect_toggled(move |_| filter());
 }
 
 fn hook_matchers(entries: &[HookOption]) -> String {

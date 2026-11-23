@@ -440,6 +440,9 @@ fn codex_home_summary(home: &super::launch_home_codex::CodexHomeSpec, copies: bo
             home.account_skills_off.len()
         ));
     }
+    if !home.plugins_off.is_empty() {
+        parts.push(format!("{} plugin(s) off", home.plugins_off.len()));
+    }
     if parts.is_empty() && copies {
         parts.push(SAME_ENVIRONMENT.to_owned());
     }

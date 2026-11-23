@@ -692,6 +692,9 @@ pub struct Options {
     #[serde(skip)]
     pub mcp_plugin_servers: std::collections::BTreeMap<String, Vec<String>>,
     pub plugins: Vec<String>,
+    /// What each of `plugins` brings, read from its folder.
+    #[serde(skip)]
+    pub plugin_details: Vec<PluginDetail>,
     pub rules: Vec<String>,
     /// Skills the account syncs from claude.ai, by their loaded name.
     pub account_skills: Vec<String>,
@@ -704,6 +707,89 @@ pub struct Options {
     /// `plugin:<id>` (what an enabled plugin lists: each skill, agent and command, with the
     /// words around each entry counted as 96 bytes).
     pub sizes: std::collections::BTreeMap<String, u64>,
+}
+
+/// What one installed plugin brings, read from its own files.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PluginDetail {
+    /// `name@marketplace`.
+    pub id: String,
+    pub description: String,
+    pub skills: Vec<String>,
+    pub agents: usize,
+    pub commands: usize,
+    /// Events its hooks run on: these run without being called.
+    pub hook_events: usize,
+    pub mcp: bool,
+}
+
+/// Reads what the plugin in `root` brings. `manifest` is its manifest, relative to `root`.
+pub fn plugin_detail(id: &str, root: &Path, manifest: &str) -> PluginDetail {
+    let manifest = read_json(&root.join(manifest)).unwrap_or(Value::Null);
+    let files = |folder: &str| {
+        fs::read_dir(root.join(folder))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| {
+                let path = entry.path();
+                path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension == "md" || extension == "toml")
+            })
+            .count()
+    };
+    let mut skills: Vec<String> = fs::read_dir(root.join("skills"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().join("SKILL.md").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    skills.sort();
+    let hook_events = read_json(&root.join("hooks/hooks.json"))
+        .ok()
+        .and_then(|value| value.get("hooks").and_then(Value::as_object).map(Map::len))
+        .unwrap_or(0);
+    PluginDetail {
+        id: id.to_owned(),
+        description: manifest
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        skills,
+        agents: files("agents"),
+        commands: files("commands"),
+        hook_events,
+        mcp: root.join(".mcp.json").is_file() || manifest.get("mcpServers").is_some(),
+    }
+}
+
+/// For each plugin on, the other plugins on that bring a skill with the same name.
+pub fn plugin_clashes(
+    details: &[PluginDetail],
+    off: &[String],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let on: Vec<&PluginDetail> = details
+        .iter()
+        .filter(|detail| !off.contains(&detail.id))
+        .collect();
+    let mut clashes = std::collections::BTreeMap::new();
+    for plugin in &on {
+        let others: Vec<String> = on
+            .iter()
+            .filter(|other| {
+                other.id != plugin.id && other.skills.iter().any(|s| plugin.skills.contains(s))
+            })
+            .map(|other| other.id.clone())
+            .collect();
+        if !others.is_empty() {
+            clashes.insert(plugin.id.clone(), others);
+        }
+    }
+    clashes
 }
 
 /// Most bytes read of a file to parse it (imports, front matter). Sizes are the files' own.
@@ -957,6 +1043,16 @@ pub fn options(owner: &Owner) -> Options {
     }
     let roots = plugin_roots(owner);
     let mut mcp_plugin_servers = std::collections::BTreeMap::new();
+    let plugin_details = plugins
+        .iter()
+        .map(|plugin| match roots.get(plugin) {
+            Some(root) => plugin_detail(plugin, root, ".claude-plugin/plugin.json"),
+            None => PluginDetail {
+                id: plugin.clone(),
+                ..PluginDetail::default()
+            },
+        })
+        .collect();
     for plugin in &plugins {
         if let Some(root) = roots.get(plugin) {
             sizes.insert(format!("plugin:{plugin}"), plugin_bytes(root));
@@ -992,6 +1088,7 @@ pub fn options(owner: &Owner) -> Options {
         mcp_groups,
         mcp_plugin_servers,
         plugins,
+        plugin_details,
         rules,
         account_skills,
         instructions: INSTRUCTIONS
@@ -1029,6 +1126,38 @@ pub fn token() -> Option<zeroize::Zeroizing<String>> {
         && token.len() <= 4096
         && !token.chars().any(|c| c.is_whitespace() || c.is_control()))
     .then(|| zeroize::Zeroizing::new(token.to_owned()))
+}
+
+#[cfg(test)]
+mod plugin_detail_tests {
+    use super::*;
+
+    #[test]
+    fn a_plugin_lists_what_it_brings_and_only_same_named_skills_clash() {
+        let root = std::env::temp_dir().join(format!("wyss-plugin-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("skills/review")).unwrap();
+        fs::create_dir_all(root.join("skills/not-a-skill")).unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
+        fs::create_dir_all(root.join("hooks")).unwrap();
+        fs::create_dir_all(root.join("meta")).unwrap();
+        fs::write(root.join("skills/review/SKILL.md"), "x").unwrap();
+        fs::write(root.join("agents/a.md"), "x").unwrap();
+        fs::write(root.join("hooks/hooks.json"), r#"{"hooks":{"Stop":[],"SessionStart":[]}}"#).unwrap();
+        fs::write(root.join("meta/plugin.json"), r#"{"description":"Does a thing"}"#).unwrap();
+        let one = plugin_detail("one@m", &root, "meta/plugin.json");
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            (one.description.as_str(), one.skills.clone(), one.agents, one.hook_events, one.mcp),
+            ("Does a thing", vec!["review".to_owned()], 1, 2, false)
+        );
+        let two = PluginDetail { id: "two@m".into(), skills: vec!["review".into()], ..Default::default() };
+        let three = PluginDetail { id: "three@m".into(), skills: vec!["other".into()], ..Default::default() };
+        let all = [one, two, three];
+        let clashes = plugin_clashes(&all, &[]);
+        assert_eq!(clashes["one@m"], ["two@m"]);
+        assert!(!clashes.contains_key("three@m"));
+        assert!(plugin_clashes(&all, &["two@m".to_owned()]).is_empty());
+    }
 }
 
 #[cfg(test)]

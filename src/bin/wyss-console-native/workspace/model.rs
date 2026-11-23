@@ -30,12 +30,13 @@ pub fn tabs(agent: &str) -> impl Iterator<Item = (&'static str, &'static str)> {
     [
         ("general", crate::t!("General")),
         ("skills", crate::t!("Skills")),
+        ("plugins", crate::t!("Plugins")),
         ("mcp", "MCP"),
         ("hooks", crate::t!("Hooks")),
         ("summary", crate::t!("Summary")),
     ]
     .into_iter()
-    .filter(move |(id, _)| *id != "mcp" || matches!(agent, CLAUDE | CODEX))
+    .filter(move |(id, _)| !matches!(*id, "mcp" | "plugins") || matches!(agent, CLAUDE | CODEX))
 }
 
 pub fn permission_label(id: &str) -> &'static str {
@@ -792,9 +793,12 @@ mod tests {
         let ids = |agent| tabs(agent).map(|(id, _)| id).collect::<Vec<_>>();
         assert_eq!(
             ids(CLAUDE),
-            ["general", "skills", "mcp", "hooks", "summary"]
+            ["general", "skills", "plugins", "mcp", "hooks", "summary"]
         );
-        assert_eq!(ids(CODEX), ["general", "skills", "mcp", "hooks", "summary"]);
+        assert_eq!(
+            ids(CODEX),
+            ["general", "skills", "plugins", "mcp", "hooks", "summary"]
+        );
         assert_eq!(
             GENERAL_FIELDS,
             [
@@ -1121,6 +1125,43 @@ pub fn k_tokens(tokens: u64) -> String {
     } else {
         format!("{}k", tokens / 1000 + u64::from(tokens % 1000 >= 500))
     }
+}
+
+pub fn plugin_details<'a>(
+    agent: &str,
+    claude: &'a Options,
+    codex: &'a CodexOptions,
+) -> &'a [wyss_console::native::launch_home::PluginDetail] {
+    if agent == CLAUDE {
+        &claude.plugin_details
+    } else {
+        &codex.plugins
+    }
+}
+
+pub fn plugins_off(draft: &Draft) -> &[String] {
+    if draft.agent == CLAUDE {
+        &draft.claude.plugins_off
+    } else {
+        &draft.codex.plugins_off
+    }
+}
+
+pub fn set_plugin(draft: &mut Draft, id: &str, on: bool) {
+    if draft.agent == CLAUDE {
+        set_off(&mut draft.claude.plugins_off, id, on);
+    } else {
+        set_off(&mut draft.codex.plugins_off, id, on);
+    }
+}
+
+pub fn plugin_counts(draft: &Draft, claude: &Options, codex: &CodexOptions) -> (usize, usize) {
+    let details = plugin_details(&draft.agent, claude, codex);
+    let off = plugins_off(draft);
+    (
+        details.iter().filter(|detail| !off.contains(&detail.id)).count(),
+        details.len(),
+    )
 }
 
 pub fn codex_mcp_counts(spec: &CodexHomeSpec, options: &CodexOptions) -> (usize, usize) {

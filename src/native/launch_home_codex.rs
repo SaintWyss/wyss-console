@@ -65,6 +65,10 @@ pub struct CodexHomeSpec {
     pub mcp: BTreeMap<String, bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub account_skills_off: Vec<String>,
+    /// Plugins switched off in this launch's own `config.toml`, by `name@marketplace`. Codex does
+    /// not honor this as a `-c` override, so a launch with any needs its own folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugins_off: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -79,6 +83,7 @@ impl Default for CodexHomeSpec {
             hooks_off: Vec::new(),
             mcp: BTreeMap::new(),
             account_skills_off: Vec::new(),
+            plugins_off: Vec::new(),
         }
     }
 }
@@ -87,7 +92,13 @@ impl CodexHomeSpec {
     /// `Err("home_invalid")` when a key is not a [`launch_home::hook_key`], is repeated, or there
     /// are more than [`MAX_NAMES`].
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.mcp.len() + self.account_skills_off.len() + self.hooks_off.len() > MAX_NAMES
+        if self.mcp.len()
+            + self.account_skills_off.len()
+            + self.hooks_off.len()
+            + self.plugins_off.len()
+            > MAX_NAMES
+            || !self.plugins_off.iter().all(|id| plugin_id_ok(id))
+            || self.plugins_off.iter().collect::<BTreeSet<_>>().len() != self.plugins_off.len()
             || !self.mcp.keys().all(|name| mcp_name_ok(name))
             || !self.account_skills_off.iter().all(|name| {
                 name.len() <= 1024
@@ -113,13 +124,115 @@ impl CodexHomeSpec {
     }
 
     pub(super) fn needs_launch_home(&self) -> bool {
-        !self.instructions || !self.hooks_off.is_empty() || !self.account_skills_off.is_empty()
+        !self.instructions
+            || !self.hooks_off.is_empty()
+            || !self.account_skills_off.is_empty()
+            || !self.plugins_off.is_empty()
     }
 
     /// The preset changes nothing.
     pub fn is_default(&self) -> bool {
         self == &Self::default()
     }
+}
+
+/// `name@marketplace`, in the characters a quoted TOML key can hold as they are.
+fn plugin_id_ok(id: &str) -> bool {
+    let part = |text: &str| {
+        !text.is_empty()
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    };
+    id.len() <= 128 && id.split_once('@').is_some_and(|(name, market)| part(name) && part(market))
+}
+
+/// `text` with each plugin of `off` set to `enabled = false`, and nothing else changed: the result
+/// is parsed and compared, and a file that cannot be edited this way is refused.
+fn disable_plugins(text: &str, off: &[String]) -> io::Result<String> {
+    if off.is_empty() {
+        return Ok(text.to_owned());
+    }
+    let unsupported = || fail("codex_home_config_unsupported");
+    let mut expected: toml::Table = toml::from_str(text).map_err(|_| unsupported())?;
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    for id in off {
+        let header = format!("[plugins.\"{id}\"]");
+        if let Some(at) = lines.iter().position(|line| line.trim() == header) {
+            let end = lines[at + 1..]
+                .iter()
+                .position(|line| line.trim_start().starts_with('['))
+                .map_or(lines.len(), |n| at + 1 + n);
+            match lines[at + 1..end]
+                .iter()
+                .position(|line| line.split('=').next().is_some_and(|key| key.trim() == "enabled"))
+            {
+                Some(n) => lines[at + 1 + n] = "enabled = false".to_owned(),
+                None => lines.insert(at + 1, "enabled = false".to_owned()),
+            }
+        } else {
+            lines.extend([String::new(), header, "enabled = false".to_owned()]);
+        }
+        let table = || toml::Value::Table(toml::Table::new());
+        expected
+            .entry("plugins")
+            .or_insert_with(table)
+            .as_table_mut()
+            .ok_or_else(unsupported)?
+            .entry(id.as_str())
+            .or_insert_with(table)
+            .as_table_mut()
+            .ok_or_else(unsupported)?
+            .insert("enabled".to_owned(), toml::Value::Boolean(false));
+    }
+    let mut result = lines.join("\n");
+    result.push('\n');
+    let parsed: toml::Table = toml::from_str(&result).map_err(|_| unsupported())?;
+    if parsed != expected {
+        return Err(unsupported());
+    }
+    Ok(result)
+}
+
+/// The plugins in Codex's cache that its configuration does not switch off. A plugin cached for
+/// both a marketplace and its `-remote` twin is the remote one: that is the id Codex loads.
+fn installed_plugins(dir: &Path, config: &toml::Table) -> Vec<launch_home::PluginDetail> {
+    let cache = dir.join("plugins/cache");
+    let mut found = BTreeMap::new();
+    for market in fs::read_dir(&cache).into_iter().flatten().flatten() {
+        let market_name = market.file_name().to_string_lossy().into_owned();
+        for plugin in fs::read_dir(market.path()).into_iter().flatten().flatten() {
+            let name = plugin.file_name().to_string_lossy().into_owned();
+            let mut versions: Vec<PathBuf> = fs::read_dir(plugin.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect();
+            versions.sort();
+            if let Some(root) = versions.pop() {
+                found.insert((market_name.clone(), name), root);
+            }
+        }
+    }
+    let plugins = config.get("plugins").and_then(toml::Value::as_table);
+    found
+        .iter()
+        .filter(|((market, name), _)| {
+            !found.contains_key(&(format!("{market}-remote"), name.clone()))
+        })
+        .filter_map(|((market, name), root)| {
+            let id = format!("{name}@{market}");
+            let off = plugins
+                .and_then(|table| table.get(&id))
+                .and_then(|entry| entry.get("enabled"))
+                .and_then(toml::Value::as_bool)
+                == Some(false);
+            (plugin_id_ok(&id) && !off)
+                .then(|| launch_home::plugin_detail(&id, root, ".codex-plugin/plugin.json"))
+        })
+        .collect()
 }
 
 fn mcp_name_ok(name: &str) -> bool {
@@ -409,7 +522,7 @@ pub fn build_with_skills(
     .unwrap_or_default();
     let home_config =
         read_text(&dir.join(CONFIG), "codex_home_config_unreadable")?.unwrap_or_default();
-    let config = config_text(&owner_config, &home_config)?;
+    let config = disable_plugins(&config_text(&owner_config, &home_config)?, &spec.plugins_off)?;
     let owner_hooks = owner.dir.join(HOOKS);
     let hooks = if present(&owner_hooks)? {
         let bytes = store::read_bounded(&owner_hooks, MAX_FILE)
@@ -574,6 +687,9 @@ pub struct CodexOptions {
     pub mcp: BTreeMap<String, bool>,
     pub account_skills: Vec<String>,
     pub account_listing_bytes: BTreeMap<String, u64>,
+    /// The plugins on in the owner's Codex, with what each brings.
+    #[serde(skip)]
+    pub plugins: Vec<launch_home::PluginDetail>,
 }
 
 /// The hooks a parsed `config.toml` declares under `hooks`, whatever is under `hooks.state`
@@ -684,6 +800,7 @@ pub fn options(owner: &CodexOwner) -> CodexOptions {
             .map(|file| (name, file.bytes().len() as u64))
     });
     CodexOptions {
+        plugins: installed_plugins(&owner.dir, &config),
         hooks,
         config_hooks: config_hooks(&config),
         instructions: INSTRUCTION_FILES
@@ -726,6 +843,50 @@ pub fn project_instruction_bytes(directory: &Path) -> u64 {
             })
         })
         .sum()
+}
+
+#[cfg(test)]
+mod plugin_tests {
+    use super::*;
+
+    #[test]
+    fn a_plugin_is_switched_off_in_the_text_and_nothing_else_changes() {
+        let text = "# mine\nmodel = \"x\"\n\n[plugins.\"a@m\"]\nenabled = true\n\n[plugins.\"b@m\"]\nnote = \"keep\"\n";
+        let out = disable_plugins(text, &["a@m".into(), "b@m".into(), "c@m".into()]).unwrap();
+        let table: toml::Table = out.parse().unwrap();
+        for id in ["a@m", "b@m", "c@m"] {
+            assert_eq!(table["plugins"][id]["enabled"].as_bool(), Some(false));
+        }
+        assert_eq!(table["plugins"]["b@m"]["note"].as_str(), Some("keep"));
+        assert!(out.starts_with("# mine\n"));
+        assert_eq!(disable_plugins(text, &[]).unwrap(), text);
+    }
+
+    #[test]
+    fn a_config_that_cannot_be_edited_safely_is_refused() {
+        let text = "plugins = { \"a@m\" = { enabled = true } }\n";
+        assert!(disable_plugins(text, &["a@m".into()]).is_err());
+    }
+
+    #[test]
+    fn a_bad_plugin_id_is_refused_and_a_plugin_alone_needs_a_home() {
+        let bad = CodexHomeSpec { plugins_off: vec!["a\"]@m".into()], ..Default::default() };
+        assert!(bad.validate().is_err());
+        let good = CodexHomeSpec { plugins_off: vec!["a@m-remote".into()], ..Default::default() };
+        assert!(good.validate().is_ok() && good.needs_launch_home());
+    }
+
+    #[test]
+    fn the_remote_twin_wins_and_a_plugin_off_in_config_is_not_offered() {
+        let dir = std::env::temp_dir().join(format!("wyss-codex-plugins-{}", uuid::Uuid::new_v4()));
+        for path in ["m/a/1", "m-remote/a/2", "m/off/1", "m/solo/1"] {
+            fs::create_dir_all(dir.join("plugins/cache").join(path)).unwrap();
+        }
+        let config: toml::Table = "[plugins.\"off@m\"]\nenabled = false\n".parse().unwrap();
+        let ids: Vec<String> = installed_plugins(&dir, &config).into_iter().map(|p| p.id).collect();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(ids, ["solo@m", "a@m-remote"]);
+    }
 }
 
 #[cfg(test)]
