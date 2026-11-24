@@ -171,12 +171,9 @@ pub(super) fn prepare(
     } else {
         json!({})
     };
-    let status = if owned {
-        None
-    } else {
-        Some(command(exe, dir, "usage")?)
-    };
-    let overlay = compose(settings, status.as_deref(), &command(exe, dir, "events")?)?;
+    // Sin barra de estado propia: Claude Code le reserva un renglón vacío bajo el prompt.
+    let _ = owned;
+    let overlay = compose(settings, None, &command(exe, dir, "events")?)?;
     let bytes = serde_json::to_vec(&overlay).ok()?;
     let path = dir.join("activity-settings.json");
     store::write_atomic(&path, &bytes).ok()?;
