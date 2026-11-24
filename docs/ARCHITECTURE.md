@@ -42,7 +42,7 @@ una terminal sin agente, toma la última de cada proveedor. Los nombres salen de
 
 | CLI | Cuotas de 5 horas y 7 días | Contexto |
 | --- | --- | --- |
-| Claude Code 2.1.330 | El JSON documentado de `statusLine` entrega `rate_limits.five_hour` y `rate_limits.seven_day`, con `used_percentage` y `resets_at`. Wyss lee el reloj local al recibir el JSON. Claude entrega estas cuotas después de una respuesta en los planes compatibles. | El mismo JSON entrega `context_window.used_percentage`, correspondiente a la última respuesta de la API. |
+| Claude Code (cualquier versión) | El JSON documentado de `statusLine` entrega `rate_limits.five_hour` y `rate_limits.seven_day`, con `used_percentage` y `resets_at`. Wyss lee el reloj local al recibir el JSON. Claude entrega estas cuotas después de una respuesta en los planes compatibles. | El mismo JSON entrega `context_window.used_percentage`, correspondiente a la última respuesta de la API. |
 | Codex 0.170.0 | El evento local `token_count` entrega `rate_limits` y la hora UTC del registro. Se acepta `limit_id: codex` y se distingue por duración (300 o 10080 minutos), con `used_percent` y `resets_at`. Puede venir sin límites. | `info.last_token_usage.total_tokens / info.model_context_window` mide la última ventana reportada. Se excluyen los recálculos sintéticos con cero tokens de entrada y se omite el porcentaje cuando el conteo falta o está fuera de rango. |
 
 - El overlay de Claude agrega el callback de uso solo si los ajustes efectivos del usuario y los

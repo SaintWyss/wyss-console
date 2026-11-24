@@ -1444,8 +1444,8 @@ impl NativeService {
             }
         }
         let mut launch_exe = direct.clone();
+        // Monitoring is wired for every Claude Code version; the owner does not want a version gate.
         if agent_id == AgentId::ClaudeCode
-            && version.as_deref() == Some("2.1.330 (Claude Code)")
             && let Ok(helper) = std::env::current_exe()
             && helper.file_name().is_some_and(|name| name == "wyss-host")
             && store::private_dir(&dir).is_ok()
