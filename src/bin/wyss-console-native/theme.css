@@ -238,11 +238,6 @@ button.tool-btn:focus-visible {
 }
 .pane {
   background: @terminal_bg;
-  border: 1px solid @line;
-  border-radius: 6px;
-}
-.pane.focused {
-  border-color: @accent_line;
 }
 .dot {
   min-width: 8px;
