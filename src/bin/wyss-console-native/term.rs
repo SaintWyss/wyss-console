@@ -810,7 +810,7 @@ impl Terminal {
                 gtk::ShortcutTrigger::parse_string("<Control><Shift>a"),
                 Some(gtk::CallbackAction::new(move |_, _| {
                     if let (Some(a), Some(row)) = (area_w.upgrade(), state.cursor_row.get()) {
-                        let cols = state.size.get().0 as usize;
+                        let cols = state.size.get().0;
                         let (c0, c1) = selection::line_span(cols);
                         *state.sel.borrow_mut() = Some(Selection { anchor: Pos { row, col: c0 }, head: Pos { row, col: c1 }, mode: Mode::Line });
                         state.input_sel.set(true);
