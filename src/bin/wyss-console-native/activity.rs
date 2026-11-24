@@ -1,7 +1,7 @@
 //! Usage strip and per-pane prompt queue. Only the host reads usage sources or writes the PTY.
 use crate::{
     host::Host,
-    i18n::{tr, trf},
+    i18n::tr,
 };
 use gtk::{gio, glib, prelude::*};
 use serde_json::json;
@@ -14,7 +14,7 @@ use wyss_console::native::{
     prompt_queue::{self, Arming, Dispatch, Edit, Queue},
     service::{ActivitySession, ActivityView},
     store,
-    usage::{self, Level, Plan, Window},
+    usage::{self, Level, Plan},
 };
 
 pub struct Strip {
@@ -25,8 +25,17 @@ pub struct Strip {
 }
 
 struct Column {
-    windows: gtk::Label,
-    context: gtk::Label,
+    heading: gtk::Label,
+    title: &'static str,
+    context: Meter,
+    short: Meter,
+    long: Meter,
+}
+
+/// One battery-style reading: a bar that fills and changes colour, then its percentage.
+struct Meter {
+    bar: gtk::LevelBar,
+    value: gtk::Label,
 }
 
 impl Strip {
@@ -155,103 +164,103 @@ fn one_line() -> gtk::Label {
 }
 
 impl Column {
-    fn new(root: &gtk::Box, title: &str) -> Self {
+    fn new(root: &gtk::Box, title: &'static str) -> Self {
         let col = gtk::Box::new(gtk::Orientation::Vertical, 2);
         col.add_css_class("usage-column");
-        let heading = gtk::Label::new(Some(title));
+        let heading = one_line();
         heading.add_css_class("usage-provider");
-        heading.set_xalign(0.0);
-        let windows = one_line();
-        let context = one_line();
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let context = Meter::new(&row, &tr("Context"));
+        let short = Meter::new(&row, "5 h");
+        let long = Meter::new(&row, &tr("Week"));
         col.append(&heading);
-        col.append(&windows);
-        col.append(&context);
+        col.append(&row);
         root.append(&col);
-        Self { windows, context }
+        Self {
+            heading,
+            title,
+            context,
+            short,
+            long,
+        }
     }
 
     fn paint(&self, plan: Plan, session: Option<&ActivitySession>, now: u64) {
-        let windows = trf(
-            "5 h {short} · Week {long}",
-            &[
-                ("short", &window(plan.five_hours, now)),
-                ("long", &window(plan.weekly, now)),
-            ],
+        let heading = session.map_or_else(
+            || self.title.to_string(),
+            |s| format!("{} · {}", self.title, s.name),
         );
-        self.windows.set_text(&windows);
-        self.windows.set_tooltip_text(Some(&windows));
-        self.context.remove_css_class("usage-warning");
-        self.context.remove_css_class("usage-danger");
-        let used = match session.and_then(|s| s.context) {
-            Some(value) => {
-                let level = match usage::context_level(value) {
-                    Level::Normal => tr("Normal"),
-                    Level::Warning => {
-                        self.context.add_css_class("usage-warning");
-                        tr("Warning")
-                    }
-                    Level::Danger => {
-                        self.context.add_css_class("usage-danger");
-                        tr("Danger")
-                    }
-                };
-                format!("{} · {level}", percent(value))
-            }
-            None => tr("No data"),
+        self.heading.set_text(&heading);
+        self.heading.set_tooltip_text(Some(&heading));
+        self.context
+            .set(session.and_then(|s| s.context), None, false);
+        // ponytail: only the 5 h window shows its reset; the weekly one is too far away to matter.
+        let reset = plan.five_hours.and_then(|r| r.resets_at).map(|reset| {
+            let mins = reset.saturating_sub(now).div_ceil(60);
+            format!("{}h {}m", mins / 60, mins % 60)
+        });
+        let short = plan.five_hours;
+        self.short.set(
+            short.map(|r| r.used),
+            reset,
+            short.is_some_and(|r| r.stale(now)),
+        );
+        let long = plan.weekly;
+        self.long.set(
+            long.map(|r| r.used),
+            None,
+            long.is_some_and(|r| r.stale(now)),
+        );
+    }
+}
+
+impl Meter {
+    fn new(row: &gtk::Box, name: &str) -> Self {
+        let cell = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let label = gtk::Label::new(Some(name));
+        let bar = gtk::LevelBar::for_interval(0.0, 100.0);
+        for offset in ["low", "high", "full"] {
+            bar.remove_offset_value(Some(offset));
+        }
+        bar.add_css_class("usage-bar");
+        bar.set_size_request(64, -1);
+        bar.set_valign(gtk::Align::Center);
+        let value = gtk::Label::new(None);
+        cell.append(&label);
+        cell.append(&bar);
+        cell.append(&value);
+        row.append(&cell);
+        Self { bar, value }
+    }
+
+    fn set(&self, used: Option<f64>, extra: Option<String>, stale: bool) {
+        for class in ["usage-warning", "usage-danger", "usage-stale"] {
+            self.bar.remove_css_class(class);
+        }
+        let Some(used) = used else {
+            self.bar.set_value(0.0);
+            self.value.set_text(&tr("No data"));
+            return;
         };
-        let text = if let Some(session) = session {
-            trf(
-                "Context {used} · {session}",
-                &[("used", &used), ("session", &session.name)],
-            )
-        } else {
-            trf("Context {used}", &[("used", &used)])
-        };
-        self.context.set_text(&text);
-        self.context.set_tooltip_text(Some(&text));
+        self.bar.set_value(used.clamp(0.0, 100.0));
+        match usage::context_level(used) {
+            Level::Normal => {}
+            Level::Warning => self.bar.add_css_class("usage-warning"),
+            Level::Danger => self.bar.add_css_class("usage-danger"),
+        }
+        let text = extra.map_or_else(|| percent(used), |e| format!("{} · {e}", percent(used)));
+        self.value.set_text(&text);
+        if stale {
+            self.bar.add_css_class("usage-stale");
+        }
+        self.value
+            .set_tooltip_text(stale.then(|| tr("Stale reading")).as_deref());
     }
 }
 
 fn percent(value: f64) -> String {
-    // Keep the displayed decimal on the same side of a threshold as the source value.
-    format!("{:.1}%", (value * 10.0).floor() / 10.0)
-}
-
-fn window(reading: Option<Window>, now: u64) -> String {
-    let Some(reading) = reading else {
-        return tr("No data");
-    };
-    let reset = reading.resets_at.map_or_else(
-        || tr("No data"),
-        |reset| {
-            let mins = reset.saturating_sub(now).div_ceil(60);
-            trf(
-                "{hours}h {minutes}m",
-                &[
-                    ("hours", &(mins / 60).to_string()),
-                    ("minutes", &(mins % 60).to_string()),
-                ],
-            )
-        },
-    );
-    let when = i64::try_from(reading.at)
-        .ok()
-        .and_then(|t| glib::DateTime::from_unix_local(t).ok())
-        .and_then(|t| t.format("%d/%m %H:%M").ok())
-        .map_or_else(|| tr("No data"), |t| t.to_string());
-    let text = trf(
-        "{used}, resets in {reset}, read {time}",
-        &[
-            ("used", &percent(reading.used)),
-            ("reset", &reset),
-            ("time", &when),
-        ],
-    );
-    if reading.stale(now) {
-        trf("{reading} · stale", &[("reading", &text)])
-    } else {
-        text
-    }
+    // Whole number, floored, so 74.9 never reads as the 75 that turns the bar red.
+    format!("{}%", value.floor())
 }
 
 pub fn snapshot(host: Option<&Host>) -> (ActivityView, bool) {

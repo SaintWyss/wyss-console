@@ -98,20 +98,15 @@
     "your own environment, with the skills copied from Arsenal": "tu propio entorno, con las skills copiadas desde Arsenal"
   },
   "sentences": {
-    "5 h {short} · Week {long}": "5 h {short} · Semana {long}",
     "Add": "Agregar",
     "Arm during a turn with the prompt empty. Typing pauses the queue.": "Armá la cola durante un turno con el campo de entrada vacío. Si escribís, se pausa.",
     "Arm queue": "Armar cola",
     "Armed. Waiting for the session to become idle.": "Cola armada. Esperando que la sesión quede disponible.",
     "Automatic sending is off until the agent's idle screen can be verified.": "El envío automático queda apagado hasta poder verificar la pantalla inactiva del agente.",
     "Codex does not expose whether its terminal is ready to receive a queued prompt.": "Cola pausada. Codex no informa si su terminal puede recibir un prompt de la cola.",
-    "Context {used}": "Contexto {used}",
-    "Context {used} · {session}": "Contexto {used} · {session}",
-    "Danger": "Crítico",
     "Move down": "Bajar",
     "Move up": "Subir",
     "No data": "sin dato",
-    "Normal": "Normal",
     "Pause queue": "Pausar cola",
     "Prompt queue": "Cola de prompts",
     "Queue": "Cola",
@@ -128,10 +123,6 @@
     "Save edit": "Guardar edición",
     "Saved queues": "Colas guardadas",
     "Session stopped. You can edit saved prompts.": "Sesión detenida. Podés editar los prompts guardados.",
-    "Warning": "Advertencia",
-    "{hours}h {minutes}m": "{hours} h {minutes} min",
-    "{reading} · stale": "{reading} · desactualizado",
-    "{used}, resets in {reset}, read {time}": "{used}, reinicia en {reset}, lectura {time}",
     "Before the first heading": "Antes del primer encabezado",
     "Cancel suggestion": "Cancelar sugerencia",
     "Claude Code could not complete the tool-free suggestion.": "Claude Code no pudo completar la sugerencia sin herramientas.",
@@ -739,6 +730,9 @@
     "That terminal is no longer open.": "Esa terminal ya no está abierta.",
     "The terminal host is from another version. Close Wyss Console and open it again.": "El host de terminales es de otra versión. Cerrá Wyss Console y abrila de nuevo.",
     "Something failed inside the terminal host. Nothing was started.": "Algo falló dentro del host de terminales. No se inició nada.",
-    "The terminal host answered “{code}”. Nothing was started.": "El host de terminales respondió «{code}». No se inició nada."
+    "The terminal host answered “{code}”. Nothing was started.": "El host de terminales respondió «{code}». No se inició nada.",
+    "Context": "Contexto",
+    "Week": "Semana",
+    "Stale reading": "Lectura desactualizada"
   }
 }

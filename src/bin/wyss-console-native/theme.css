@@ -312,11 +312,23 @@ paned > separator:hover {
   color: @text;
   font-weight: 600;
 }
-.usage-warning {
-  color: @warn;
+levelbar.usage-bar trough {
+  min-height: 6px;
+  border-radius: 3px;
+  background: @line;
 }
-.usage-danger {
-  color: @error;
+levelbar.usage-bar block.filled {
+  border-radius: 3px;
+  background: @ok;
+}
+levelbar.usage-bar.usage-warning block.filled {
+  background: @warn;
+}
+levelbar.usage-bar.usage-danger block.filled {
+  background: @error;
+}
+levelbar.usage-bar.usage-stale {
+  opacity: 0.45;
 }
 
 /* ---- tooltips and the shortcut list ---- */
