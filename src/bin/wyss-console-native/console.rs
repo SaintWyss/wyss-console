@@ -113,11 +113,8 @@ struct Pane {
     id: u64,
     term: term::Terminal,
     root: gtk::Box,
-    dot: gtk::Box,
-    badge: gtk::Label,
-    shell: gtk::Label,
-    state: gtk::Label,
-    ram: gtk::Label,
+    /// Queue, stop, restart, forget and close; shown in the status bar while the pane has focus.
+    actions: gtk::Box,
     buttons: HeaderButtons,
     find: FindBar,
     info: RefCell<Info>,
@@ -159,6 +156,7 @@ struct Ui {
     folder: gtk::Label,
     git: gtk::Label,
     kind: gtk::Label,
+    pane_actions: gtk::Box,
     launch_btn: gtk::Button,
     launch_panel: gtk::Box,
     banner: gtk::Box,
@@ -221,20 +219,7 @@ impl Ui {
         root.add_css_class("pane");
         root.set_overflow(gtk::Overflow::Hidden);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        header.add_css_class("pane-header");
-        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        dot.add_css_class("dot");
-        dot.set_valign(gtk::Align::Center);
-        let badge = label("Native", "pane-native");
-        badge.set_valign(gtk::Align::Center);
-        badge.set_visible(false);
-        let shell = label("", "pane-shell");
-        let state = label(&format!(" · {}", tr("Running")), "pane-state");
-        let ram = label(" · ", "pane-ram");
-        shell.set_visible(false);
-        ram.set_visible(false);
-        let grow = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        grow.set_hexpand(true);
+        header.add_css_class("pane-actions");
         let buttons = HeaderButtons {
             stop: self.header_button(&tr("Stop"), &key, PaneAct::Stop),
             restart: self.header_button(&tr("Restart"), &key, PaneAct::Restart),
@@ -246,7 +231,7 @@ impl Ui {
         for b in [&buttons.stop, &buttons.restart, &buttons.forget] {
             b.set_visible(false);
         }
-        for w in [dot.upcast_ref::<gtk::Widget>(), badge.upcast_ref(), shell.upcast_ref(), state.upcast_ref(), ram.upcast_ref(), grow.upcast_ref(), buttons.stop.upcast_ref(), buttons.restart.upcast_ref(), buttons.forget.upcast_ref(), buttons.close.upcast_ref()] {
+        for w in [buttons.stop.upcast_ref::<gtk::Widget>(), buttons.restart.upcast_ref(), buttons.forget.upcast_ref(), buttons.close.upcast_ref()] {
             header.append(w);
         }
         let queue = self.host.as_ref().zip(tag.as_ref()).zip(tid.as_ref())
@@ -255,10 +240,9 @@ impl Ui {
                 let panel = activity::QueuePanel::new(
                     host.clone(), tag.session_id.clone(), Some(tid.clone()), tag.agent_name == "Codex",
                 );
-                header.insert_child_after(&panel.button, Some(&grow));
+                header.prepend(&panel.button);
                 panel
             });
-        root.append(&header);
 
         // Search bar (Ctrl+Shift+F), closed until asked for.
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -304,11 +288,7 @@ impl Ui {
             id,
             term: t,
             root,
-            dot,
-            badge,
-            shell,
-            state,
-            ram,
+            actions: header,
             buttons,
             find: FindBar { bar, entry, count },
             info: RefCell::new(Info { running: true, ..Info::default() }),
@@ -390,26 +370,7 @@ impl Ui {
     /// that fit (stop and restart while an agent runs; start again and forget once it is finished;
     /// close for a plain shell).
     fn paint_header(&self, p: &Pane) {
-        let info = p.info.borrow();
         let is_agent = p.native.borrow().is_some();
-        p.badge.set_visible(is_agent);
-        p.shell.set_text(&info.shell);
-        p.shell.set_visible(!is_agent && !info.shell.is_empty());
-        let state = if info.running {
-            tr("Running")
-        } else if is_agent {
-            tr("Agent exited")
-        } else {
-            tr("Shell exited")
-        };
-        p.state.set_text(&if p.shell.is_visible() { format!(" · {state}") } else { state });
-        if info.running {
-            p.dot.remove_css_class("ended");
-        } else {
-            p.dot.add_css_class("ended");
-        }
-        p.ram.set_text(&format!(" · {}", procinfo::mb(info.rss)));
-        p.ram.set_visible(info.rss.is_some() && info.running);
         let life = p.life.get().filter(|_| is_agent);
         p.buttons.stop.set_visible(life == Some(native::Lifecycle::Running));
         p.buttons.restart.set_visible(life.is_some());
@@ -922,6 +883,12 @@ impl Ui {
         }
         self.paint_activity();
         self.kind.set_text(&tag.map(|t| native::agent_label(&t)).unwrap_or_else(|| tr("Terminal")));
+        while let Some(child) = self.pane_actions.first_child() {
+            self.pane_actions.remove(&child);
+        }
+        if let Some(p) = self.focused() {
+            self.pane_actions.append(&p.actions);
+        }
     }
 
     fn paint_activity(&self) {
@@ -1594,7 +1561,8 @@ pub fn build(
     let kind = label(&tr("Terminal"), "status-kind");
     kind.set_hexpand(true);
     kind.set_halign(gtk::Align::End);
-    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), kind.upcast_ref()] {
+    let pane_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), kind.upcast_ref(), pane_actions.upcast_ref()] {
         status.append(w);
     }
 
@@ -1655,6 +1623,7 @@ pub fn build(
         folder,
         git,
         kind,
+        pane_actions,
         launch_btn: launch_btn.clone(),
         launch_panel: launch_panel.clone(),
         banner: banner.clone(),

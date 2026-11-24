@@ -304,7 +304,8 @@ pub struct QueuePanel {
 
 impl QueuePanel {
     pub fn new(host: Host, id: String, tid: Option<String>, codex: bool) -> Rc<Self> {
-        let button = gtk::MenuButton::builder().label(tr("Queue")).build();
+        // A label child instead of `.label()`: no dropdown arrow, so it matches Stop and Restart.
+        let button = gtk::MenuButton::builder().child(&gtk::Label::new(Some(&tr("Queue")))).build();
         button.add_css_class("hdr-btn");
         button.set_tooltip_text(Some(&tr("Prompt queue")));
         let popover = gtk::Popover::new();

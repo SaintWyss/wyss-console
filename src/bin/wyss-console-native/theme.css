@@ -244,18 +244,6 @@ button.tool-btn:focus-visible {
 .pane.focused {
   border-color: @accent_line;
 }
-.pane-header {
-  background: @surface;
-  border-bottom: 1px solid @line;
-  min-height: 31px;
-  padding: 0 12px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  color: @faint;
-}
-.pane-shell {
-  color: @muted;
-}
 .dot {
   min-width: 8px;
   min-height: 8px;
@@ -362,14 +350,11 @@ popover.shortcuts .shortcut-title {
 }
 
 /* ---- pane header: agent label and lifecycle buttons ---- */
-.pane-native {
-  color: @muted;
-  border: 1px solid @line;
-  border-radius: 9px;
-  padding: 0 7px;
-  margin-right: 8px;
+.pane-actions {
+  margin-left: 6px;
 }
-button.hdr-btn {
+button.hdr-btn,
+menubutton.hdr-btn > button {
   min-height: 20px;
   padding: 0 8px;
   margin-left: 6px;
@@ -381,7 +366,8 @@ button.hdr-btn {
   font-family: 'IBM Plex Sans', 'Inter', sans-serif;
   font-size: 12px;
 }
-button.hdr-btn:hover {
+button.hdr-btn:hover,
+menubutton.hdr-btn > button:hover {
   background: @surface_hover;
   color: @text;
 }
