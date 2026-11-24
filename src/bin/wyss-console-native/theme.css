@@ -354,7 +354,8 @@ popover.shortcuts .shortcut-title {
   margin-left: 6px;
 }
 button.hdr-btn,
-menubutton.hdr-btn > button {
+menubutton.hdr-btn > button,
+menubutton.hdr-btn > button.toggle {
   min-height: 20px;
   padding: 0 8px;
   margin-left: 6px;

@@ -240,6 +240,7 @@ impl Ui {
                 let panel = activity::QueuePanel::new(
                     host.clone(), tag.session_id.clone(), Some(tid.clone()), tag.agent_name == "Codex",
                 );
+                panel.button.set_valign(gtk::Align::Center);
                 header.prepend(&panel.button);
                 panel
             });
