@@ -25,8 +25,6 @@ pub struct Strip {
 }
 
 struct Column {
-    heading: gtk::Label,
-    title: &'static str,
     context: Meter,
     short: Meter,
     long: Meter,
@@ -164,10 +162,11 @@ fn one_line() -> gtk::Label {
 }
 
 impl Column {
-    fn new(root: &gtk::Box, title: &'static str) -> Self {
+    fn new(root: &gtk::Box, title: &str) -> Self {
         let col = gtk::Box::new(gtk::Orientation::Vertical, 2);
         col.add_css_class("usage-column");
-        let heading = one_line();
+        let heading = gtk::Label::new(Some(title));
+        heading.set_xalign(0.0);
         heading.add_css_class("usage-provider");
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let context = Meter::new(&row, &tr("Context"));
@@ -177,8 +176,6 @@ impl Column {
         col.append(&row);
         root.append(&col);
         Self {
-            heading,
-            title,
             context,
             short,
             long,
@@ -186,12 +183,6 @@ impl Column {
     }
 
     fn paint(&self, plan: Plan, session: Option<&ActivitySession>, now: u64) {
-        let heading = session.map_or_else(
-            || self.title.to_string(),
-            |s| format!("{} · {}", self.title, s.name),
-        );
-        self.heading.set_text(&heading);
-        self.heading.set_tooltip_text(Some(&heading));
         self.context
             .set(session.and_then(|s| s.context), None, false);
         // ponytail: only the 5 h window shows its reset; the weekly one is too far away to matter.
