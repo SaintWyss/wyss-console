@@ -1513,6 +1513,15 @@ pub fn build(
     let win = gtk::ApplicationWindow::builder().application(app).title("Wyss Console").default_width(1200).default_height(800).build();
     win.add_css_class("console");
 
+    // Titlebar drawn by the app (Warp style): same color as the terminal, traffic-light buttons on the left.
+    let titlebar = gtk::HeaderBar::new();
+    titlebar.add_css_class("titlebar-console");
+    titlebar.set_decoration_layout(Some("close,minimize,maximize:"));
+    let title = gtk::Label::new(Some("Wyss Console"));
+    title.add_css_class("titlebar-title");
+    titlebar.set_title_widget(Some(&title));
+    win.set_titlebar(Some(&titlebar));
+
     // Rail.
     let rail = gtk::Box::new(gtk::Orientation::Vertical, 4);
     rail.add_css_class("rail");

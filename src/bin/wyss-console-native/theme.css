@@ -10,6 +10,35 @@ window.console {
   font-size: 13px;
 }
 
+/* Titlebar drawn by the app: no line, same color as the terminal, round traffic-light buttons. */
+headerbar.titlebar-console {
+  background: @bg;
+  border: none;
+  box-shadow: none;
+  min-height: 34px;
+  padding: 0 8px;
+}
+headerbar.titlebar-console .titlebar-title {
+  color: @text;
+  opacity: 0.55;
+  font-size: 12px;
+}
+headerbar.titlebar-console windowcontrols button {
+  min-width: 12px;
+  min-height: 12px;
+  padding: 0;
+  margin: 0 4px;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+}
+headerbar.titlebar-console windowcontrols button image { opacity: 0; -gtk-icon-size: 0; }
+headerbar.titlebar-console windowcontrols button:hover image { opacity: 0.6; -gtk-icon-size: 8px; }
+headerbar.titlebar-console windowcontrols button.close { background: #ff5f57; }
+headerbar.titlebar-console windowcontrols button.minimize { background: #febc2e; }
+headerbar.titlebar-console windowcontrols button.maximize { background: #28c840; }
+headerbar.titlebar-console:backdrop windowcontrols button { background: @surface_hover; }
+
 window.console * {
   -gtk-icon-style: symbolic;
 }
