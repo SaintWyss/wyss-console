@@ -1536,17 +1536,25 @@ pub fn build(
     }
     let win = gtk::ApplicationWindow::builder().application(app).title("Wyss Console").default_width(1200).default_height(800).build();
     win.add_css_class("console");
+    // An empty title bar of our own keeps KWin from drawing its bar over the traffic lights.
+    let no_titlebar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    no_titlebar.add_css_class("no-titlebar");
+    win.set_titlebar(Some(&no_titlebar));
 
     // Rail.
     let rail = gtk::Box::new(gtk::Orientation::Vertical, 4);
     rail.add_css_class("rail");
     let (console_row, console_button) = rail_button(Icon::Terminal, &tr("Console"), true);
-    let (workspace_row, workspace_button) = rail_button(Icon::Sliders, &tr("Workspace"), false);
+    let (workspace_row, workspace_button) = rail_button(Icon::Grid, &tr("Workspace"), false);
     rail.append(&console_row);
     rail.append(&workspace_row);
     let (personal_row, personal_button) = rail_button(Icon::Palette, &tr("Personalization"), false);
     rail.append(&personal_row);
     let (settings_row, settings_button) = rail_button(Icon::Settings, &tr("Settings"), false);
+    // Settings sits alone at the bottom of the rail.
+    let rail_gap = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    rail_gap.set_vexpand(true);
+    rail.append(&rail_gap);
     rail.append(&settings_row);
 
     // Tab bar.
@@ -1587,10 +1595,12 @@ pub fn build(
     let folder = label("", "status-folder");
     let git = label("", "status-git");
     let kind = label(&tr("Terminal"), "status-kind");
-    kind.set_hexpand(true);
-    kind.set_halign(gtk::Align::End);
+    // One bottom bar: folder and branch on the left, the Claude / Codex readings and the pane on the right.
+    let activity_strip = activity::Strip::new(cfg.host.clone());
+    activity_strip.root.set_hexpand(true);
+    activity_strip.root.set_halign(gtk::Align::End);
     let pane_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), kind.upcast_ref(), pane_actions.upcast_ref()] {
+    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), activity_strip.root.upcast_ref(), kind.upcast_ref(), pane_actions.upcast_ref()] {
         status.append(w);
     }
 
@@ -1645,8 +1655,6 @@ pub fn build(
     body.set_hexpand(true);
     screens.set_vexpand(true);
     body.append(&screens);
-    let activity_strip = activity::Strip::new(cfg.host.clone());
-    body.append(&activity_strip.root);
     outer.append(&body);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&outer));

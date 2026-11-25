@@ -10,10 +10,19 @@ window.console {
   font-size: 13px;
 }
 
+/* The empty title bar that keeps the window's own decoration: no height at all. */
+.no-titlebar, .titlebar.no-titlebar {
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
 /* Traffic lights centered in the corner cell above the rail (12px circles, 6px apart). */
 .corner {
   background: @chrome;
-  border-bottom: 1px solid @line;
+  border-bottom: 1px solid @edge;
   min-width: 51px;
   min-height: 39px;
 }
@@ -159,7 +168,7 @@ scrollbar slider:hover, scrollbar slider:active {
 /* ---- rail ---- */
 .rail {
   background: @chrome;
-  border-right: 1px solid @line;
+  border-right: 1px solid @edge;
   min-width: 51px;
   padding: 11px 0;
 }
@@ -199,18 +208,21 @@ button.rail-btn:focus-visible {
 /* ---- tab bar ---- */
 .tabbar {
   background: @chrome;
-  border-bottom: 1px solid @line;
+  border-bottom: 1px solid @edge;
   min-height: 39px;
   padding: 0 8px 0 8px;
 }
 .tab {
-  padding: 0 10px 0 10px;
-  margin: 0 2px 0 0;
-  border-bottom: 2px solid transparent;
+  padding: 0 6px 0 12px;
+  margin: 6px 2px 6px 0;
+  border-radius: 7px;
   color: @muted;
 }
+.tab:hover {
+  background: @surface_control;
+}
 .tab.active {
-  border-bottom-color: @text;
+  background: @surface_strong;
   color: @text;
 }
 .tab-name {
@@ -274,6 +286,7 @@ button.tool-btn:focus-visible {
 }
 .pane {
   background: @terminal_bg;
+  padding: 6px 4px 2px 8px;
 }
 .dot {
   min-width: 8px;
@@ -297,8 +310,8 @@ paned > separator:hover {
 /* ---- status bar ---- */
 .statusbar {
   background: @chrome;
-  border-top: 1px solid @line;
-  min-height: 29px;
+  border-top: 1px solid @edge;
+  min-height: 28px;
   padding: 0 12px 0 10px;
   color: @muted;
   font-size: 12px;
@@ -311,46 +324,30 @@ paned > separator:hover {
   color: @faint;
 }
 .status-kind {
+  margin-left: 18px;
   color: @muted;
 }
 
-/* ---- subscription and context readings ---- */
+/* ---- subscription and context readings (inside the status bar) ---- */
 .usage-strip {
-  background: @chrome;
-  border-top: 1px solid @line;
   color: @muted;
   font-size: 12px;
-}
-.usage-column {
-  padding: 4px 10px;
-}
-.usage-column + .usage-column {
-  border-left: 1px solid @line;
 }
 .usage-provider {
   color: @text;
   font-weight: 600;
 }
-levelbar.usage-bar trough {
-  min-height: 6px;
-  border-radius: 3px;
-  background: @line;
+.usage-name {
+  color: @faint;
 }
-levelbar.usage-bar block.filled {
-  border-radius: 3px;
-  background: @ok;
+label.usage-value.usage-warning {
+  color: @warn;
 }
-levelbar.usage-bar.usage-warning block.filled {
-  background: @warn;
-}
-levelbar.usage-bar.usage-danger block.filled {
-  background: @error;
+label.usage-value.usage-danger {
+  color: @error;
 }
 label.usage-stale {
   opacity: 0.55;
-}
-levelbar.usage-bar.usage-stale {
-  opacity: 0.45;
 }
 
 /* ---- tooltips and the shortcut list ---- */

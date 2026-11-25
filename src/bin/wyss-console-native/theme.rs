@@ -364,10 +364,14 @@ pub fn token(theme: Theme, name: &str) -> Option<&'static str> {
 
 /// The `@define-color` lines that go in front of `theme.css`.
 pub fn defines(theme: Theme) -> String {
-    tokens(theme)
+    let mut css: String = tokens(theme)
         .iter()
         .map(|(name, value)| format!("@define-color {} {};\n", name.replace('-', "_"), value))
-        .collect()
+        .collect();
+    // Bars are told apart by tone; only high contrast keeps a line between them.
+    let edge = if theme == Theme::HighContrast { token(theme, "line").unwrap_or("#ffffff") } else { "transparent" };
+    css.push_str(&format!("@define-color edge {edge};\n"));
+    css
 }
 
 thread_local! {
@@ -408,8 +412,16 @@ mod tests {
         let d = defines(Theme::Light);
         assert!(d.contains("@define-color surface_hover #ececec;"), "{d}");
         assert!(d.contains("@define-color bg #f5f5f5;"));
-        assert_eq!(d.lines().count(), tokens(Theme::Light).len());
+        // Every token plus the `edge` color of the lines between bars.
+        assert_eq!(d.lines().count(), tokens(Theme::Light).len() + 1);
         assert!(defines(Theme::HighContrast).contains("@define-color warn #ffff00;"));
+    }
+
+    #[test]
+    fn only_high_contrast_draws_lines_between_bars() {
+        assert!(defines(Theme::Dark).contains("@define-color edge transparent;"));
+        assert!(defines(Theme::Light).contains("@define-color edge transparent;"));
+        assert!(defines(Theme::HighContrast).contains("@define-color edge #ffffff;"));
     }
 
     #[test]

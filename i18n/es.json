@@ -106,7 +106,6 @@
     "Codex does not expose whether its terminal is ready to receive a queued prompt.": "Cola pausada. Codex no informa si su terminal puede recibir un prompt de la cola.",
     "Move down": "Bajar",
     "Move up": "Subir",
-    "No data": "sin dato",
     "Pause queue": "Pausar cola",
     "Prompt queue": "Cola de prompts",
     "Queue": "Cola",

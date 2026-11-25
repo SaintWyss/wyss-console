@@ -9,7 +9,7 @@ use crate::view::TermView;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Icon {
     Terminal,
-    Sliders,
+    Grid,
     Palette,
     Settings,
     Folder,
@@ -45,10 +45,10 @@ fn paths(icon: Icon, k: f32) -> (gsk::Path, Option<gsk::Path>) {
             line(&b, &[(5.0, 7.0), (10.5, 12.0), (5.0, 17.0)], k);
             line(&b, &[(13.0, 18.0), (19.0, 18.0)], k);
         }
-        Icon::Sliders => {
-            slider(&b, 6.0, 9.0, k);
-            slider(&b, 12.0, 15.0, k);
-            slider(&b, 18.0, 8.0, k);
+        Icon::Grid => {
+            for (x, y) in [(4.0, 4.0), (13.5, 4.0), (4.0, 13.5), (13.5, 13.5)] {
+                rrect(&b, x, y, 6.5, 6.5, 1.8, k);
+            }
         }
         Icon::Settings => {
             slider(&b, 8.0, 15.0, k);

@@ -245,7 +245,6 @@ pub const ES: &[(&str, &str)] = &[
     ("No commits yet", "Sin commits todavía"),
     ("No confirmation", "Sin confirmar"),
     ("No context at start. To add one, ask Claude.", "No ocupan contexto al iniciar. Para agregar uno, pedíselo a Claude."),
-    ("No data", "sin dato"),
     ("No key store (the Secret Service) is available, so nothing was kept. A key is never kept unsealed.", "No hay un almacén de claves (el Secret Service) disponible, así que no se guardó nada. Una clave nunca se guarda sin sellar."),
     ("No keys yet", "Todavía no hay claves"),
     ("No launch on this computer uses this preset. Deleting it syncs to the other computer; its launches are not visible here.", "Ningún lanzamiento de esta computadora usa este preset. Al borrarlo, el cambio se sincroniza con la otra computadora; sus lanzamientos no se ven acá."),

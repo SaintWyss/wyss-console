@@ -25,14 +25,15 @@ pub struct Strip {
 }
 
 struct Column {
+    root: gtk::Box,
     context: Meter,
     short: Meter,
     long: Meter,
 }
 
-/// One battery-style reading: a bar that fills and changes colour, then its percentage.
+/// One reading: its name and the percentage, which turns amber or red as it fills.
 struct Meter {
-    bar: gtk::LevelBar,
+    cell: gtk::Box,
     value: gtk::Label,
 }
 
@@ -40,9 +41,7 @@ impl Strip {
     pub fn new(host: Option<Host>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         root.add_css_class("usage-strip");
-        let columns = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        columns.set_homogeneous(true);
-        columns.set_hexpand(true);
+        let columns = gtk::Box::new(gtk::Orientation::Horizontal, 18);
         let claude = Column::new(&columns, "Claude Code");
         let codex = Column::new(&columns, "Codex");
         root.append(&columns);
@@ -163,19 +162,17 @@ fn one_line() -> gtk::Label {
 
 impl Column {
     fn new(root: &gtk::Box, title: &str) -> Self {
-        let col = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let col = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         col.add_css_class("usage-column");
         let heading = gtk::Label::new(Some(title));
-        heading.set_xalign(0.0);
         heading.add_css_class("usage-provider");
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        let context = Meter::new(&row, &tr("Context"));
-        let short = Meter::new(&row, "5 h");
-        let long = Meter::new(&row, &tr("Week"));
         col.append(&heading);
-        col.append(&row);
+        let context = Meter::new(&col, &tr("Context"));
+        let short = Meter::new(&col, "5 h");
+        let long = Meter::new(&col, &tr("Week"));
         root.append(&col);
         Self {
+            root: col,
             context,
             short,
             long,
@@ -183,6 +180,8 @@ impl Column {
     }
 
     fn paint(&self, plan: Plan, session: Option<&ActivitySession>, now: u64) {
+        // A provider with nothing to show takes no room in the bar.
+        self.root.set_visible(session.and_then(|s| s.context).is_some() || plan.five_hours.is_some() || plan.weekly.is_some());
         self.context
             .set(session.and_then(|s| s.context), None, false);
         // ponytail: only the 5 h window shows its reset; the weekly one is too far away to matter.
@@ -214,44 +213,30 @@ impl Meter {
     fn new(row: &gtk::Box, name: &str) -> Self {
         let cell = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let label = gtk::Label::new(Some(name));
-        let bar = gtk::LevelBar::for_interval(0.0, 100.0);
-        for offset in ["low", "high", "full"] {
-            bar.remove_offset_value(Some(offset));
-        }
-        bar.add_css_class("usage-bar");
-        bar.set_size_request(64, -1);
-        bar.set_valign(gtk::Align::Center);
+        label.add_css_class("usage-name");
         let value = gtk::Label::new(None);
+        value.add_css_class("usage-value");
         cell.append(&label);
-        cell.append(&bar);
         cell.append(&value);
         row.append(&cell);
-        Self { bar, value }
+        Self { cell, value }
     }
 
     fn set(&self, used: Option<f64>, extra: Option<String>, stale: bool) {
         for class in ["usage-warning", "usage-danger", "usage-stale"] {
-            self.bar.remove_css_class(class);
+            self.value.remove_css_class(class);
         }
-        let Some(used) = used else {
-            self.bar.set_value(0.0);
-            self.value.remove_css_class("usage-stale");
-            self.value.set_text(&tr("No data"));
-            return;
-        };
-        self.bar.set_value(used.clamp(0.0, 100.0));
+        self.cell.set_visible(used.is_some());
+        let Some(used) = used else { return };
         match usage::context_level(used) {
             Level::Normal => {}
-            Level::Warning => self.bar.add_css_class("usage-warning"),
-            Level::Danger => self.bar.add_css_class("usage-danger"),
+            Level::Warning => self.value.add_css_class("usage-warning"),
+            Level::Danger => self.value.add_css_class("usage-danger"),
         }
         let text = extra.map_or_else(|| percent(used), |e| format!("{} · {e}", percent(used)));
         self.value.set_text(&text);
         if stale {
-            self.bar.add_css_class("usage-stale");
             self.value.add_css_class("usage-stale");
-        } else {
-            self.value.remove_css_class("usage-stale");
         }
         self.value
             .set_tooltip_text(stale.then(|| tr("Stale reading")).as_deref());
