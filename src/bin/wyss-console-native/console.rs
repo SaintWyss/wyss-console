@@ -569,17 +569,23 @@ impl Ui {
     fn show_tab_more(self: &Rc<Self>) {
         let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
         for i in self.hidden_tabs() {
-            let name = self.tabs.borrow()[i]
-                .head
-                .first_child()
-                .and_downcast::<gtk::Label>()
-                .map(|l| l.label().to_string())
-                .unwrap_or_default();
-            let item = gtk::Button::with_label(&name);
+            let (name, ram) = {
+                let tabs = self.tabs.borrow();
+                let t = &tabs[i];
+                let name = t.head.first_child().and_downcast::<gtk::Label>().map(|l| l.label().to_string()).unwrap_or_default();
+                (name, if t.ram.is_visible() { t.ram.label().to_string() } else { procinfo::mb(None) })
+            };
+            let item = gtk::Button::new();
             item.add_css_class("tab-more-item");
-            if let Some(l) = item.child().and_downcast::<gtk::Label>() {
-                l.set_xalign(0.0);
-            }
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+            let title = label(&name, "tab-name");
+            title.set_hexpand(true);
+            title.set_xalign(0.0);
+            let ram = label(&ram, "tab-ram");
+            ram.set_margin_start(0);
+            row.append(&title);
+            row.append(&ram);
+            item.set_child(Some(&row));
             let weak = Rc::downgrade(self);
             item.connect_clicked(move |_| {
                 if let Some(ui) = weak.upgrade() {
