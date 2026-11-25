@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use wyss_console::native::arsenal::{ArsenalLaunch, InstructionReview};
+use wyss_console::native::arsenal::ArsenalLaunch;
 
 use crate::host::{Host, HostError, ListEntry};
 use crate::i18n::{tr, trf};
@@ -210,14 +210,9 @@ pub fn started_with(profile: Option<&str>) -> Option<String> {
     }
 }
 
-/// The label of an agent's session in the status bar: `Native · {agent}` and, when the agent was
-/// started with a permission, ` · ` and the permission.
-pub fn agent_label(tag: &Tag) -> String {
-    let kind = trf("Native · {agent}", &[("agent", &tag.agent_name)]);
-    match started_with(tag.profile.as_deref()) {
-        Some(p) => format!("{kind} · {p}"),
-        None => kind,
-    }
+/// What the status bar says of an agent's session: the permission it was started with, if any.
+pub fn permission_label(tag: &Tag) -> Option<String> {
+    started_with(tag.profile.as_deref())
 }
 
 // ---- failure words -----------------------------------------------------------------------
@@ -316,102 +311,6 @@ pub fn start(host: &Host, agent: &str, project: &str, profile: Option<&str>, ars
         params["arsenal"] = arsenal.clone();
     }
     parse_started(&host.call("native_start", params)?)
-}
-
-/// `native_restart`. A session with full access is restarted only with `checked`: a preview of
-/// its own start ([`prepare_restart`]) the owner confirmed, whose token the host consumes.
-#[cfg(test)]
-pub fn restart(host: &Host, id: &str, checked: Option<&Preview>) -> Result<Started, HostError> {
-    restart_with_review(host, id, checked, None)
-}
-
-pub fn restart_with_review(
-    host: &Host, id: &str, checked: Option<&Preview>, review: Option<&InstructionReview>,
-) -> Result<Started, HostError> {
-    let mut params = json!({"id": id, "size": {"rows": FIRST_SIZE.0, "cols": FIRST_SIZE.1}});
-    if let Some(preview) = checked {
-        params["plan_token"] = json!(preview.plan_token);
-        params["expected_cli_version"] = json!(preview.provider_version);
-    }
-    if let Some(review) = review {
-        params["review"] = json!(review);
-    }
-    parse_started(&host.call("native_restart", params)?)
-}
-
-pub enum Restart {
-    Started(Box<Started>),
-    Confirm(Preview, Option<InstructionReview>),
-    Cancelled,
-}
-
-#[cfg(test)]
-pub fn prepare_restart(host: &Host, id: &str) -> Result<Restart, HostError> {
-    prepare_restart_using(host, id, None).map_err(|error| match error {
-        RestartError::Host(error) => error,
-        RestartError::Review(_) => unreachable!("no selector in this test"),
-    })
-}
-
-pub enum RestartError {
-    Host(HostError),
-    Review(String),
-}
-
-impl From<HostError> for RestartError {
-    fn from(error: HostError) -> Self { Self::Host(error) }
-}
-
-/// Uses the host's current profile plan and gives a preset another review before restarting.
-pub fn prepare_restart_select(
-    host: &Host, id: &str, select: &ReviewFor<'_>,
-) -> Result<Restart, RestartError> {
-    prepare_restart_using(host, id, Some(select))
-}
-
-fn prepare_restart_using(
-    host: &Host, id: &str, select: Option<&ReviewFor<'_>>,
-) -> Result<Restart, RestartError> {
-    let mut session = sessions(host)?.into_iter().find(|s| s.id == id)
-        .ok_or_else(|| HostError::Remote { code: "session_unknown".into(), reasons: vec![] })?;
-    let agent = session.agent_id.as_deref().ok_or_else(|| bad("session has no agent"))?;
-    let mut review = None;
-    if let (Some(select), Some(arsenal)) = (select, session.arsenal.as_mut()) {
-        let mut launch: ArsenalLaunch = serde_json::from_value(arsenal.clone())
-            .map_err(|_| bad("invalid session preset"))?;
-        let previous = launch.review();
-        if !select(&mut launch, agent, &session.project, true).map_err(RestartError::Review)? {
-            return Ok(Restart::Cancelled);
-        }
-        if launch.review() != previous {
-            review = Some(launch.review());
-            *arsenal = serde_json::to_value(launch).map_err(|_| bad("invalid review"))?;
-        }
-    }
-    if !full_access(&session) {
-        match restart_with_review(host, id, None, review.as_ref()) {
-            Err(HostError::Remote { code, .. }) if code == "restart_needs_preview" => {}
-            result => return Ok(Restart::Started(Box::new(result?))),
-        }
-    }
-    let preview = preview(host, agent, session.profile_id.as_deref(), session.arsenal.as_ref())?;
-    if preview.can_start && preview.bypass == Some(false) {
-        Ok(Restart::Started(Box::new(restart_with_review(host, id, Some(&preview), review.as_ref())?)))
-    } else {
-        Ok(Restart::Confirm(preview, review))
-    }
-}
-
-fn full_access(session: &Session) -> bool {
-    session.restart_bypass == Some(true)
-}
-
-pub fn stop(host: &Host, id: &str) -> Result<(), HostError> {
-    host.call("native_stop", json!({"id": id})).map(|_| ())
-}
-
-pub fn forget(host: &Host, id: &str) -> Result<(), HostError> {
-    host.call("native_forget", json!({"id": id})).map(|_| ())
 }
 
 pub fn sessions(host: &Host) -> Result<Vec<Session>, HostError> {
@@ -688,17 +587,6 @@ mod tests {
     }
 
     #[test]
-    fn restart_access_uses_the_host_plan_instead_of_the_profile_name() {
-        let mut row = session_answer("running");
-        row["profile"]["name"] = json!("Custom automation");
-        row["restart_bypass"] = json!(true);
-        assert!(full_access(&parse_session(&row).unwrap()));
-        row["profile"]["name"] = json!("Full access (bypass)");
-        row["restart_bypass"] = json!(false);
-        assert!(!full_access(&parse_session(&row).unwrap()));
-    }
-
-    #[test]
     fn previews_sessions_and_replies_are_read() {
         let p = parse_preview(&json!({"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok", "through_shell": true, "with_cost": []})).unwrap();
         assert_eq!(
@@ -729,13 +617,13 @@ mod tests {
     }
 
     #[test]
-    fn the_tag_of_a_terminal_labels_the_agent_like_the_session_bar() {
+    fn the_tag_of_a_terminal_labels_the_permission_like_the_session_bar() {
         let tag = parse_tag(&json!({"session_id": "s", "agent_name": "Claude Code", "project": "/home/o", "profile": "Full access (bypass)", "through_shell": true})).unwrap();
-        assert_eq!(agent_label(&tag), "Native · Claude Code · Full access");
+        assert_eq!(permission_label(&tag).as_deref(), Some("Full access"));
         let plain = Tag { profile: None, ..tag.clone() };
-        assert_eq!(agent_label(&plain), "Native · Claude Code");
+        assert_eq!(permission_label(&plain), None);
         let old = Tag { profile: Some("My old profile".into()), ..tag.clone() };
-        assert_eq!(agent_label(&old), "Native · Claude Code · Profile My old profile");
+        assert_eq!(permission_label(&old).as_deref(), Some("Profile My old profile"));
         assert_eq!(started_with(Some("As configured")), None);
         assert_eq!(started_with(Some("Strict")).as_deref(), Some("Ask before acting"));
         assert_eq!(started_with(Some("Review, read only")).as_deref(), Some("Read only"));
@@ -880,20 +768,6 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_preview_names_the_exclusion_the_session_started_with() {
-        let mut row = session_answer("running");
-        row["restart_bypass"] = json!(true);
-        row["arsenal"] = json!({"selection": "s-1", "skills_off": ["design"]});
-        let (path, h) = fake_host(vec![
-            ("native_sessions", json!({"ok": [row]})),
-            ("native_preview", json!({"ok": {"applied": [], "can_start": true, "not_applicable": [], "plan_token": "tok", "through_shell": true, "with_cost": []}})),
-        ]);
-        let Restart::Confirm(_, _) = prepare_restart(&Host::new(&path), "0123456789abcdef0123456789abcdef").unwrap() else { panic!("asks") };
-        let seen = h.join().unwrap();
-        assert_eq!(seen[1]["params"]["arsenal"], json!({"selection": "s-1", "skills_off": ["design"]}));
-    }
-
-    #[test]
     fn host_failures_become_the_consoles_sentences() {
         let (path, _h) = fake_host(vec![("native_preview", json!({"err": {"code": "agent_not_installed", "reasons": [], "bytes_written": 0}}))]);
         let home = std::env::temp_dir().to_string_lossy().into_owned();
@@ -903,47 +777,10 @@ mod tests {
     }
 
     #[test]
-    fn stop_restart_forget_and_sessions_send_what_the_console_sends() {
-        let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-10"}});
-        let (path, h) = fake_host(vec![
-            ("native_stop", json!({"ok": null})),
-            ("native_restart", json!({"ok": reply})),
-            ("native_forget", json!({"ok": null})),
-            ("native_sessions", json!({"ok": [session_answer("stopped")]})),
-        ]);
-        let host = Host::new(&path);
-        stop(&host, "sid").unwrap();
-        assert_eq!(restart(&host, "sid", None).unwrap().terminal_id, "t-10");
-        forget(&host, "sid").unwrap();
-        assert_eq!(sessions(&host).unwrap()[0].state, "stopped");
-        let seen = h.join().unwrap();
-        assert_eq!(seen[0]["params"], json!({"id": "sid"}));
-        assert_eq!(seen[1]["params"], json!({"id": "sid", "size": {"rows": 24, "cols": 80}}));
-        assert_eq!(seen[2]["params"], json!({"id": "sid"}));
-        assert_eq!(seen[3]["params"], json!({"sample": false}));
-    }
-
-    #[test]
-    fn a_full_access_restart_previews_the_sessions_own_start_and_sends_its_token() {
-        let reply = json!({"session": session_answer("running"), "terminal": {"terminal_id": "t-11"}});
-        let mut custom = session_answer("running");
-        custom["profile"]["name"] = json!("Custom automation");
-        custom["restart_bypass"] = json!(true);
-        let (path, h) = fake_host(vec![
-            ("native_sessions", json!({"ok": [custom]})),
-            ("native_preview", json!({"ok": {"can_start": true, "plan_token": "tok-r", "provider_version": "codex-cli 0.159.0"}})),
-            ("native_restart", json!({"ok": reply})),
-        ]);
-        let host = Host::new(&path);
-        let id = "0123456789abcdef0123456789abcdef";
-        let Restart::Confirm(pre, _) = prepare_restart(&host, id).unwrap() else {
-            panic!("bypass restart did not ask for confirmation");
-        };
-        assert_eq!(restart(&host, id, Some(&pre)).unwrap().terminal_id, "t-11");
-        let seen = h.join().unwrap();
-        assert_eq!(seen[1]["params"], json!({"agent_id": "codex", "profile_id": "template-full-access"}));
-        assert_eq!(seen[2]["params"], json!({"id": id, "size": {"rows": 24, "cols": 80}, "plan_token": "tok-r", "expected_cli_version": "codex-cli 0.159.0"}));
-
+    fn sessions_ask_the_host_without_sampling() {
+        let (path, h) = fake_host(vec![("native_sessions", json!({"ok": [session_answer("stopped")]}))]);
+        assert_eq!(sessions(&Host::new(&path)).unwrap()[0].state, "stopped");
+        assert_eq!(h.join().unwrap()[0]["params"], json!({"sample": false}));
     }
 
     #[test]

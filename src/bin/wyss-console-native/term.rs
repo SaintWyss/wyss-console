@@ -835,10 +835,6 @@ impl Terminal {
         Terminal { widget: area, local_pid, state }
     }
 
-    pub fn queue_input_state(&self) -> (bool, u64) {
-        (self.state.shared.lock().bracketed_paste(), self.state.input_revision.get())
-    }
-
     pub fn type_text(&self, text: &str) {
         // This entry point neither submits input nor accepts terminal control sequences.
         if !text.chars().any(char::is_control) {

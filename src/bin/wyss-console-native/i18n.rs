@@ -80,11 +80,9 @@ mod tests {
 
     #[test]
     fn spanish_comes_from_the_consoles_table_and_english_is_the_key() {
-        assert_eq!(translate(Lang::Es, "Stop"), "Parar");
-        assert_eq!(translate(Lang::Es, "Restart"), "Reiniciar");
-        assert_eq!(translate(Lang::Es, "Forget"), "Olvidar");
+        assert_eq!(translate(Lang::Es, "Close the pane"), "Cerrar el panel");
         assert_eq!(translate(Lang::Es, "Launch"), "Lanzar");
-        assert_eq!(translate(Lang::En, "Stop"), "Stop");
+        assert_eq!(translate(Lang::En, "Close the pane"), "Close the pane");
         assert_eq!(translate(Lang::Es, "A sentence nobody translated"), "A sentence nobody translated");
     }
 

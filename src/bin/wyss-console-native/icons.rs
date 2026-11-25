@@ -13,8 +13,6 @@ pub enum Icon {
     Palette,
     Settings,
     Folder,
-    SplitRow,
-    SplitCol,
     Keyboard,
 }
 
@@ -63,14 +61,6 @@ fn paths(icon: Icon, k: f32) -> (gsk::Path, Option<gsk::Path>) {
             dots = Some(d);
         }
         Icon::Folder => line(&b, &[(3.0, 7.0), (3.0, 18.0), (21.0, 18.0), (21.0, 9.0), (11.5, 9.0), (9.5, 6.0), (3.0, 6.0), (3.0, 7.0)], k),
-        Icon::SplitRow => {
-            rrect(&b, 3.0, 4.0, 18.0, 16.0, 2.5, k);
-            line(&b, &[(12.0, 4.0), (12.0, 20.0)], k);
-        }
-        Icon::SplitCol => {
-            rrect(&b, 3.0, 4.0, 18.0, 16.0, 2.5, k);
-            line(&b, &[(3.0, 12.0), (21.0, 12.0)], k);
-        }
         Icon::Keyboard => {
             rrect(&b, 2.0, 6.0, 20.0, 12.0, 2.5, k);
             for x in [6.0, 10.0, 14.0, 18.0] {

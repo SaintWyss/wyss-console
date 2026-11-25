@@ -19,41 +19,29 @@ window.console {
   background: none;
   box-shadow: none;
 }
-/* Traffic lights centered in the corner cell above the rail (12px circles, 6px apart). */
-.corner {
-  background: @chrome;
-  border-bottom: 1px solid @edge;
-  min-width: 51px;
-  min-height: 39px;
+/* The window buttons at the end of the tab bar: the system's icons, flat. */
+.window-buttons {
+  margin: 0 0 0 6px;
 }
-.lights button.light {
-  min-width: 12px;
-  min-height: 12px;
+.window-buttons button {
+  min-width: 28px;
+  min-height: 28px;
   padding: 0;
-  margin: 0;
+  margin-left: 2px;
   border: none;
-  border-radius: 50%;
-  color: transparent;
-  font-size: 11px;
-  font-weight: 800;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: @muted;
 }
-/* Lit from the top with a 1px darker rim, like the macOS buttons. */
-.lights button.light.close {
-  background: linear-gradient(#ff6d65, #fb5149);
-  box-shadow: inset 0 0 0 1px #d9413a, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
+.window-buttons button:hover {
+  background: @surface_hover;
+  color: @text;
 }
-.lights button.light.minimize {
-  background: linear-gradient(#ffc845, #f9b32a);
-  box-shadow: inset 0 0 0 1px #cf9a22, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
+.window-buttons button.close:hover {
+  background: @error;
+  color: @text_on_accent;
 }
-.lights button.light.maximize {
-  background: linear-gradient(#38d555, #21c03b);
-  box-shadow: inset 0 0 0 1px #1ea530, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
-}
-.lights:hover button.light { color: alpha(black, 0.6); }
-.lights button.light:active { filter: brightness(0.8); }
-.lights button.light label { padding: 0; margin: -3px 0; }
-window.console:backdrop .lights button.light { background: @surface_hover; box-shadow: inset 0 0 0 1px @line; color: transparent; }
 
 window.console * {
   -gtk-icon-style: symbolic;
@@ -170,7 +158,7 @@ scrollbar slider:hover, scrollbar slider:active {
   background: @chrome;
   border-right: 1px solid @edge;
   min-width: 51px;
-  padding: 11px 0;
+  padding: 2px 0 11px;
 }
 .rail-marker {
   min-width: 3px;
@@ -213,16 +201,13 @@ button.rail-btn:focus-visible {
   padding: 0 8px 0 8px;
 }
 .tab {
-  padding: 0 6px 0 12px;
-  margin: 6px 2px 6px 0;
-  border-radius: 7px;
+  padding: 0 10px 0 10px;
+  margin: 0 2px 0 0;
+  border-bottom: 2px solid transparent;
   color: @muted;
 }
-.tab:hover {
-  background: @surface_control;
-}
 .tab.active {
-  background: @surface_strong;
+  border-bottom-color: @text;
   color: @text;
 }
 .tab-name {
@@ -330,6 +315,7 @@ paned > separator:hover {
 
 /* ---- subscription and context readings (inside the status bar) ---- */
 .usage-strip {
+  margin: 0 8px 0 20px;
   color: @muted;
   font-size: 12px;
 }
@@ -380,13 +366,11 @@ popover.shortcuts .shortcut-title {
   margin-bottom: 6px;
 }
 
-/* ---- pane header: agent label and lifecycle buttons ---- */
+/* ---- pane header: the × of a pane ---- */
 .pane-actions {
   margin-left: 6px;
 }
-button.hdr-btn,
-menubutton.hdr-btn > button,
-menubutton.hdr-btn > button.toggle {
+button.hdr-btn {
   min-height: 20px;
   padding: 0 8px;
   margin-left: 6px;
@@ -398,8 +382,7 @@ menubutton.hdr-btn > button.toggle {
   font-family: 'IBM Plex Sans', 'Inter', sans-serif;
   font-size: 12px;
 }
-button.hdr-btn:hover,
-menubutton.hdr-btn > button:hover {
+button.hdr-btn:hover {
   background: @surface_hover;
   color: @text;
 }

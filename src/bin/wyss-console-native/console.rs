@@ -22,7 +22,7 @@ use crate::{launches, native, search, settings, t, theme};
 use wyss_console::settings::{Preferences, SettingsService};
 
 const THEME: &str = include_str!("theme.css");
-/// Set (`WYSS_CONSOLE_DEMO=launch-menu,search:text,stop`) to open the menu, search, or stop the first agent
+/// Set (`WYSS_CONSOLE_DEMO=launch-menu,search:text`) to open the menu or the search
 /// by itself, so a screenshot can show those states without a keyboard.
 const DEMO_VAR: &str = "WYSS_CONSOLE_DEMO";
 const REFRESH_SECS: u32 = 2;
@@ -83,23 +83,6 @@ struct Info {
     git: Option<Git>,
 }
 
-/// What a pane's header buttons do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PaneAct {
-    Stop,
-    Restart,
-    Forget,
-    Close,
-}
-
-/// The header buttons of a pane: the agent's lifecycle, and Close for a plain shell.
-struct HeaderButtons {
-    stop: gtk::Button,
-    restart: gtk::Button,
-    forget: gtk::Button,
-    close: gtk::Button,
-}
-
 /// The search bar of a pane (Ctrl+Shift+F).
 struct FindBar {
     bar: gtk::Box,
@@ -113,9 +96,8 @@ struct Pane {
     id: u64,
     term: term::Terminal,
     root: gtk::Box,
-    /// Queue, stop, restart, forget and close; shown in the status bar while the pane has focus.
+    /// The pane's × (closes just that pane); shown in the top bar while the tab is split.
     actions: gtk::Box,
-    buttons: HeaderButtons,
     find: FindBar,
     info: RefCell<Info>,
     /// Set when the terminal is an agent's: what the host says about its session.
@@ -123,7 +105,6 @@ struct Pane {
     /// What the session's state offers (stop and restart, or start again and forget); `None` until
     /// the first read of `native_sessions`, and for a start that is still being prepared.
     life: Cell<Option<native::Lifecycle>>,
-    queue: Option<Rc<activity::QueuePanel>>,
 }
 
 struct Tab {
@@ -220,30 +201,8 @@ impl Ui {
         root.set_overflow(gtk::Overflow::Hidden);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         header.add_css_class("pane-actions");
-        let buttons = HeaderButtons {
-            stop: self.header_button(&tr("Stop"), &key, PaneAct::Stop),
-            restart: self.header_button(&tr("Restart"), &key, PaneAct::Restart),
-            forget: self.header_button(&tr("Forget"), &key, PaneAct::Forget),
-            close: self.header_button("×", &key, PaneAct::Close),
-        };
-        buttons.close.add_css_class("hdr-close");
-        buttons.close.set_tooltip_text(Some(&tr("Close the pane")));
-        for b in [&buttons.stop, &buttons.restart, &buttons.forget] {
-            b.set_visible(false);
-        }
-        for w in [buttons.stop.upcast_ref::<gtk::Widget>(), buttons.restart.upcast_ref(), buttons.forget.upcast_ref(), buttons.close.upcast_ref()] {
-            header.append(w);
-        }
-        let queue = self.host.as_ref().zip(tag.as_ref()).zip(tid.as_ref())
-            .filter(|((_, tag), _)| matches!(tag.agent_name.as_str(), "Claude Code" | "Codex"))
-            .map(|((host, tag), tid)| {
-                let panel = activity::QueuePanel::new(
-                    host.clone(), tag.session_id.clone(), Some(tid.clone()), tag.agent_name == "Codex",
-                );
-                panel.button.set_valign(gtk::Align::Center);
-                header.prepend(&panel.button);
-                panel
-            });
+        let pane_close = self.close_button(&key);
+        header.append(&pane_close);
 
         // Search bar (Ctrl+Shift+F), closed until asked for.
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -290,12 +249,10 @@ impl Ui {
             term: t,
             root,
             actions: header,
-            buttons,
             find: FindBar { bar, entry, count },
             info: RefCell::new(Info { running: true, ..Info::default() }),
             native: RefCell::new(tag),
             life: Cell::new(None),
-            queue,
         });
         // The search bar talks to this pane only; a weak reference keeps the widgets from holding it alive.
         {
@@ -349,35 +306,24 @@ impl Ui {
         }
         self.panes.borrow_mut().insert(key.clone(), pane.clone());
         self.by_id.borrow_mut().insert(id, key);
-        self.paint_header(&pane);
         pane
     }
 
-    fn header_button(self: &Rc<Self>, text: &str, key: &str, act: PaneAct) -> gtk::Button {
-        let b = gtk::Button::with_label(text);
+    /// The × of a pane: closes just that pane.
+    fn close_button(self: &Rc<Self>, key: &str) -> gtk::Button {
+        let b = gtk::Button::with_label("×");
         b.add_css_class("hdr-btn");
+        b.add_css_class("hdr-close");
+        b.set_tooltip_text(Some(&tr("Close the pane")));
         b.set_valign(gtk::Align::Center);
         b.set_focusable(false);
         let (weak, key) = (Rc::downgrade(self), key.to_owned());
         b.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
-                ui.pane_act(&key, act);
+                ui.remove_pane(&key, true);
             }
         });
         b
-    }
-
-    /// The header of a pane as its facts say: shell or agent label, state, memory, and the buttons
-    /// that fit (stop and restart while an agent runs; start again and forget once it is finished;
-    /// close for a plain shell).
-    fn paint_header(&self, p: &Pane) {
-        let is_agent = p.native.borrow().is_some();
-        let life = p.life.get().filter(|_| is_agent);
-        p.buttons.stop.set_visible(life == Some(native::Lifecycle::Running));
-        p.buttons.restart.set_visible(life.is_some());
-        p.buttons.restart.set_label(&if life == Some(native::Lifecycle::Running) { tr("Restart") } else { tr("Start it again") });
-        p.buttons.forget.set_visible(life == Some(native::Lifecycle::Finished));
-        p.buttons.close.set_visible(!is_agent);
     }
 
     fn paint_count(p: &Pane, (total, selected): (usize, Option<usize>)) {
@@ -409,10 +355,9 @@ impl Ui {
     fn on_exit(self: &Rc<Self>, id: u64) {
         let key = self.by_id.borrow().get(&id).cloned();
         if let Some(key) = key {
-            // An agent that ended keeps its pane: the owner restarts or forgets it from the header.
+            // An agent that ended keeps its pane, so its last output can still be read; it closes with its tab.
             if let Some(p) = self.pane(&key).filter(|p| p.native.borrow().is_some()) {
                 p.info.borrow_mut().running = false;
-                self.paint_header(&p);
                 self.refresh_soon();
                 return;
             }
@@ -854,7 +799,6 @@ impl Ui {
 
     fn project_agent_unavailable(self: &Rc<Self>, pane: &Pane) {
         pane.life.set(None);
-        self.paint_header(pane);
         self.update_status();
         self.banner(&tr(t!("The agent is no longer running in this terminal's foreground.")), true);
     }
@@ -883,11 +827,18 @@ impl Ui {
             }
         }
         self.paint_activity();
-        self.kind.set_text(&tag.map(|t| native::agent_label(&t)).unwrap_or_else(|| tr("Terminal")));
+        // The tab already names a plain terminal; an agent shows only the permission it was started with.
+        let permission = tag.as_ref().and_then(native::permission_label);
+        self.kind.set_visible(permission.is_some());
+        if let Some(p) = &permission {
+            self.kind.set_text(p);
+        }
         while let Some(child) = self.pane_actions.first_child() {
             self.pane_actions.remove(&child);
         }
-        if let Some(p) = self.focused() {
+        // In a split, the focused pane keeps its × to close just that pane.
+        let split = self.tabs.borrow().get(self.active.get()).is_some_and(|t| layout::leaves(&t.tree).len() >= 2);
+        if let Some(p) = self.focused().filter(|_| split) {
             self.pane_actions.append(&p.actions);
         }
     }
@@ -908,20 +859,9 @@ impl Ui {
             let result = gtk::gio::spawn_blocking(move || activity::snapshot(host.as_ref())).await;
             let Some(ui) = weak.upgrade() else { return };
             ui.activity_refreshing.set(false);
-            let (view, reachable) = result.unwrap_or_default();
+            let (view, _) = result.unwrap_or_default();
             ui.activity.replace(view);
             ui.paint_activity();
-            let activity = ui.activity.borrow();
-            for pane in ui.panes.borrow().values() {
-                if let Some(panel) = &pane.queue {
-                    let tag = pane.native.borrow();
-                    let info = reachable.then_some(()).and_then(|()| {
-                        let id = &tag.as_ref()?.session_id;
-                        activity.sessions.iter().find(|s| &s.id == id)
-                    });
-                    panel.observe(info, pane.term.queue_input_state());
-                }
-            }
         });
     }
 
@@ -987,7 +927,6 @@ impl Ui {
             if p.find.bar.is_visible() {
                 Ui::paint_count(&p, p.term.find_info());
             }
-            self.paint_header(&p);
         }
         for i in 0..self.tabs.borrow().len() {
             self.refresh_tab_labels(i);
@@ -1264,107 +1203,6 @@ impl Ui {
         self.add_host_tab(started.terminal_id.clone(), Some(tag));
     }
 
-    /// A header button: the agent's lifecycle goes to the host off the GTK thread; Close is local.
-    fn pane_act(self: &Rc<Self>, key: &str, act: PaneAct) {
-        if act == PaneAct::Close {
-            self.remove_pane(key, true);
-            return;
-        }
-        let (Some(host), Some(tag)) = (self.host.clone(), self.pane(key).and_then(|p| p.native.borrow().clone())) else { return };
-        self.banner("", false);
-        let key = key.to_owned();
-        std::thread::spawn(move || {
-            let result = match act {
-                PaneAct::Stop => native::stop(&host, &tag.session_id).map(|_| None),
-                PaneAct::Forget => native::forget(&host, &tag.session_id).map(|_| None),
-                PaneAct::Restart => match native::prepare_restart_select(&host, &tag.session_id, &review_project_instructions) {
-                    Ok(native::Restart::Started(started)) => Ok(Some(*started)),
-                    Ok(native::Restart::Confirm(preview, review)) => {
-                        glib::MainContext::default().invoke(move || {
-                            UI.with(|u| {
-                                if let Some(ui) = u.borrow().clone() {
-                                    ui.confirm_full_restart(&key, tag.session_id, preview, review);
-                                }
-                            });
-                        });
-                        return;
-                    }
-                    Ok(native::Restart::Cancelled) => return,
-                    Err(native::RestartError::Host(error)) => Err(error),
-                    Err(native::RestartError::Review(reason)) => {
-                        glib::MainContext::default().invoke(move || UI.with(|ui| {
-                            if let Some(ui) = ui.borrow().clone() { ui.banner(&reason, true); }
-                        }));
-                        return;
-                    }
-                },
-                PaneAct::Close => unreachable!("handled above"),
-            };
-            glib::MainContext::default().invoke(move || {
-                UI.with(|u| {
-                    if let Some(ui) = u.borrow().clone() {
-                        ui.acted(&key, act, result);
-                    }
-                });
-            });
-        });
-    }
-
-    /// Asks, as a launch with full access does, before restarting a session with full access;
-    /// accepting restarts it with the token of the preview just made, which the host consumes.
-    fn confirm_full_restart(self: &Rc<Self>, key: &str, id: String, preview: native::Preview, review: Option<wyss_console::native::arsenal::InstructionReview>) {
-        if !preview.can_start || preview.plan_token.is_none() {
-            return self.banner(&native::failure_text("profile_not_applicable"), true);
-        }
-        let Some(host) = self.host.clone() else { return };
-        let dialog = gtk::AlertDialog::builder()
-            .modal(true)
-            .message(tr(crate::t!("Restart with full access?")))
-            .detail(tr(crate::t!("It starts the agent with full access: no permission prompts and no sandbox.")))
-            .buttons([tr(crate::t!("Cancel")), tr(crate::t!("Restart"))])
-            .default_button(0)
-            .cancel_button(0)
-            .build();
-        let key = key.to_owned();
-        dialog.choose(Some(&self.win), gtk::gio::Cancellable::NONE, move |answer| {
-            if answer != Ok(1) {
-                return;
-            }
-            let review = review.clone();
-            std::thread::spawn(move || {
-                let result = native::restart_with_review(&host, &id, Some(&preview), review.as_ref()).map(Some);
-                glib::MainContext::default().invoke(move || {
-                    UI.with(|u| {
-                        if let Some(ui) = u.borrow().clone() {
-                            ui.acted(&key, PaneAct::Restart, result);
-                        }
-                    });
-                });
-            });
-        });
-    }
-
-    fn acted(self: &Rc<Self>, key: &str, act: PaneAct, result: Result<Option<native::Started>, crate::host::HostError>) {
-        match (act, result) {
-            (_, Err(e)) => {
-                self.banner(&native::explain(&e), true);
-                self.refresh_soon();
-            }
-            (PaneAct::Stop, Ok(_)) => self.refresh_soon(),
-            (PaneAct::Forget, Ok(_)) => self.remove_pane(key, true),
-            (PaneAct::Restart, Ok(Some(started))) => {
-                // Open the restarted agent in a new tab and remove the pane for the stopped session.
-                self.add_agent_tab(&started);
-                self.remove_pane(key, true);
-                let notes = native::start_notes(&started);
-                if !notes.is_empty() {
-                    self.banner(&notes.join(" "), false);
-                }
-            }
-            _ => {}
-        }
-    }
-
     // ---- persistence ----------------------------------------------------------------------
 
     fn snapshot(&self) -> SavedLayout {
@@ -1456,30 +1294,6 @@ fn rail_button(icon: Icon, tip: &str, active: bool) -> (gtk::Box, gtk::Button) {
     (row, b)
 }
 
-/// Close / minimize / maximize as round buttons, centered in the corner cell above the rail; the glyphs show while the pointer is over the group.
-fn traffic_lights(win: &gtk::ApplicationWindow) -> gtk::Box {
-    let lights = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    lights.add_css_class("lights");
-    lights.set_halign(gtk::Align::Center);
-    lights.set_valign(gtk::Align::Center);
-    lights.set_hexpand(true);
-    for (class, glyph, name) in [("close", "×", "Close"), ("minimize", "−", "Minimize"), ("maximize", "+", "Maximize")] {
-        let b = gtk::Button::with_label(glyph);
-        b.add_css_class("light");
-        b.add_css_class(class);
-        b.set_focusable(false);
-        b.update_property(&[gtk::accessible::Property::Label(name)]);
-        let win = win.clone();
-        b.connect_clicked(move |_| match class {
-            "close" => win.close(),
-            "minimize" => win.minimize(),
-            _ => win.set_maximized(!win.is_maximized()),
-        });
-        lights.append(&b);
-    }
-    lights
-}
-
 fn tool_button(icon: Icon, tip: &str) -> gtk::Button {
     let b = gtk::Button::new();
     b.set_child(Some(&icons::widget(icon, 16)));
@@ -1555,6 +1369,9 @@ pub fn build(
     let rail_gap = gtk::Box::new(gtk::Orientation::Vertical, 0);
     rail_gap.set_vexpand(true);
     rail.append(&rail_gap);
+    // The shortcut list sits right above Settings.
+    let (keys_row, keys) = rail_button(Icon::Keyboard, &tr("Keyboard shortcuts"), false);
+    rail.append(&keys_row);
     rail.append(&settings_row);
 
     // Tab bar.
@@ -1562,14 +1379,13 @@ pub fn build(
     tab_strip.set_hexpand(true);
     let tools = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tools.add_css_class("tools");
-    let split_row = tool_button(Icon::SplitRow, &tr("Split side by side (Ctrl+Shift+D)"));
-    let split_col = tool_button(Icon::SplitCol, &tr("Split, one above the other (Ctrl+Shift+E)"));
     let project_btn = tool_button(Icon::Folder, &tr("Project (Ctrl+Shift+P)"));
     project_btn.update_property(&[gtk::accessible::Property::Label(&tr("Project"))]);
-    let keys = tool_button(Icon::Keyboard, &tr("Keyboard shortcuts"));
-    for b in [&split_row, &split_col, &project_btn, &keys] {
-        tools.append(b);
-    }
+    tools.append(&project_btn);
+    // The agent's buttons (Queue, Stop, Restart) and the pane's × go between Project and Launch.
+    let pane_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    pane_actions.set_valign(gtk::Align::Center);
+    tools.append(&pane_actions);
     let launch_btn = gtk::Button::with_label(&format!("+ {}", tr("Launch")));
     launch_btn.add_css_class("launch-btn");
     launch_btn.set_valign(gtk::Align::Center);
@@ -1580,6 +1396,11 @@ pub fn build(
     tabbar.add_css_class("tabbar");
     tabbar.append(&tab_strip);
     tabbar.append(&tools);
+    // The window buttons of the system (its icons and its decoration layout), at the end of the bar.
+    let controls = gtk::WindowControls::new(gtk::PackType::End);
+    controls.add_css_class("window-buttons");
+    controls.set_valign(gtk::Align::Center);
+    tabbar.append(&controls);
     // Dragging the tab bar moves the window (there is no system title bar).
     let tabbar_handle = gtk::WindowHandle::new();
     tabbar_handle.set_child(Some(&tabbar));
@@ -1593,14 +1414,14 @@ pub fn build(
     status.add_css_class("statusbar");
     let folder_icon = icons::widget(Icon::Folder, 14);
     let folder = label("", "status-folder");
+    folder.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     let git = label("", "status-git");
     let kind = label(&tr("Terminal"), "status-kind");
     // One bottom bar: folder and branch on the left, the Claude / Codex readings and the pane on the right.
-    let activity_strip = activity::Strip::new(cfg.host.clone());
+    let activity_strip = activity::Strip::new();
     activity_strip.root.set_hexpand(true);
     activity_strip.root.set_halign(gtk::Align::End);
-    let pane_actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), activity_strip.root.upcast_ref(), kind.upcast_ref(), pane_actions.upcast_ref()] {
+    for w in [folder_icon.upcast_ref::<gtk::Widget>(), folder.upcast_ref(), git.upcast_ref(), activity_strip.root.upcast_ref(), kind.upcast_ref()] {
         status.append(w);
     }
 
@@ -1635,17 +1456,8 @@ pub fn build(
     main.append(&project.paned);
     main.append(&status);
     let outer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    // Corner above the rail: same height as the tab bar, holds the traffic lights (Apple look).
-    let corner = gtk::WindowHandle::new();
-    let corner_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    corner_box.add_css_class("corner");
-    corner_box.append(&traffic_lights(&win));
-    corner.set_child(Some(&corner_box));
     rail.set_vexpand(true);
-    let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    left.append(&corner);
-    left.append(&rail);
-    outer.append(&left);
+    outer.append(&rail);
     let screens = gtk::Stack::new();
     screens.set_hexpand(true);
     screens.set_hhomogeneous(false);
@@ -1714,14 +1526,6 @@ pub fn build(
         });
     }
 
-    {
-        let ui = ui.clone();
-        split_row.connect_clicked(move |_| ui.split(Dir::Row));
-    }
-    {
-        let ui = ui.clone();
-        split_col.connect_clicked(move |_| ui.split(Dir::Col));
-    }
     {
         let pop = shortcuts_popover(&keys);
         keys.connect_clicked(move |_| pop.popup());
@@ -2087,8 +1891,7 @@ pub fn build(
 }
 
 /// Test aid for screenshots: `WYSS_CONSOLE_DEMO` is a comma-separated list of `launch-menu` (opens the Launch
-/// menu), `open:<launch id>` (opens that launch as its menu entry does), `search:<text>` (opens the search bar of the focused pane with that text) and `stop` (stops the
-/// first agent of the window, as its Stop button does).
+/// menu), `open:<launch id>` (opens that launch as its menu entry does), and `search:<text>` (opens the search bar of the focused pane with that text).
 fn run_demo(ui: &Rc<Ui>) {
     let Ok(demo) = std::env::var(DEMO_VAR) else { return };
     for step in demo.split(',') {
@@ -2105,11 +1908,6 @@ fn run_demo(ui: &Rc<Ui>) {
                 }
             } else if let Some(id) = step.strip_prefix("open:") {
                 ui.open_launch(id);
-            } else if step == "stop" {
-                let agent = ui.panes.borrow().values().find(|p| p.native.borrow().is_some()).map(|p| p.key.clone());
-                if let Some(k) = agent {
-                    ui.pane_act(&k, PaneAct::Stop);
-                }
             }
         });
     }
