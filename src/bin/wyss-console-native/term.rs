@@ -975,6 +975,29 @@ fn mix(a: Rgb, b: Rgb) -> Rgb {
     Rgb { r: m(a.r, b.r), g: m(a.g, b.g), b: m(a.b, b.b) }
 }
 
+/// Block elements (U+2580-259F) as rectangles `(x0, y0, x1, y1, alpha)`, fractions of the cell. Drawn
+/// geometrically because the font's glyphs stop short of the cell edges and leave seams between rows.
+fn block_rects(c: char) -> Option<Vec<(f32, f32, f32, f32, f32)>> {
+    let n = c as u32;
+    let full = |x0, y0, x1, y1| vec![(x0, y0, x1, y1, 1.0)];
+    Some(match n {
+        0x2580 => full(0.0, 0.0, 1.0, 0.5),
+        0x2581..=0x2588 => full(0.0, 1.0 - (n - 0x2580) as f32 / 8.0, 1.0, 1.0),
+        0x2589..=0x258F => full(0.0, 0.0, (0x2590 - n) as f32 / 8.0, 1.0),
+        0x2590 => full(0.5, 0.0, 1.0, 1.0),
+        0x2591..=0x2593 => vec![(0.0, 0.0, 1.0, 1.0, (n - 0x2590) as f32 / 4.0)],
+        0x2594 => full(0.0, 0.0, 1.0, 0.125),
+        0x2595 => full(0.875, 0.0, 1.0, 1.0),
+        0x2596..=0x259F => {
+            // Quadrants as a bit mask: 1 = upper left, 2 = upper right, 4 = lower left, 8 = lower right.
+            let mask = [4, 8, 1, 13, 9, 7, 11, 2, 6, 14][(n - 0x2596) as usize];
+            let q = [(1, 0.0, 0.0), (2, 0.5, 0.0), (4, 0.0, 0.5), (8, 0.5, 0.5)];
+            q.iter().filter(|(b, ..)| mask & b != 0).map(|&(_, x, y)| (x, y, x + 0.5, y + 0.5, 1.0)).collect()
+        }
+        _ => return None,
+    })
+}
+
 /// Text accumulated for one pango layout: narrow cells in a row share a run; each wide cell gets its
 /// own, so a fallback-font glyph can never push the following cells off the grid.
 struct Run {
@@ -1008,6 +1031,7 @@ fn build_row(ctx: &pango::Context, font: &pango::FontDescription, cells: &[Cell]
     let pal = palette::colors();
     let mut run = Run::new();
     let mut bg_run: Option<(usize, Rgb)> = None; // (first column, color)
+    let mut blocks: Vec<(usize, char, Rgb)> = Vec::new(); // block elements, drawn as rectangles
 
     // Text layouts wait until the backgrounds and the selection are in the node, so they draw on top.
     let mut layouts: Vec<(usize, pango::Layout)> = Vec::new();
@@ -1059,7 +1083,16 @@ fn build_row(ctx: &pango::Context, font: &pango::FontDescription, cells: &[Cell]
         if run.text.is_empty() {
             run.col = col;
         }
-        let t = if cell.text().is_empty() || cell.invisible { " " } else { cell.text() };
+        let mut t = if cell.text().is_empty() || cell.invisible { " " } else { cell.text() };
+        if !wide && !cell.invisible {
+            let mut chars = t.chars();
+            if let (Some(c), None) = (chars.next(), chars.next()) {
+                if block_rects(c).is_some() {
+                    blocks.push((col, c, fg));
+                    t = " ";
+                }
+            }
+        }
         let start = run.text.len();
         run.text.push_str(t);
         let end = run.text.len();
@@ -1090,6 +1123,14 @@ fn build_row(ctx: &pango::Context, font: &pango::FontDescription, cells: &[Cell]
     flush_bg(&snap, &mut bg_run, cells.len());
     if let Some((c0, c1)) = sel {
         snap.append_color(&rgba(pal.sel_bg), &graphene::Rect::new(PAD + c0 as f32 * cw, 0.0, (c1 + 1 - c0) as f32 * cw, ch));
+    }
+    for &(col, c, color) in &blocks {
+        let x = |f: f32| (PAD + (col as f32 + f) * cw).round();
+        for (x0, y0, x1, y1, alpha) in block_rects(c).into_iter().flatten() {
+            let mut rgba = rgba(color);
+            rgba.set_alpha(alpha);
+            snap.append_color(&rgba, &graphene::Rect::new(x(x0), (y0 * ch).round(), x(x1) - x(x0), (y1 * ch).round() - (y0 * ch).round()));
+        }
     }
     for (col, layout) in &layouts {
         snap.save();
@@ -1228,6 +1269,25 @@ fn draw(snap: &gtk::Snapshot, state: &State, w: f32, h: f32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn block_elements_fill_exact_fractions_of_the_cell() {
+        let area = |c| block_rects(c).unwrap().iter().map(|(a, b, x, y, _)| (x - a) * (y - b)).sum::<f32>();
+        assert_eq!(block_rects('█'), Some(vec![(0.0, 0.0, 1.0, 1.0, 1.0)]));
+        assert_eq!(block_rects('▀'), Some(vec![(0.0, 0.0, 1.0, 0.5, 1.0)]));
+        assert_eq!(block_rects('▐'), Some(vec![(0.5, 0.0, 1.0, 1.0, 1.0)]), "the logo's sides");
+        assert_eq!(block_rects('▌'), Some(vec![(0.0, 0.0, 0.5, 1.0, 1.0)]));
+        assert_eq!(block_rects('▛').unwrap().len(), 3, "three quadrants, not the lower right");
+        assert_eq!(area('▛'), 0.75);
+        assert_eq!(area('▘'), 0.25);
+        assert_eq!(area('▚'), 0.5);
+        assert_eq!(area('▃'), 0.375);
+        assert_eq!(area('▏'), 0.125);
+        assert_eq!(block_rects('▒'), Some(vec![(0.0, 0.0, 1.0, 1.0, 0.5)]));
+        assert_eq!(block_rects('a'), None);
+        assert_eq!(block_rects('─'), None, "line drawing stays with the font");
+        assert!((0x2580..=0x259F).all(|n| block_rects(char::from_u32(n).unwrap()).is_some()));
+    }
+
     #[test]
     fn busy_reads_share_the_transport_backoff() {
         let busy = host::HostError::Remote { code: "busy".into(), reasons: vec![] };
