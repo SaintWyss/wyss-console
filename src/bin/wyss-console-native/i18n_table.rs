@@ -594,6 +594,7 @@ pub const ES: &[(&str, &str)] = &[
     ("time limit reached", "se agotó el tiempo"),
     ("tokens", "tokens"),
     ("untrusted repository", "repositorio no confiable"),
+    ("{age} ago", "hace {age}"),
     ("{changes} waiting for files still on their way.", "{changes} en espera de archivos que todavía vienen en camino."),
     ("{conflicts} kept both versions", "{conflicts}: se conservaron ambas versiones"),
     ("{count} change", "{count} cambio"),

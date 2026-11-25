@@ -310,6 +310,9 @@ levelbar.usage-bar.usage-warning block.filled {
 levelbar.usage-bar.usage-danger block.filled {
   background: @error;
 }
+label.usage-stale {
+  opacity: 0.55;
+}
 levelbar.usage-bar.usage-stale {
   opacity: 0.45;
 }

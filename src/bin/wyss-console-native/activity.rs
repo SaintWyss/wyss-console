@@ -1,7 +1,7 @@
 //! Usage strip and per-pane prompt queue. Only the host reads usage sources or writes the PTY.
 use crate::{
     host::Host,
-    i18n::tr,
+    i18n::{tr, trf},
 };
 use gtk::{gio, glib, prelude::*};
 use serde_json::json;
@@ -190,22 +190,27 @@ impl Column {
         self.context
             .set(session.and_then(|s| s.context), None, false);
         // ponytail: only the 5 h window shows its reset; the weekly one is too far away to matter.
-        let reset = plan.five_hours.and_then(|r| r.resets_at).map(|reset| {
-            let mins = reset.saturating_sub(now).div_ceil(60);
-            format!("{}h {}m", mins / 60, mins % 60)
-        });
-        let short = plan.five_hours;
-        self.short.set(
-            short.map(|r| r.used),
-            reset,
-            short.is_some_and(|r| r.stale(now)),
-        );
-        let long = plan.weekly;
-        self.long.set(
-            long.map(|r| r.used),
-            None,
-            long.is_some_and(|r| r.stale(now)),
-        );
+        // A stale reading shows its age instead: its reset may have passed already.
+        let note = |w: Option<usage::Window>, reset: bool| {
+            let w = w?;
+            if w.stale(now) {
+                return Some(trf("{age} ago", &[("age", &age(now.saturating_sub(w.at)))]));
+            }
+            let mins = w.resets_at.filter(|_| reset)?.saturating_sub(now).div_ceil(60);
+            Some(format!("{}h {}m", mins / 60, mins % 60))
+        };
+        for (meter, w, reset) in [(&self.short, plan.five_hours, true), (&self.long, plan.weekly, false)] {
+            meter.set(w.map(|r| r.used), note(w, reset), w.is_some_and(|r| r.stale(now)));
+        }
+    }
+}
+
+/// Age of a reading in its largest whole unit: 7m, 3h, 2d.
+fn age(secs: u64) -> String {
+    match secs / 60 {
+        m if m < 60 => format!("{m}m"),
+        m if m < 48 * 60 => format!("{}h", m / 60),
+        m => format!("{}d", m / (24 * 60)),
     }
 }
 
@@ -234,6 +239,7 @@ impl Meter {
         }
         let Some(used) = used else {
             self.bar.set_value(0.0);
+            self.value.remove_css_class("usage-stale");
             self.value.set_text(&tr("No data"));
             return;
         };
@@ -247,6 +253,9 @@ impl Meter {
         self.value.set_text(&text);
         if stale {
             self.bar.add_css_class("usage-stale");
+            self.value.add_css_class("usage-stale");
+        } else {
+            self.value.remove_css_class("usage-stale");
         }
         self.value
             .set_tooltip_text(stale.then(|| tr("Stale reading")).as_deref());
@@ -637,5 +646,17 @@ impl QueuePanel {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod age_tests {
+    #[test]
+    fn age_uses_the_largest_whole_unit() {
+        assert_eq!(super::age(59), "0m");
+        assert_eq!(super::age(15 * 60), "15m");
+        assert_eq!(super::age(3 * 3600 + 59), "3h");
+        assert_eq!(super::age(47 * 3600), "47h");
+        assert_eq!(super::age(3 * 86400), "3d");
     }
 }

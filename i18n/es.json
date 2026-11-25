@@ -730,6 +730,7 @@
     "The terminal host answered “{code}”. Nothing was started.": "El host de terminales respondió «{code}». No se inició nada.",
     "Context": "Contexto",
     "Week": "Semana",
-    "Stale reading": "Lectura desactualizada"
+    "Stale reading": "Lectura desactualizada",
+    "{age} ago": "hace {age}"
   }
 }
