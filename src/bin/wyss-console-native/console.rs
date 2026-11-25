@@ -1456,6 +1456,31 @@ fn rail_button(icon: Icon, tip: &str, active: bool) -> (gtk::Box, gtk::Button) {
     (row, b)
 }
 
+/// Close / minimize / maximize as round buttons in the window corner; the glyphs show while the pointer is over the group.
+fn traffic_lights(win: &gtk::ApplicationWindow) -> gtk::Box {
+    let lights = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    lights.add_css_class("lights");
+    lights.set_halign(gtk::Align::Start);
+    lights.set_valign(gtk::Align::Start);
+    lights.set_margin_start(13);
+    lights.set_margin_top(14);
+    for (class, glyph, name) in [("close", "×", "Close"), ("minimize", "−", "Minimize"), ("maximize", "+", "Maximize")] {
+        let b = gtk::Button::with_label(glyph);
+        b.add_css_class("light");
+        b.add_css_class(class);
+        b.set_focusable(false);
+        b.update_property(&[gtk::accessible::Property::Label(name)]);
+        let win = win.clone();
+        b.connect_clicked(move |_| match class {
+            "close" => win.close(),
+            "minimize" => win.minimize(),
+            _ => win.set_maximized(!win.is_maximized()),
+        });
+        lights.append(&b);
+    }
+    lights
+}
+
 fn tool_button(icon: Icon, tip: &str) -> gtk::Button {
     let b = gtk::Button::new();
     b.set_child(Some(&icons::widget(icon, 16)));
@@ -1513,15 +1538,6 @@ pub fn build(
     let win = gtk::ApplicationWindow::builder().application(app).title("Wyss Console").default_width(1200).default_height(800).build();
     win.add_css_class("console");
 
-    // Titlebar drawn by the app (Warp style): same color as the terminal, traffic-light buttons on the left.
-    let titlebar = gtk::HeaderBar::new();
-    titlebar.add_css_class("titlebar-console");
-    titlebar.set_decoration_layout(Some("close,minimize,maximize:"));
-    let title = gtk::Label::new(Some("Wyss Console"));
-    title.add_css_class("titlebar-title");
-    titlebar.set_title_widget(Some(&title));
-    win.set_titlebar(Some(&titlebar));
-
     // Rail.
     let rail = gtk::Box::new(gtk::Orientation::Vertical, 4);
     rail.add_css_class("rail");
@@ -1557,6 +1573,9 @@ pub fn build(
     tabbar.add_css_class("tabbar");
     tabbar.append(&tab_strip);
     tabbar.append(&tools);
+    // Dragging the tab bar moves the window (there is no system title bar).
+    let tabbar_handle = gtk::WindowHandle::new();
+    tabbar_handle.set_child(Some(&tabbar));
 
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
@@ -1600,14 +1619,23 @@ pub fn build(
 
     let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
     main.set_hexpand(true);
-    main.append(&tabbar);
+    main.append(&tabbar_handle);
     main.append(&banner);
     let project = Panel::new(&stack);
     project.paned.set_vexpand(true);
     main.append(&project.paned);
     main.append(&status);
     let outer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    outer.append(&rail);
+    // Corner above the rail: same height as the tab bar, holds the traffic lights (Apple look).
+    let corner = gtk::WindowHandle::new();
+    let corner_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    corner_box.add_css_class("corner");
+    corner.set_child(Some(&corner_box));
+    rail.set_vexpand(true);
+    let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    left.append(&corner);
+    left.append(&rail);
+    outer.append(&left);
     let screens = gtk::Stack::new();
     screens.set_hexpand(true);
     screens.set_hhomogeneous(false);
@@ -1623,6 +1651,7 @@ pub fn build(
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&outer));
     overlay.add_overlay(&launch_panel);
+    overlay.add_overlay(&traffic_lights(&win));
     win.set_child(Some(&overlay));
 
     let ui = Rc::new(Ui {

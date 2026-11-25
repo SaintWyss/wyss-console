@@ -10,34 +10,32 @@ window.console {
   font-size: 13px;
 }
 
-/* Titlebar drawn by the app: no line, same color as the terminal, round traffic-light buttons. */
-headerbar.titlebar-console {
-  background: @bg;
-  border: none;
-  box-shadow: none;
-  min-height: 34px;
-  padding: 0 8px;
+/* Traffic lights in the window corner, above the rail (Apple look: 12px circles, 8px apart). */
+.corner {
+  background: @chrome;
+  border-bottom: 1px solid @line;
+  min-width: 51px;
+  min-height: 39px;
 }
-headerbar.titlebar-console .titlebar-title {
-  color: @text;
-  opacity: 0.55;
-  font-size: 12px;
-}
-headerbar.titlebar-console windowcontrols button {
+.lights button.light {
   min-width: 12px;
   min-height: 12px;
   padding: 0;
-  margin: 0 4px;
-  border: none;
+  margin: 0;
+  border: 1px solid alpha(black, 0.18);
   border-radius: 50%;
   box-shadow: none;
+  color: transparent;
+  font-size: 11px;
+  font-weight: 800;
 }
-headerbar.titlebar-console windowcontrols button image { opacity: 0; -gtk-icon-size: 0; }
-headerbar.titlebar-console windowcontrols button:hover image { opacity: 0.6; -gtk-icon-size: 8px; }
-headerbar.titlebar-console windowcontrols button.close { background: #ff5f57; }
-headerbar.titlebar-console windowcontrols button.minimize { background: #febc2e; }
-headerbar.titlebar-console windowcontrols button.maximize { background: #28c840; }
-headerbar.titlebar-console:backdrop windowcontrols button { background: @surface_hover; }
+.lights button.light.close { background: #ff5f57; }
+.lights button.light.minimize { background: #febc2e; }
+.lights button.light.maximize { background: #28c840; }
+.lights:hover button.light { color: alpha(black, 0.6); }
+.lights button.light:hover { filter: brightness(0.92); }
+.lights button.light label { padding: 0; margin: -3px 0; }
+window.console:backdrop .lights button.light { background: @surface_hover; border-color: @line; color: transparent; }
 
 window.console * {
   -gtk-icon-style: symbolic;
@@ -194,7 +192,7 @@ button.rail-btn:focus-visible {
   background: @chrome;
   border-bottom: 1px solid @line;
   min-height: 39px;
-  padding: 0 8px 0 8px;
+  padding: 0 8px 0 28px; /* the traffic lights overlap the first 14px of the bar */
 }
 .tab {
   padding: 0 10px 0 10px;
