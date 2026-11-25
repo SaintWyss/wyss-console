@@ -1456,14 +1456,13 @@ fn rail_button(icon: Icon, tip: &str, active: bool) -> (gtk::Box, gtk::Button) {
     (row, b)
 }
 
-/// Close / minimize / maximize as round buttons in the window corner; the glyphs show while the pointer is over the group.
+/// Close / minimize / maximize as round buttons, centered in the corner cell above the rail; the glyphs show while the pointer is over the group.
 fn traffic_lights(win: &gtk::ApplicationWindow) -> gtk::Box {
-    let lights = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let lights = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     lights.add_css_class("lights");
-    lights.set_halign(gtk::Align::Start);
-    lights.set_valign(gtk::Align::Start);
-    lights.set_margin_start(13);
-    lights.set_margin_top(13);
+    lights.set_halign(gtk::Align::Center);
+    lights.set_valign(gtk::Align::Center);
+    lights.set_hexpand(true);
     for (class, glyph, name) in [("close", "×", "Close"), ("minimize", "−", "Minimize"), ("maximize", "+", "Maximize")] {
         let b = gtk::Button::with_label(glyph);
         b.add_css_class("light");
@@ -1630,6 +1629,7 @@ pub fn build(
     let corner = gtk::WindowHandle::new();
     let corner_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     corner_box.add_css_class("corner");
+    corner_box.append(&traffic_lights(&win));
     corner.set_child(Some(&corner_box));
     rail.set_vexpand(true);
     let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -1651,7 +1651,6 @@ pub fn build(
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&outer));
     overlay.add_overlay(&launch_panel);
-    overlay.add_overlay(&traffic_lights(&win));
     win.set_child(Some(&overlay));
 
     let ui = Rc::new(Ui {

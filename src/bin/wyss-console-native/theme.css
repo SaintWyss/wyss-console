@@ -10,7 +10,7 @@ window.console {
   font-size: 13px;
 }
 
-/* Traffic lights in the window corner, above the rail (Apple look: 12px circles, 8px apart). */
+/* Traffic lights centered in the corner cell above the rail (12px circles, 6px apart). */
 .corner {
   background: @chrome;
   border-bottom: 1px solid @line;
@@ -201,7 +201,7 @@ button.rail-btn:focus-visible {
   background: @chrome;
   border-bottom: 1px solid @line;
   min-height: 39px;
-  padding: 0 8px 0 28px; /* the traffic lights overlap the first 14px of the bar */
+  padding: 0 8px 0 8px;
 }
 .tab {
   padding: 0 10px 0 10px;
