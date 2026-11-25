@@ -2139,6 +2139,7 @@ impl NativeService {
                 queued: queue.map_or(0, |(_, count)| count),
             });
         }
+        readings.observe_codex_account(&launch_home_codex::CodexOwner::from_process(&self.inner.home).dir);
         ActivityView { plans: readings.plans(), sessions: views }
     }
 

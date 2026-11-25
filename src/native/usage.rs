@@ -368,6 +368,39 @@ fn open_rollout(pid: u32, home: &Path, executable: &Path) -> Option<(File, Uuid)
     match_file
 }
 
+/// Newest `rollout-*.jsonl` under the latest `YYYY/MM/DD` folder.
+// ponytail: only the newest day folder; right after midnight the previous day's open session is
+// skipped until Codex writes the next rollout.
+fn newest_rollout(sessions: &Path) -> Option<PathBuf> {
+    let mut dir = sessions.to_path_buf();
+    for _ in 0..3 {
+        dir = fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).max()?;
+    }
+    fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .filter(|e| rollout_name(&e.path(), sessions).is_some())
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .max()
+        .map(|(_, p)| p)
+}
+
+/// Last rate-limit snapshot in the final `CHUNK` bytes of a rollout.
+fn last_codex_plan(file: &Path) -> Option<Plan> {
+    let mut f = OpenOptions::new().read(true).custom_flags(nix::libc::O_NOFOLLOW).open(file).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(CHUNK as u64))).ok()?;
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).ok()?;
+    bytes
+        .split(|&b| b == b'\n')
+        .rev()
+        .filter_map(|line| serde_json::from_slice::<CountEnvelope>(line).ok())
+        .filter_map(|data| codex_reading(&data))
+        .map(|r| r.plan)
+        .find(|p| p.five_hours.is_some() || p.weekly.is_some())
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Plans {
     pub claude: Plan,
@@ -434,6 +467,14 @@ impl Usage {
             AgentId::ClaudeCode => self.plans.claude.merge(reading.plan),
             AgentId::Codex => self.plans.codex.merge(reading.plan),
             _ => {}
+        }
+    }
+
+    /// Account-wide Codex limits from the newest rollout on disk, even when Codex runs
+    /// outside the Console. Context stays bound to each PTY session.
+    pub(super) fn observe_codex_account(&mut self, home: &Path) {
+        if let Some(plan) = newest_rollout(&home.join("sessions")).and_then(|f| last_codex_plan(&f)) {
+            self.plans.codex.merge(plan);
         }
     }
 

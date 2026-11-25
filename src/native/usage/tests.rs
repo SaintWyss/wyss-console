@@ -207,3 +207,18 @@ fn context_thresholds_include_the_boundary() {
     assert_eq!(context_level(74.99), Level::Warning);
     assert_eq!(context_level(75.0), Level::Danger);
 }
+
+#[test]
+fn codex_account_limits_come_from_the_newest_rollout_without_a_console_session() {
+    let root = std::env::temp_dir().join(format!("wyss-usage-{}", std::process::id()));
+    let day = root.join("sessions/2026/11/24");
+    std::fs::create_dir_all(&day).unwrap();
+    let name = "rollout-2026-11-24T10-00-00-01a2105c-62d3-7383-a151-ffe1535ac125.jsonl";
+    let mut text = serde_json::to_string(&rollout_record()).unwrap();
+    text.push('\n');
+    std::fs::write(day.join(name), text).unwrap();
+    let mut usage = Usage::new(&root);
+    usage.observe_codex_account(&root);
+    assert_eq!(usage.plans().codex.five_hours.unwrap().used, 12.5);
+    std::fs::remove_dir_all(&root).unwrap();
+}
