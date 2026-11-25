@@ -24,8 +24,8 @@ window.console {
   margin: 0 0 0 6px;
 }
 .window-buttons button {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0;
   margin-left: 2px;
   border: none;
@@ -157,23 +157,23 @@ scrollbar slider:hover, scrollbar slider:active {
 .rail {
   background: @chrome;
   border-right: 1px solid @edge;
-  min-width: 51px;
-  padding: 2px 0 11px;
+  min-width: 40px;
+  padding: 5px 0 8px;
 }
 .rail-marker {
-  min-width: 3px;
-  min-height: 24px;
-  border-radius: 0 3px 3px 0;
+  min-width: 2px;
+  min-height: 16px;
+  border-radius: 0 2px 2px 0;
   background: transparent;
 }
 .rail-marker.active {
   background: @text;
 }
 button.rail-btn {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 28px;
+  min-height: 28px;
   padding: 0;
-  margin: 0 0 0 5px;
+  margin: 0 0 0 4px;
   border: none;
   border-radius: 5px;
   background: transparent;
@@ -185,7 +185,6 @@ button.rail-btn:hover {
   color: @text;
 }
 button.rail-btn.active {
-  background: @surface_strong;
   color: @text;
 }
 button.rail-btn:focus-visible {
@@ -245,11 +244,11 @@ button.tab-close:hover {
   margin: 0 0 0 4px;
 }
 button.tool-btn {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0;
-  margin-left: 6px;
-  border: 1px solid @line;
+  margin-left: 4px;
+  border: none;
   border-radius: 5px;
   background: transparent;
   box-shadow: none;
@@ -439,15 +438,15 @@ button.hdr-close {
 
 /* ---- the Launch button and its menu ---- */
 button.launch-btn {
-  min-height: 28px;
-  padding: 0 12px;
-  margin-left: 8px;
-  border: 1px solid @line_strong;
+  min-height: 24px;
+  padding: 0 10px;
+  margin-left: 6px;
+  border: 1px solid @line;
   border-radius: 5px;
   background: transparent;
   box-shadow: none;
-  color: @text;
-  font-size: 13px;
+  color: @muted;
+  font-size: 12px;
 }
 button.launch-btn:hover,
 button.launch-btn.open {

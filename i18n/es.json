@@ -702,6 +702,9 @@
     "Context": "Contexto",
     "Week": "Semana",
     "Stale reading": "Lectura desactualizada",
-    "{age} ago": "hace {age}"
+    "{age} ago": "hace {age}",
+    "Minimize": "Minimizar",
+    "Maximize": "Maximizar",
+    "Close": "Cerrar"
   }
 }

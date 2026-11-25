@@ -1283,7 +1283,7 @@ fn rail_button(icon: Icon, tip: &str, active: bool) -> (gtk::Box, gtk::Button) {
         marker.add_css_class("active");
     }
     let b = gtk::Button::new();
-    b.set_child(Some(&icons::widget(icon, 20)));
+    b.set_child(Some(&icons::widget(icon, 16)));
     b.add_css_class("rail-btn");
     if active {
         b.add_css_class("active");
@@ -1296,7 +1296,7 @@ fn rail_button(icon: Icon, tip: &str, active: bool) -> (gtk::Box, gtk::Button) {
 
 fn tool_button(icon: Icon, tip: &str) -> gtk::Button {
     let b = gtk::Button::new();
-    b.set_child(Some(&icons::widget(icon, 16)));
+    b.set_child(Some(&icons::widget(icon, 14)));
     b.add_css_class("tool-btn");
     b.set_tooltip_text(Some(tip));
     b.set_valign(gtk::Align::Center);
@@ -1396,10 +1396,28 @@ pub fn build(
     tabbar.add_css_class("tabbar");
     tabbar.append(&tab_strip);
     tabbar.append(&tools);
-    // The window buttons of the system (its icons and its decoration layout), at the end of the bar.
-    let controls = gtk::WindowControls::new(gtk::PackType::End);
+    // Minimize, maximize and close with the icons of the system's icon theme, at the end of the bar.
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     controls.add_css_class("window-buttons");
     controls.set_valign(gtk::Align::Center);
+    for (icon, tip) in [("window-minimize-symbolic", tr("Minimize")), ("window-maximize-symbolic", tr("Maximize")), ("window-close-symbolic", tr("Close"))] {
+        let b = gtk::Button::from_icon_name(icon);
+        if let Some(image) = b.child().and_downcast::<gtk::Image>() {
+            image.set_pixel_size(12);
+        }
+        b.set_tooltip_text(Some(&tip));
+        b.set_focusable(false);
+        if icon == "window-close-symbolic" {
+            b.add_css_class("close");
+        }
+        let win = win.clone();
+        b.connect_clicked(move |_| match icon {
+            "window-minimize-symbolic" => win.minimize(),
+            "window-maximize-symbolic" => win.set_maximized(!win.is_maximized()),
+            _ => win.close(),
+        });
+        controls.append(&b);
+    }
     tabbar.append(&controls);
     // Dragging the tab bar moves the window (there is no system title bar).
     let tabbar_handle = gtk::WindowHandle::new();
