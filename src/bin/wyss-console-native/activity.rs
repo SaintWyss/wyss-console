@@ -45,10 +45,6 @@ impl Strip {
         columns.set_hexpand(true);
         let claude = Column::new(&columns, "Claude Code");
         let codex = Column::new(&columns, "Codex");
-        // ponytail: sin barra de estado inyectada no hay datos de Claude Code; su columna se oculta.
-        if let Some(col) = columns.first_child() {
-            col.set_visible(false);
-        }
         root.append(&columns);
         let closed = host.map(|host| ClosedQueues::new(&root, host));
         let result = Self {
