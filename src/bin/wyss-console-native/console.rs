@@ -135,6 +135,8 @@ struct Ui {
     project: Rc<Panel>,
     tab_strip: gtk::Box,
     tab_scroll: gtk::ScrolledWindow,
+    tab_more: gtk::Button,
+    tab_more_pop: gtk::Popover,
     folder: gtk::Label,
     git: gtk::Label,
     kind: gtk::Label,
@@ -545,6 +547,51 @@ impl Ui {
         } else {
             t.ram.set_visible(false);
         }
+    }
+
+    /// Indices of the tabs that are not fully inside the visible part of the strip.
+    fn hidden_tabs(&self) -> Vec<usize> {
+        let adj = self.tab_scroll.hadjustment();
+        if adj.page_size() <= 0.0 {
+            return Vec::new();
+        }
+        let (lo, hi) = (adj.value(), adj.value() + adj.page_size());
+        let tabs = self.tabs.borrow();
+        (0..tabs.len())
+            .filter(|&i| {
+                tabs[i].head.compute_bounds(&self.tab_strip).is_some_and(|b| {
+                    f64::from(b.x()) < lo - 1.0 || f64::from(b.x() + b.width()) > hi + 1.0
+                })
+            })
+            .collect()
+    }
+
+    fn show_tab_more(self: &Rc<Self>) {
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        for i in self.hidden_tabs() {
+            let name = self.tabs.borrow()[i]
+                .head
+                .first_child()
+                .and_downcast::<gtk::Label>()
+                .map(|l| l.label().to_string())
+                .unwrap_or_default();
+            let item = gtk::Button::with_label(&name);
+            item.add_css_class("tab-more-item");
+            if let Some(l) = item.child().and_downcast::<gtk::Label>() {
+                l.set_xalign(0.0);
+            }
+            let weak = Rc::downgrade(self);
+            item.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.tab_more_pop.popdown();
+                    let ui = ui.clone();
+                    glib::idle_add_local_once(move || ui.select(i));
+                }
+            });
+            list.append(&item);
+        }
+        self.tab_more_pop.set_child(Some(&list));
+        self.tab_more_pop.popup();
     }
 
     fn select(self: &Rc<Self>, i: usize) {
@@ -1412,9 +1459,19 @@ pub fn build(
     launch_btn.set_tooltip_text(Some(&tr("Your saved launches")));
     launch_btn.set_sensitive(cfg.host.is_some());
     tools.append(&launch_btn);
+    // Tabs that do not fit are listed behind this button, at the end of the strip.
+    let tab_more = gtk::Button::with_label("»");
+    tab_more.add_css_class("tool-btn");
+    tab_more.set_valign(gtk::Align::Center);
+    tab_more.set_visible(false);
+    tab_more.set_tooltip_text(Some(&tr("More tabs")));
+    let tab_more_pop = gtk::Popover::new();
+    tab_more_pop.add_css_class("tab-more");
+    tab_more_pop.set_parent(&tab_more);
     let tabbar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tabbar.add_css_class("tabbar");
     tabbar.append(&tab_scroll);
+    tabbar.append(&tab_more);
     tabbar.append(&tools);
     // Minimize, maximize and close with the icons of the system's icon theme, at the end of the bar.
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1517,6 +1574,8 @@ pub fn build(
         project,
         tab_strip,
         tab_scroll,
+        tab_more: tab_more.clone(),
+        tab_more_pop,
         folder,
         git,
         kind,
@@ -1543,6 +1602,29 @@ pub fn build(
         terminal_preferences: Cell::new(preferences.terminal),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
+    {
+        let adj = ui.tab_scroll.hadjustment();
+        let refresh = {
+            let weak = Rc::downgrade(&ui);
+            move || {
+                let weak = weak.clone();
+                // After the layout, so every tab already has its allocation.
+                glib::idle_add_local_full(glib::Priority::LOW, move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.tab_more.set_visible(!ui.hidden_tabs().is_empty());
+                    }
+                    glib::ControlFlow::Break
+                });
+            }
+        };
+        let r = refresh.clone();
+        adj.connect_changed(move |_| r());
+        adj.connect_value_changed(move |_| refresh());
+        let weak = Rc::downgrade(&ui);
+        tab_more.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() { ui.show_tab_more(); }
+        });
+    }
 
     {
         let weak = Rc::downgrade(&ui);

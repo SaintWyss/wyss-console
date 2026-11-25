@@ -199,19 +199,6 @@ button.rail-btn:focus-visible {
   min-height: 39px;
   padding: 0 8px 0 8px;
 }
-/* Fade at the edge that has more tabs hidden behind it. */
-.tabbar scrolledwindow undershoot.left {
-  background-image: linear-gradient(to right, @chrome, alpha(@chrome, 0));
-  background-size: 28px 100%;
-  background-repeat: no-repeat;
-  background-position: left;
-}
-.tabbar scrolledwindow undershoot.right {
-  background-image: linear-gradient(to left, @chrome, alpha(@chrome, 0));
-  background-size: 28px 100%;
-  background-repeat: no-repeat;
-  background-position: right;
-}
 .tab {
   padding: 0 10px 0 10px;
   margin: 0 2px 0 0;
@@ -548,4 +535,17 @@ button.launch-item:focus-visible {
   background: transparent;
   box-shadow: none;
   color: inherit;
+}
+
+/* ---- tabs that do not fit ---- */
+button.tab-more-item {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: @text;
+}
+button.tab-more-item:hover {
+  background: @surface_hover;
 }

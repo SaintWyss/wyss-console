@@ -220,6 +220,7 @@ pub const ES: &[(&str, &str)] = &[
     ("Model setting", "Ajuste de modelo"),
     ("Models", "Modelos"),
     ("Monokai", "Monokai"),
+    ("More tabs", "Más pestañas"),
     ("Move to the pane in that direction", "Ir al panel en esa dirección"),
     ("Name", "Nombre"),
     ("Needs a look", "Hay que revisar"),
