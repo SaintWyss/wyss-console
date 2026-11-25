@@ -134,6 +134,7 @@ struct Ui {
     stack: gtk::Stack,
     project: Rc<Panel>,
     tab_strip: gtk::Box,
+    tab_scroll: gtk::ScrolledWindow,
     folder: gtk::Label,
     git: gtk::Label,
     kind: gtk::Label,
@@ -561,6 +562,17 @@ impl Ui {
             }
         }
         self.stack.set_visible_child_name(&format!("t{n}"));
+        if let Some(t) = self.tabs.borrow().get(i) {
+            let (head, scroll, strip) = (t.head.clone(), self.tab_scroll.clone(), self.tab_strip.clone());
+            // Low priority: runs after the redraw, so a tab just added already has its allocation.
+            glib::idle_add_local_full(glib::Priority::LOW, move || {
+                if let Some(b) = head.compute_bounds(&strip) {
+                    let adj = scroll.hadjustment();
+                    adj.set_value((b.x() + b.width() / 2.0) as f64 - adj.page_size() / 2.0);
+                }
+                glib::ControlFlow::Break
+            });
+        }
         self.update_status();
         self.focus_pane(&focus);
         self.save_soon();
@@ -1376,7 +1388,15 @@ pub fn build(
 
     // Tab bar.
     let tab_strip = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    tab_strip.set_hexpand(true);
+    // The strip scrolls instead of widening the window: with many tabs the sum of their minimum widths
+    // would otherwise become the window's minimum width and push the bar off screen.
+    let tab_scroll = gtk::ScrolledWindow::builder()
+        .hexpand(true)
+        .hscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_width(false)
+        .child(&tab_strip)
+        .build();
     let tools = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tools.add_css_class("tools");
     let project_btn = tool_button(Icon::Folder, &tr("Project (Ctrl+Shift+P)"));
@@ -1394,7 +1414,7 @@ pub fn build(
     tools.append(&launch_btn);
     let tabbar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tabbar.add_css_class("tabbar");
-    tabbar.append(&tab_strip);
+    tabbar.append(&tab_scroll);
     tabbar.append(&tools);
     // Minimize, maximize and close with the icons of the system's icon theme, at the end of the bar.
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1496,6 +1516,7 @@ pub fn build(
         stack,
         project,
         tab_strip,
+        tab_scroll,
         folder,
         git,
         kind,
