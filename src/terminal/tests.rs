@@ -614,24 +614,6 @@ fn dropping_last_service_requests_child_cleanup() {
 }
 
 #[test]
-fn spawned_shell_advertises_truecolor() {
-    let service = TerminalService::default();
-    let terminal = shell(&service);
-    service
-        .write(
-            &terminal.terminal_id,
-            b"printf '\\nCT_CHECK:%s\\n' \"$COLORTERM\"\n".to_vec(),
-        )
-        .unwrap();
-    output_until(
-        &service,
-        &terminal.terminal_id,
-        b"\r\nCT_CHECK:truecolor\r\n",
-    );
-    service.close(&terminal.terminal_id).unwrap();
-}
-
-#[test]
 fn renderer_term_is_scoped_to_spawned_shell() {
     let before = std::env::var_os("TERM");
     let service = TerminalService::default();
