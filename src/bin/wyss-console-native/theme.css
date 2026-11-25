@@ -22,20 +22,29 @@ window.console {
   min-height: 12px;
   padding: 0;
   margin: 0;
-  border: 1px solid alpha(black, 0.18);
+  border: none;
   border-radius: 50%;
-  box-shadow: none;
   color: transparent;
   font-size: 11px;
   font-weight: 800;
 }
-.lights button.light.close { background: #ff5f57; }
-.lights button.light.minimize { background: #febc2e; }
-.lights button.light.maximize { background: #28c840; }
+/* Lit from the top with a 1px darker rim, like the macOS buttons. */
+.lights button.light.close {
+  background: linear-gradient(#ff6d65, #fb5149);
+  box-shadow: inset 0 0 0 1px #d9413a, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
+}
+.lights button.light.minimize {
+  background: linear-gradient(#ffc845, #f9b32a);
+  box-shadow: inset 0 0 0 1px #cf9a22, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
+}
+.lights button.light.maximize {
+  background: linear-gradient(#38d555, #21c03b);
+  box-shadow: inset 0 0 0 1px #1ea530, inset 0 2px 1px -1px rgba(255, 255, 255, 0.45);
+}
 .lights:hover button.light { color: alpha(black, 0.6); }
-.lights button.light:hover { filter: brightness(0.92); }
+.lights button.light:active { filter: brightness(0.8); }
 .lights button.light label { padding: 0; margin: -3px 0; }
-window.console:backdrop .lights button.light { background: @surface_hover; border-color: @line; color: transparent; }
+window.console:backdrop .lights button.light { background: @surface_hover; box-shadow: inset 0 0 0 1px @line; color: transparent; }
 
 window.console * {
   -gtk-icon-style: symbolic;

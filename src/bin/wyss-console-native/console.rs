@@ -1463,7 +1463,7 @@ fn traffic_lights(win: &gtk::ApplicationWindow) -> gtk::Box {
     lights.set_halign(gtk::Align::Start);
     lights.set_valign(gtk::Align::Start);
     lights.set_margin_start(13);
-    lights.set_margin_top(14);
+    lights.set_margin_top(13);
     for (class, glyph, name) in [("close", "×", "Close"), ("minimize", "−", "Minimize"), ("maximize", "+", "Maximize")] {
         let b = gtk::Button::with_label(glyph);
         b.add_css_class("light");
