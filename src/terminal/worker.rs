@@ -80,6 +80,8 @@ fn open(
     command.args(launch.args);
     command.cwd(cwd);
     command.env("TERM", "xterm-256color");
+    // The renderer draws 24-bit color; without this agents fall back to the 256-color palette.
+    command.env("COLORTERM", "truecolor");
     for name in launch.remove_env {
         command.env_remove(name);
     }
