@@ -15,6 +15,8 @@ pub fn encode(key: Key, mods: ModifierType, app_cursor: bool) -> Option<Vec<u8>>
         }
     };
     let seq: Vec<u8> = match key {
+        // Shift+Enter is ESC CR so programs (Claude Code, readline) can tell it from Enter.
+        Key::Return | Key::KP_Enter if mods.contains(ModifierType::SHIFT_MASK) => b"\x1b\r".to_vec(),
         Key::Return | Key::KP_Enter => vec![b'\r'],
         Key::BackSpace => vec![if ctrl { 0x08 } else { 0x7f }],
         Key::Tab => vec![b'\t'],
@@ -77,6 +79,13 @@ mod tests {
         assert_eq!(encode(Key::dead_acute, ModifierType::empty(), false), None);
         // Ctrl+Shift is reserved for the window's own shortcuts.
         assert_eq!(encode(Key::T, ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK, false), None);
+    }
+
+    #[test]
+    fn shift_enter_differs_from_enter() {
+        assert_eq!(encode(Key::Return, ModifierType::empty(), false), Some(b"\r".to_vec()));
+        assert_eq!(encode(Key::Return, ModifierType::SHIFT_MASK, false), Some(b"\x1b\r".to_vec()));
+        assert_eq!(encode(Key::KP_Enter, ModifierType::SHIFT_MASK, false), Some(b"\x1b\r".to_vec()));
     }
 
     #[test]
