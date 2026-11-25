@@ -975,9 +975,12 @@ fn mix(a: Rgb, b: Rgb) -> Rgb {
     Rgb { r: m(a.r, b.r), g: m(a.g, b.g), b: m(a.b, b.b) }
 }
 
-/// Block elements (U+2580-259F) as rectangles `(x0, y0, x1, y1, alpha)`, fractions of the cell. Drawn
-/// geometrically because the font's glyphs stop short of the cell edges and leave seams between rows.
-fn block_rects(c: char) -> Option<Vec<(f32, f32, f32, f32, f32)>> {
+/// `(x0, y0, x1, y1, alpha)`, fractions of the cell.
+type BlockRect = (f32, f32, f32, f32, f32);
+
+/// Block elements (U+2580-259F) as rectangles. Drawn geometrically because the font's glyphs stop
+/// short of the cell edges and leave seams between rows.
+fn block_rects(c: char) -> Option<Vec<BlockRect>> {
     let n = c as u32;
     let full = |x0, y0, x1, y1| vec![(x0, y0, x1, y1, 1.0)];
     Some(match n {
@@ -1086,11 +1089,11 @@ fn build_row(ctx: &pango::Context, font: &pango::FontDescription, cells: &[Cell]
         let mut t = if cell.text().is_empty() || cell.invisible { " " } else { cell.text() };
         if !wide && !cell.invisible {
             let mut chars = t.chars();
-            if let (Some(c), None) = (chars.next(), chars.next()) {
-                if block_rects(c).is_some() {
-                    blocks.push((col, c, fg));
-                    t = " ";
-                }
+            if let (Some(c), None) = (chars.next(), chars.next())
+                && block_rects(c).is_some()
+            {
+                blocks.push((col, c, fg));
+                t = " ";
             }
         }
         let start = run.text.len();
