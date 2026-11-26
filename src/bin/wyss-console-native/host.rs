@@ -12,8 +12,9 @@ use serde_json::{json, Value};
 
 use wyss_console::host::protocol::{MAX_FRAME, read_frame_body};
 
-/// Input is sent in pieces of at most this many bytes (a byte costs up to 4 bytes of JSON).
-pub const WRITE_CHUNK: usize = 64 * 1024;
+/// Input is sent in pieces of at most this many bytes: the host refuses a bigger write whole, so a
+/// paste over it never reached the terminal.
+pub const WRITE_CHUNK: usize = wyss_console::terminal::contracts::INPUT_LIMIT;
 
 /// Nanoseconds spent waiting for the host (connect, send, receive, JSON decode of the frame) and in
 /// turning the answer into bytes, summed over all reads. Printed with `WYSS_CONSOLE_STATS=1`.
@@ -405,6 +406,22 @@ pub(crate) mod tests {
         assert_eq!(seen[2]["params"]["data"], json!([97, 98, 99]));
         assert_eq!(seen[3]["params"]["from"], 0);
         assert_eq!(seen[4]["params"]["size"], json!({"rows": 30, "cols": 100}));
+    }
+
+    /// A paste over the host's input limit (a 5 KB prompt) goes in pieces the host accepts.
+    #[test]
+    fn a_long_paste_is_sent_in_pieces_the_host_accepts() {
+        let limit = wyss_console::terminal::contracts::INPUT_LIMIT;
+        let paste = vec![b'x'; 5000];
+        let pieces = paste.len().div_ceil(WRITE_CHUNK);
+        let answers = paste.chunks(WRITE_CHUNK).map(|c| ("term_write", json!({"ok": c.len()}))).collect();
+        let (path, h) = fake_host(answers);
+        assert_eq!(Host::new(&path).write("t-1", &paste).unwrap(), paste.len());
+        let seen = h.join().unwrap();
+        assert_eq!(seen.len(), pieces);
+        let sizes: Vec<usize> = seen.iter().map(|r| r["params"]["data"].as_array().unwrap().len()).collect();
+        assert!(sizes.iter().all(|&n| n <= limit), "a piece over the host's limit is refused whole: {sizes:?}");
+        assert_eq!(sizes.iter().sum::<usize>(), paste.len());
     }
 
     /// A fresh directory with the given mode, under the scratch tree.
