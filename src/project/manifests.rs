@@ -160,7 +160,7 @@ fn node(text: &str) -> Manifest {
         p.scripts
             .0
             .into_iter()
-            .map(|(name, value)| (format!("npm run {name}"), value)),
+            .map(|(name, value)| (format!("pnpm run {name}"), value)),
     );
     m.quality.extend(
         [

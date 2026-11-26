@@ -172,7 +172,7 @@ name = "tool"
         "package.json",
         r#"{"name":"site","version":"0.1","engines":{"node":">=20"},"dependencies":{"next":"^14"},"scripts":{"build":"next build"}}"#,
     );
-    assert_eq!(node.runs[0], ("npm run build".into(), "next build".into()));
+    assert_eq!(node.runs[0], ("pnpm run build".into(), "next build".into()));
     assert_eq!(node.edition[0].1, ">=20");
     assert_eq!(node.version.as_deref(), Some("0.1"));
 
